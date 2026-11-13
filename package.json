@@ -1,0 +1,43 @@
+{
+  "name": "buildframe-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=26.4.0 <27.0.0"
+  },
+  "type": "module",
+  "scripts": {
+    "check:node": "node scripts/check-node-version.mjs",
+    "test:fast": "pnpm check:node && NODE_OPTIONS=--experimental-ffi vitest run --config vitest.config.ts packages/workspace/test/fast packages/local-runtime/test/fast packages/pi-adapter/test/fast packages/claude-adapter/test/fast apps/buildframe/test/fast",
+    "test": "pnpm check:node && NODE_OPTIONS=--experimental-ffi vitest run --config vitest.config.ts",
+    "typecheck": "pnpm --filter @buildframe/workspace --filter @buildframe/local-runtime --filter @buildframe/pi-adapter-source --filter @buildframe/claude-adapter-source --filter @buildframe/app-source -r typecheck && tsc --noEmit -p tsconfig.tests.json",
+    "clean": "pnpm -r --if-present run clean",
+    "build": "pnpm --filter @buildframe/workspace --filter @buildframe/local-runtime --filter @buildframe/pi-adapter-source --filter @buildframe/claude-adapter-source --filter @buildframe/app-source -r build",
+    "smoke:build": "node scripts/smoke-build.mjs && node --experimental-ffi scripts/smoke-claude-direct.mjs",
+    "risk:state": "pnpm --filter @buildframe/workspace build && node scripts/probe-authoritative-state.mjs",
+    "risk:runtime": "pnpm --filter @buildframe/workspace --filter @buildframe/local-runtime --filter @buildframe/app-source -r build && node scripts/probe-local-runtime.mjs",
+    "risk:pi": "pnpm --filter @buildframe/workspace --filter @buildframe/local-runtime --filter @buildframe/pi-adapter-source -r build && node scripts/probe-pi-adapter.mjs",
+    "risk:dogfood": "pnpm check:node && pnpm --filter @buildframe/workspace --filter @buildframe/local-runtime --filter @buildframe/pi-adapter-source --filter @buildframe/app-source -r build && node --experimental-ffi scripts/probe-dogfood.mjs",
+    "dogfood": "pnpm check:node && pnpm build && pnpm --filter @buildframe/app-source dogfood",
+    "fixture:state": "node scripts/generate-authoritative-state-golden.mjs",
+    "lint": "oxlint",
+    "format:check": "oxfmt --check .",
+    "format": "oxfmt .",
+    "check:dependencies": "node scripts/check-dependencies.mjs",
+    "verify": "pnpm lint && pnpm format:check && pnpm check:dependencies && pnpm test && pnpm typecheck && pnpm build && pnpm smoke:build",
+    "release:assemble": "pnpm build && node scripts/assemble-release.mjs",
+    "release:manifest": "pnpm --filter @buildframe/workspace --filter @buildframe/local-runtime --filter @buildframe/app-source -r build && node scripts/assemble-release.mjs --manifest-only"
+  },
+  "devDependencies": {
+    "@opentui/core": "0.8.1",
+    "@types/node": "^26.1.2",
+    "esbuild": "0.28.1",
+    "oxfmt": "0.66.0",
+    "oxlint": "1.81.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.4"
+  },
+  "license": "MIT"
+}

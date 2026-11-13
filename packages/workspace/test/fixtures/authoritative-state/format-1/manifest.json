@@ -1,0 +1,32 @@
+{
+  "fixtureFormat": 1,
+  "storeFormatVersion": 1,
+  "workspaceIdentity": "wsp_11111111-1111-4111-8111-111111111111",
+  "currentGeneration": "generation-1.sqlite",
+  "generationSha256": "248e1ae8902d69fb88a2e5b5fe13bd47b04fc33bdc369392972e3b5c7210608b",
+  "stateVersion": 2,
+  "records": [
+    {
+      "recordIdentity": "record-golden-stable",
+      "workflowIdentity": "workflow-golden-stable",
+      "kind": "review.snapshot",
+      "schemaVersion": 1,
+      "recordClass": "immutable",
+      "revision": 1,
+      "payloadSha256": "1f4cf78c88280d3c442e04f2f23499b2f9d0e104c3067d4fe02b1f15fe56faa2",
+      "contentSha256": [
+        "5f8438bf9c6d9cdf15288bcaf82d16a5a3d9a89282f4af263426ff1a1681f00c"
+      ]
+    },
+    {
+      "recordIdentity": "record-golden-secondary",
+      "workflowIdentity": "workflow-golden-secondary",
+      "kind": "review.question-draft",
+      "schemaVersion": 2,
+      "recordClass": "revisioned",
+      "revision": 3,
+      "payloadSha256": "2e39d70e78358f140f18c15e9669362af833df6aaf37cbc99756bdb7924495a8",
+      "contentSha256": []
+    }
+  ]
+}

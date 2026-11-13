@@ -1,0 +1,13 @@
+{
+  "name": "buildframe",
+  "version": "0.1.0",
+  "description": "Connect a Claude Code conversation to BuildFrame with /buildframe, so each Review Message you send becomes a normal turn",
+  "author": {
+    "name": "JuanAn Aranda Triana",
+    "url": "https://github.com/juantot9"
+  },
+  "homepage": "https://github.com/juantot9/buildframe#readme",
+  "repository": "https://github.com/juantot9/buildframe",
+  "license": "MIT",
+  "keywords": ["code-review", "buildframe", "tui"]
+}

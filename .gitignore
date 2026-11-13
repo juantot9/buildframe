@@ -1,0 +1,13 @@
+node_modules/
+dist/
+apps/*/dist/
+packages/*/dist/
+.DS_Store
+.env
+.env.*
+*.log
+.local/
+.neoflow/
+release/
+.claude/
+.pi/

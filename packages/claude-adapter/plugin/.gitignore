@@ -1,0 +1,2 @@
+# Claude Code writes this on load; it extends the generated .claude-plugin/types.
+tsconfig.json

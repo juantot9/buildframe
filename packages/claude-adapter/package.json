@@ -1,0 +1,45 @@
+{
+  "name": "@buildframe/claude-adapter-source",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26.4.0 <27.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": {
+        "types": "./src/index.ts",
+        "import": "./src/index.ts"
+      },
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "plugin"
+  ],
+  "buildframe": {
+    "supportedClaudeDirectHostVersions": [
+      ">=2.1.310 <3.0.0"
+    ],
+    "reviewedClaudeDirectHostVersions": [
+      "2.1.310",
+      "2.1.311",
+      "2.1.317",
+      "2.1.322"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "build": "pnpm run clean && tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@buildframe/local-runtime": "workspace:*",
+    "@buildframe/workspace": "workspace:*"
+  }
+}

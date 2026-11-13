@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "no-control-regex": "off",
+    "prefer-as-const": "warn",
+    "no-useless-spread": "warn",
+    "no-useless-fallback-in-spread": "warn",
+    "no-useless-escape": "warn",
+    "no-unused-vars": "warn",
+    "no-async-promise-executor": "warn"
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/.neoflow/**",
+    "**/test/fixtures/**",
+    ".pi/**",
+    ".claude/**"
+  ],
+  "env": {
+    "builtin": true
+  }
+}

@@ -1,0 +1,10 @@
+[
+  {
+    "id": "legacy-array-edit",
+    "kind": "edit",
+    "file": "src/value.ts",
+    "line": 7,
+    "text": "Use the normalized value.",
+    "excerpt": "+const value = normalize(input);"
+  }
+]

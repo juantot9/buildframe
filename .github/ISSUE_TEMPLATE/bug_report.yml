@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in BuildFrame doesn't work as described.
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: buildframe doctor
+      description: Run `buildframe doctor --json` in the repository and paste the output. It names versions and folders, not your code.
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal
+      description: The terminal app, and tmux or similar if you use one.
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Connected agent
+      options:
+        - None
+        - Pi
+        - Claude Code

@@ -1,0 +1,93 @@
+{
+  "name": "@buildframe/workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26.4.0 <27.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": {
+        "types": "./src/index.ts",
+        "import": "./src/index.ts"
+      },
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./runtime": {
+      "development": {
+        "types": "./src/runtime.ts",
+        "import": "./src/runtime.ts"
+      },
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js"
+    },
+    "./bytes-base64": {
+      "development": {
+        "types": "./src/bytesBase64.ts",
+        "import": "./src/bytesBase64.ts"
+      },
+      "types": "./dist/bytesBase64.d.ts",
+      "import": "./dist/bytesBase64.js"
+    },
+    "./sha256": {
+      "development": {
+        "types": "./src/sha256.ts",
+        "import": "./src/sha256.ts"
+      },
+      "types": "./dist/sha256.d.ts",
+      "import": "./dist/sha256.js"
+    },
+    "./harness-interaction": {
+      "development": {
+        "types": "./src/harness-interaction/index.ts",
+        "import": "./src/harness-interaction/index.ts"
+      },
+      "types": "./dist/harness-interaction/index.d.ts",
+      "import": "./dist/harness-interaction/index.js"
+    },
+    "./projection": {
+      "development": {
+        "types": "./src/projection/surface.ts",
+        "import": "./src/projection/surface.ts"
+      },
+      "types": "./dist/projection/surface.d.ts",
+      "import": "./dist/projection/surface.js"
+    },
+    "./reviewing": {
+      "development": {
+        "types": "./src/reviewing/surface.ts",
+        "import": "./src/reviewing/surface.ts"
+      },
+      "types": "./dist/reviewing/surface.d.ts",
+      "import": "./dist/reviewing/surface.js"
+    },
+    "./legacy-review-import": {
+      "development": {
+        "types": "./src/legacyReviewImport/surface.ts",
+        "import": "./src/legacyReviewImport/surface.ts"
+      },
+      "types": "./dist/legacyReviewImport/surface.d.ts",
+      "import": "./dist/legacyReviewImport/surface.js"
+    },
+    "./workspace-evidence": {
+      "development": {
+        "types": "./src/workspaceEvidence/surface.ts",
+        "import": "./src/workspaceEvidence/surface.ts"
+      },
+      "types": "./dist/workspaceEvidence/surface.d.ts",
+      "import": "./dist/workspaceEvidence/surface.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "build": "pnpm run clean && tsc -p tsconfig.json"
+  }
+}

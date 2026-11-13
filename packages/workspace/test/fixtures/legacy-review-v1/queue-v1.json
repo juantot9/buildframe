@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "updatedAt": "2026-07-10T12:00:00.000Z",
+  "annotations": [
+    {
+      "id": "legacy-v1-question",
+      "kind": "question",
+      "file": "src/removed.ts",
+      "line": 11,
+      "text": "Why was this removed?",
+      "excerpt": "-const retired = true;"
+    },
+    {
+      "id": "legacy-v1-general",
+      "kind": "change",
+      "text": "Keep the validation close to its caller."
+    }
+  ]
+}

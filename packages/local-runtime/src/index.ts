@@ -1,0 +1,22 @@
+export { connectWorkspaceRuntime } from './client.js';
+export {
+  LOCAL_RUNTIME_PROTOCOL_VERSION,
+  LocalRuntimeSessionError,
+  type ConnectWorkspaceRuntimeRequest,
+  type ConnectWorkspaceRuntimeResult,
+  type InvalidRuntimeBootstrapDiagnostic,
+  type LocalRuntimeClientRole,
+  type LocalRuntimeSessionErrorCode,
+  type RuntimeCodeIdentity,
+  type RuntimeCodeMismatchDiagnostic,
+  type RuntimeCompatibility,
+  type RuntimeGeneration,
+  type RuntimeProtocolIncompatibleDiagnostic,
+  type RuntimeRoleRejectedDiagnostic,
+  type RuntimeUnavailableDiagnostic,
+  type RuntimeWorkspaceMismatchDiagnostic,
+  type WorkspaceInterfaceIncompatibleDiagnostic,
+  type WorkspaceRuntimeBootstrapDiagnostic,
+  type WorkspaceRuntimeConnected,
+  type WorkspaceRuntimeRejected,
+} from './contracts.js';

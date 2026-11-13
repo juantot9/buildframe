@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "productVersion": "0.1.0",
+  "releaseCoordinates": {
+    "application": "@buildframe/cli",
+    "pi": "@buildframe/pi",
+    "claudeCode": {
+      "marketplace": "buildframe",
+      "plugin": "buildframe",
+      "repository": "github.com/juantot9/buildframe"
+    }
+  },
+  "node": {
+    "range": ">=26.4.0 <27.0.0",
+    "tested": "26.5.1"
+  },
+  "packageManagers": ["npm", "pnpm"],
+  "environments": ["macOS", "Linux"],
+  "hosts": {
+    "pi": {
+      "range": ">=0.80.6 <2.0.0",
+      "verified": ["0.80.6", "0.80.7", "0.80.10", "0.81.0", "0.81.1", "0.82.1", "0.84.1", "0.85.1", "1.3.0"]
+    },
+    "claudeCode": {
+      "range": ">=2.1.310 <3.0.0",
+      "verified": ["2.1.310", "2.1.311", "2.1.317", "2.1.322"]
+    }
+  },
+  "protocols": {
+    "workspaceInterface": 1,
+    "localRuntime": 1,
+    "adapter": 1
+  },
+  "knownLimitations": [
+    "One agent session is connected per repository; the newest /buildframe wins.",
+    "Messages go to the agent exactly as written; BuildFrame never scans them for secrets.",
+    "BuildFrame trusts programs running as the same user on the same machine.",
+    "Windows is not supported yet; WSL2 is not claimed."
+  ]
+}

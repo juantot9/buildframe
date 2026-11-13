@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "isolatedDeclarations": false,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "vitest.config.ts",
+    "apps/buildframe/test/**/*.ts",
+    "packages/claude-adapter/test/**/*.ts",
+    "packages/local-runtime/test/**/*.ts",
+    "packages/pi-adapter/test/**/*.ts",
+    "packages/workspace/test/**/*.ts"
+  ]
+}

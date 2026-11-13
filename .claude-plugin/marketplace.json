@@ -1,0 +1,14 @@
+{
+  "name": "buildframe",
+  "owner": {
+    "name": "JuanAn Aranda Triana"
+  },
+  "plugins": [
+    {
+      "name": "buildframe",
+      "source": "./packages/claude-adapter/plugin",
+      "description": "Connect a Claude Code conversation to BuildFrame with /buildframe, so each Review Message you send becomes a normal turn",
+      "version": "0.1.0"
+    }
+  ]
+}

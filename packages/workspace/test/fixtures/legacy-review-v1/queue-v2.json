@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "updatedAt": "2026-07-11T09:30:00.000Z",
+  "annotations": [
+    {
+      "id": "legacy-v2-question",
+      "kind": "question",
+      "file": "src/session.ts",
+      "anchor": {
+        "side": "new",
+        "newLine": 23
+      },
+      "text": "Should this reject an expired session?",
+      "excerpt": "+assertSession(current);"
+    },
+    {
+      "id": "legacy-v2-file-edit",
+      "kind": "edit",
+      "file": "src/config.ts",
+      "anchor": {
+        "side": "file"
+      },
+      "text": "Replace this file-level strategy explicitly."
+    }
+  ]
+}

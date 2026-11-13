@@ -1,0 +1,59 @@
+{
+  "name": "@buildframe/app-source",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26.4.0 <27.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "buildframe-dogfood": "./dist/developerExecutable.js"
+  },
+  "exports": {
+    ".": {
+      "development": {
+        "types": "./src/index.ts",
+        "import": "./src/index.ts"
+      },
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./launcher": {
+      "development": {
+        "types": "./src/launcher.ts",
+        "import": "./src/launcher.ts"
+      },
+      "types": "./dist/launcher.d.ts",
+      "import": "./dist/launcher.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "build": "pnpm run clean && tsc -p tsconfig.json",
+    "dogfood": "node dist/developerExecutable.js"
+  },
+  "dependencies": {
+    "@buildframe/local-runtime": "workspace:*",
+    "@buildframe/workspace": "workspace:*",
+    "@opentui/core": "0.8.1",
+    "@tree-sitter-grammars/tree-sitter-yaml": "0.7.1",
+    "tree-sitter-bash": "0.25.1",
+    "tree-sitter-c": "0.24.1",
+    "tree-sitter-cpp": "0.23.4",
+    "tree-sitter-css": "0.25.0",
+    "tree-sitter-go": "0.25.0",
+    "tree-sitter-html": "0.23.2",
+    "tree-sitter-java": "0.23.5",
+    "tree-sitter-json": "0.24.8",
+    "tree-sitter-python": "0.25.0",
+    "tree-sitter-rust": "0.24.0",
+    "tree-sitter-toml": "0.5.1",
+    "tree-sitter-wasms": "0.1.13"
+  }
+}

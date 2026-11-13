@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "updatedAt": "2026-07-12T12:10:00.000Z",
+  "batches": [
+    {
+      "id": "legacy-batch-cleared",
+      "workspace": "/sanitized/workspace",
+      "annotations": [
+        {
+          "id": "legacy-receipt-question",
+          "kind": "question",
+          "file": "src/api.ts",
+          "anchor": {
+            "side": "old",
+            "oldLine": 5
+          },
+          "text": "Why did this branch disappear?",
+          "excerpt": "-return fallback;"
+        }
+      ],
+      "harness": {
+        "id": "pi",
+        "name": "Pi",
+        "version": "0.80.6",
+        "sessionId": "sanitized-session-one",
+        "model": "sanitized-model",
+        "workspace": "/sanitized/workspace"
+      },
+      "createdAt": "2026-07-12T12:00:00.000Z",
+      "updatedAt": "2026-07-12T12:02:00.000Z",
+      "harnessOutcome": "succeeded",
+      "harnessCompletedAt": "2026-07-12T12:01:00.000Z",
+      "queueDisposition": "cleared",
+      "queueUpdatedAt": "2026-07-12T12:02:00.000Z"
+    },
+    {
+      "id": "legacy-batch-retained",
+      "workspace": "/sanitized/workspace",
+      "annotations": [
+        {
+          "id": "legacy-receipt-change",
+          "kind": "change",
+          "anchor": {
+            "side": "file"
+          },
+          "text": "Retain this source occurrence as legacy history only."
+        }
+      ],
+      "harness": {
+        "id": "claude",
+        "name": "Claude Code",
+        "sessionId": "sanitized-session-two",
+        "workspace": "/sanitized/workspace"
+      },
+      "createdAt": "2026-07-12T12:03:00.000Z",
+      "updatedAt": "2026-07-12T12:05:00.000Z",
+      "harnessOutcome": "failed",
+      "harnessCompletedAt": "2026-07-12T12:04:00.000Z",
+      "harnessError": "sanitized failure",
+      "queueDisposition": "retained",
+      "queueUpdatedAt": "2026-07-12T12:05:00.000Z",
+      "queueReason": "harness_failed"
+    }
+  ]
+}

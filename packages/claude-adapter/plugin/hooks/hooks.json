@@ -1,0 +1,4 @@
+{
+  "description": "BuildFrame Direct Review: native Mod and private helper for the attached conversation",
+  "modules": ["./register.js"]
+}

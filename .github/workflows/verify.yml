@@ -1,0 +1,52 @@
+name: Verify
+
+# The canonical `pnpm verify` chain (lint → format → deps → tests → typecheck →
+# build → smoke) on both supported platforms, at both ends of the declared Node
+# range: 26.4.0 (the node:ffi floor) and the newest 26.x. Bump the newest entry
+# when a 26.x release lands. Development runs on 26.5.1 (.nvmrc). Markdown-only
+# pushes are ignored so a forgotten `[skip ci]` on an evidence commit cannot
+# spend a run.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        node: ['26.4.0', '26.13.1']
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Verify
+        run: pnpm verify
