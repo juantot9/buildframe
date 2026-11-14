@@ -255,6 +255,21 @@ Nothing else from WF-050's candidate gate list is required for 0.1.0.
     then `npm publish` the same tarballs (as `latest`) and push the commit
     the plugin marketplace serves. Date the CHANGELOG entry first.
 
+    Tarballs packed 2026-11-14 from 42f37ff (byte-identical on a second
+    pack), SHA-256:
+    - `buildframe-cli-0.1.0.tgz`
+      `0f0c2571882f3a85d0e18cdbecfd32af64102d5a429dd36fe8021d55d085c587`
+    - `buildframe-pi-0.1.0.tgz`
+      `f3ed23d86195047b28d80cae7786235ad3a1ec15c3de2a722124903d94128722`
+
+    A scratch global install from npmjs.com took 14s and gave `buildframe`,
+    `bframe` and `buildframe-claude-helper`; `--version`, `--help` and
+    `doctor --json` ran. `npm publish --dry-run` targets
+    `https://registry.npmjs.org/` with public access for both packages; the
+    registry is pinned in `publishConfig` because the owner's user `.npmrc`
+    points at a company mirror. npm 11 skips the tree-sitter install scripts;
+    BuildFrame uses the grammars' bundled `.wasm` files, so they aren't needed.
+
 Order: 1 → (2, 3, 4) → 5 → 7 → 8 → 9 → 6 → 10. Child 9 must land before
 child 6's CI, and both before child 10.
 
