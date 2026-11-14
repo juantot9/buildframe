@@ -18,6 +18,10 @@ session you connected, exactly as you wrote it.
 npm i -g @buildframe/cli      # or: pnpm add -g @buildframe/cli
 ```
 
+Recent npm versions may warn that they skipped install scripts for
+`tree-sitter-*` packages. BuildFrame doesn't need those scripts; it uses the
+grammar files those packages already contain.
+
 Then, inside a Git repository:
 
 ```bash

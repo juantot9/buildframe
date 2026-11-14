@@ -61,7 +61,9 @@ const publicMetadata = {
   bugs: { url: `${repositoryUrl}/issues` },
   repository: { type: 'git', url: `git+${repositoryUrl}.git` },
   // Scoped packages are private on first publish unless they say otherwise.
-  publishConfig: { access: 'public' },
+  // The registry is pinned because npm reads no repository .npmrc from
+  // release/, so a user-level registry (a company mirror) would otherwise win.
+  publishConfig: { access: 'public', registry: 'https://registry.npmjs.org/' },
 };
 
 // --- @buildframe/cli -------------------------------------------------------------
@@ -213,6 +215,11 @@ for (const [directory, allowed] of [
       `${file} imports a private @buildframe package`,
     );
   }
+}
+
+for (const directory of [cli, pi]) {
+  const { publishConfig } = await readJson(path.join(directory, 'package.json'));
+  assert.deepEqual(publishConfig, { access: 'public', registry: 'https://registry.npmjs.org/' });
 }
 
 const versions = [
