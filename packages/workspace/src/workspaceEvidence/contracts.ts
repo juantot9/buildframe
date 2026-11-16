@@ -70,6 +70,10 @@ export type CurrentRepositoryFileContent =
       readonly status: 'available';
       readonly bytesBase64: string;
       readonly byteLength: number;
+      readonly totalByteLength: number;
+      readonly firstLine: number;
+      readonly lineCount: number;
+      readonly totalLines: number;
       readonly truncated: boolean;
     }
   | { readonly status: 'unsupported'; readonly classification: 'binary' | 'unrenderable' }

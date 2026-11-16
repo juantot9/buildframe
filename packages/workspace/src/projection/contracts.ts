@@ -105,6 +105,8 @@ export interface ReviewLiveFileContentViewRequest {
   readonly reviewIdentity: ReviewIdentity;
   readonly liveChangesIdentity: string;
   readonly pathBytesBase64: string;
+  /** One-based source line to include; defaults to the start of the file. */
+  readonly anchorLine?: number;
 }
 
 export interface ReviewVersionsViewRequest {
@@ -674,6 +676,11 @@ export type ReviewLiveFileContentView =
         readonly encoding: 'utf8';
         readonly bytesBase64: string;
         readonly byteLength: number;
+        readonly totalByteLength: number;
+        /** Absolute one-based line of the first complete line in this window. */
+        readonly firstLine: number;
+        readonly lineCount: number;
+        readonly totalLines: number;
         readonly truncated: boolean;
       };
     }

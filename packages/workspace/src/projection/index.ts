@@ -2820,7 +2820,7 @@ export class WorkspaceProjection {
       file => (file.newSide ?? file.oldSide)?.path.bytesBase64 === request.pathBytesBase64,
     );
     if (captured) return unavailable('unavailable', 'file-unavailable');
-    const content = await this.#evidence.readCurrentRepositoryFileContent(pathBytes);
+    const content = await this.#evidence.readCurrentRepositoryFileContent(pathBytes, request.anchorLine);
     if (content.status === 'too-large') return unavailable('unavailable', 'too-large');
     if (content.status === 'unsupported') return unavailable('unavailable', content.classification);
     if (content.status !== 'available') return unavailable('unavailable', 'file-unavailable');
@@ -2836,6 +2836,10 @@ export class WorkspaceProjection {
         encoding: 'utf8',
         bytesBase64: content.bytesBase64,
         byteLength: content.byteLength,
+        totalByteLength: content.totalByteLength,
+        firstLine: content.firstLine,
+        lineCount: content.lineCount,
+        totalLines: content.totalLines,
         truncated: content.truncated,
       },
     };

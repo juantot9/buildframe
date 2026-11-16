@@ -206,7 +206,39 @@ function content(review: ReviewViewBundle): Extract<ReviewLiveFileContentView, {
     reviewIdentity: review.manifest.header.reviewIdentity,
     liveChangesIdentity: review.source.liveChangesIdentity,
     path: { display: 'review.txt', bytesBase64: PATH },
-    content: { encoding: 'utf8', bytesBase64: bytes.toString('base64'), byteLength: bytes.length, truncated: false },
+    content: {
+      encoding: 'utf8',
+      bytesBase64: bytes.toString('base64'),
+      byteLength: bytes.length,
+      totalByteLength: bytes.length,
+      firstLine: 1,
+      lineCount: 8,
+      totalLines: 8,
+      truncated: false,
+    },
+  };
+}
+
+/** One bounded window of a longer unchanged file, numbered by absolute line. */
+function contentWindow(
+  review: ReviewViewBundle,
+  firstLine: number,
+  lineCount: number,
+  totalLines: number,
+): Extract<ReviewLiveFileContentView, { status: 'available' }> {
+  const whole = content(review);
+  const bytes = Buffer.from(Array.from({ length: lineCount }, (_, index) => `line ${firstLine + index}\n`).join(''));
+  return {
+    ...whole,
+    content: {
+      ...whole.content,
+      bytesBase64: bytes.toString('base64'),
+      byteLength: bytes.length,
+      firstLine,
+      lineCount,
+      totalLines,
+      truncated: firstLine > 1 || firstLine + lineCount - 1 < totalLines,
+    },
   };
 }
 
@@ -423,5 +455,31 @@ describe('Reviewing source-isolated windows', () => {
     const cachedEffects = model.applyReview(current, { ...target(current), fileIdentity: OTHER_FILE });
     expect(cachedEffects.some(effect => effect.type === 'preview-file-content')).toBe(false);
     expect(model.state.unchangedContent).toMatchObject({ view: content(current) });
+  });
+
+  it('pages a large unchanged file by absolute line, keeping the loaded window visible meanwhile', () => {
+    const review = unchanged(bundle(live('large')));
+    const model = allFilesModel(review);
+    const first = contentWindow(review, 1, 8, 20);
+    model.applyUnchangedFileContent(PATH, first);
+    model.unchangedContentLineTo(8);
+    expect(model.moveUnchangedContentLine(0).some(effect => effect.type === 'preview-file-content')).toBe(false);
+
+    expect(model.moveUnchangedContentLine(1)).toContainEqual(
+      expect.objectContaining({ type: 'preview-file-content', liveChangesIdentity: 'large', anchorLine: 9 }),
+    );
+    expect(model.state.unchangedContentLine).toBe(9);
+    expect(model.state.unchangedContent?.view).toEqual(first);
+
+    const second = contentWindow(review, 9, 8, 20);
+    model.applyUnchangedFileContent(PATH, second, 9);
+    expect(model.state.unchangedContent?.view).toEqual(second);
+    expect(model.state.unchangedContentLine).toBe(9);
+
+    // A jump past the end selects the file's real last line, not the window's.
+    expect(model.moveUnchangedContentLine(100)).toContainEqual(
+      expect.objectContaining({ type: 'preview-file-content', anchorLine: 20 }),
+    );
+    expect(model.state.unchangedContentLine).toBe(20);
   });
 });

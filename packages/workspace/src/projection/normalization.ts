@@ -149,7 +149,8 @@ function normalizeLiveFileContentRequest(
     !LIVE_CHANGES_ID_PATTERN.test(request.liveChangesIdentity) ||
     typeof request.pathBytesBase64 !== 'string' ||
     request.pathBytesBase64.length === 0 ||
-    Buffer.from(request.pathBytesBase64, 'base64').byteLength === 0
+    Buffer.from(request.pathBytesBase64, 'base64').byteLength === 0 ||
+    (request.anchorLine !== undefined && !safeInteger(request.anchorLine, false))
   ) {
     throw new TypeError('Invalid Live file content request');
   }

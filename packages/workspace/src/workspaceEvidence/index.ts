@@ -56,7 +56,7 @@ import {
   revisionEndpoint,
   validReviewComparisonResolution,
 } from './comparisonIdentity.js';
-import { streamRegularFile } from './content.js';
+import { readRepositoryContentWindow } from './repositoryContent.js';
 import {
   MEBIBYTE,
   checkedLimits,
@@ -420,28 +420,19 @@ export class WorkspaceEvidence {
   }
 
   /** Bounded working-tree content for one unchanged file; never follows symlinks out. */
-  async readCurrentRepositoryFileContent(pathBytes: Buffer): Promise<CurrentRepositoryFileContent> {
+  async readCurrentRepositoryFileContent(pathBytes: Buffer, anchorLine = 1): Promise<CurrentRepositoryFileContent> {
     try {
       return await withGitInspection(this.#canonicalCheckout, this.#gitDirectory, async context => {
         validateRelativePath(pathBytes);
         const filename = absolutePath(context.checkout, pathBytes);
-        const read = await streamRegularFile(filename, this.#limits.maxCapturedContentBytes, true);
-        if (read.status === 'limit') return deepFreeze({ status: 'too-large' });
-        if (read.status !== 'read' || read.content === undefined) {
-          return deepFreeze({ status: 'unavailable' });
-        }
-        if (read.classification !== 'text') {
-          return deepFreeze({
-            status: 'unsupported',
-            classification: read.classification === 'binary' ? 'binary' : 'unrenderable',
-          });
-        }
-        return deepFreeze({
-          status: 'available',
-          bytesBase64: read.content.toString('base64'),
-          byteLength: read.content.byteLength,
-          truncated: false,
-        });
+        return deepFreeze(
+          await readRepositoryContentWindow(
+            filename,
+            this.#limits.maxCapturedContentBytes,
+            this.#limits.maxContentWindowBytes,
+            anchorLine,
+          ),
+        );
       });
     } catch {
       return deepFreeze({ status: 'unavailable' });

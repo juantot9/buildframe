@@ -795,15 +795,17 @@ class OpenReviewingApplication implements ReviewingApplication {
     effect: Extract<ReviewingModelEffect, { readonly type: 'preview-file-content' }>,
   ): Promise<void> {
     const generation = this.#routeGeneration;
+    const anchorLine = effect.windowLine ?? effect.anchorLine;
     try {
       const view = await this.#workspace.read({
         kind: 'review.live-file-content',
         reviewIdentity: effect.reviewIdentity,
         liveChangesIdentity: effect.liveChangesIdentity,
         pathBytesBase64: effect.pathBytesBase64,
+        ...(anchorLine === undefined ? {} : { anchorLine }),
       });
       if (this.#stopped || generation !== this.#routeGeneration) return;
-      this.#model.applyUnchangedFileContent(effect.pathBytesBase64, view, effect.anchorLine);
+      this.#model.applyUnchangedFileContent(effect.pathBytesBase64, view, effect.anchorLine, effect.windowLine);
       this.#render();
       this.#scheduleNeighborWarmup();
     } catch {

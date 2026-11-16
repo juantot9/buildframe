@@ -54,6 +54,7 @@ import type {
 } from '@buildframe/workspace/reviewing';
 import type { ReviewComparisonSelection } from '@buildframe/workspace/workspace-evidence';
 
+import { contentWindowContainsLine } from './reviewingContent.js';
 import { Key, matchesKey, printableInput, type ReviewingInput } from './reviewingInput.js';
 import { reasonSentence } from './reviewingReasons.js';
 import { outgoingStateSpins, type MessageState, type NoticeTone } from './reviewingStatus.js';
@@ -559,6 +560,8 @@ export type ReviewingModelEffect =
       readonly liveChangesIdentity: string;
       readonly pathBytesBase64: string;
       readonly anchorLine?: number;
+      /** Load around this line while preserving selection where the new window permits it. */
+      readonly windowLine?: number;
     }
   | { readonly type: 'load-commit-graph' }
   | {
@@ -1679,9 +1682,19 @@ export class ReviewingApplicationModel {
       this.state.paneScroll[region] = view.state;
       return [];
     }
-    // The Diff and file content are one continuous document: their next rows
-    // arrive by prefetch, so the wheel simply stops at the real end.
-    if (region === 'diff') return [];
+    if (region === 'diff') {
+      const file = this.selectedFileEntry();
+      const content = this.state.unchangedContent?.view;
+      if (file?.status === 'unchanged' && content?.status === 'available') {
+        const next =
+          direction > 0 ? content.content.firstLine + content.content.lineCount : content.content.firstLine - 1;
+        if (next >= 1 && next <= content.content.totalLines) {
+          return this.previewUnchangedFile(file, undefined, next);
+        }
+      }
+      // Diff rows arrive by prefetch; only the real end stops its wheel.
+      return [];
+    }
     // Files and Messages still load in windows: step just past the loaded edge
     // so the next window opens where the view already is.
     if (region === 'files') {
@@ -3690,6 +3703,7 @@ export class ReviewingApplicationModel {
         ? this.moveMessage(direction, true)
         : this.moveQuestion(direction, true);
     }
+    if (this.selectedFileEntry()?.status === 'unchanged') return this.moveUnchangedContentLine(direction);
     return this.moveDiff(direction, true);
   }
 
@@ -3984,6 +3998,7 @@ export class ReviewingApplicationModel {
   private previewUnchangedFile(
     file: ReviewingFileItem | undefined,
     anchorLine?: number,
+    windowLine?: number,
   ): readonly ReviewingModelEffect[] {
     const review = this.state.review;
     if (review === undefined || review.source.kind !== 'live' || file?.status !== 'unchanged') {
@@ -4000,17 +4015,26 @@ export class ReviewingApplicationModel {
     const previouslyLoadedSamePath = retainedSamePath || reloadingSamePath;
     const requestedLine =
       anchorLine ?? (retainedSamePath ? this.state.unchangedContentLine : reloadingSamePath ? reload?.line : undefined);
-    if (
+    const readLine = windowLine ?? requestedLine ?? 1;
+    const retainedIsCurrent =
       retainedSamePath &&
       retainedContent !== undefined &&
       contentCacheKey(retainedContent.view, file.pathBytesBase64) ===
-        `${reviewingSourceKey(review)}:${file.pathBytesBase64}`
+        `${reviewingSourceKey(review)}:${file.pathBytesBase64}`;
+    if (
+      retainedIsCurrent &&
+      (retainedContent.view.status !== 'available' ||
+        contentWindowContainsLine(retainedContent.view, Math.min(readLine, retainedContent.view.content.totalLines)))
     ) {
       if (anchorLine !== undefined) this.unchangedContentLineTo(anchorLine);
       return [];
     }
     const cached = this.#contentCache.get(`${reviewingSourceKey(review)}:${file.pathBytesBase64}`);
-    if (cached !== undefined) {
+    if (
+      cached !== undefined &&
+      (cached.status !== 'available' ||
+        contentWindowContainsLine(cached, Math.min(readLine, cached.content.totalLines)))
+    ) {
       this.state.unchangedContent = { pathBytesBase64: file.pathBytesBase64, view: cached };
       this.#unchangedContentReload = undefined;
       if (requestedLine !== undefined) this.unchangedContentLineTo(requestedLine);
@@ -4027,7 +4051,9 @@ export class ReviewingApplicationModel {
             pathBytesBase64: file.pathBytesBase64,
             line: requestedLine,
           };
-    this.state.unchangedContent = undefined;
+    // A page load of the same source can keep its old window visible. A source
+    // replacement still hides stale bytes until the matching read arrives.
+    if (!retainedIsCurrent) this.state.unchangedContent = undefined;
     return [
       {
         type: 'preview-file-content',
@@ -4036,11 +4062,17 @@ export class ReviewingApplicationModel {
         pathBytesBase64: file.pathBytesBase64,
         // A refresh keeps the selected line; a new file starts at line one.
         ...(requestedLine === undefined ? {} : { anchorLine: requestedLine }),
+        ...(windowLine === undefined ? {} : { windowLine }),
       },
     ];
   }
 
-  applyUnchangedFileContent(pathBytesBase64: string, view: ReviewLiveFileContentView, anchorLine?: number): void {
+  applyUnchangedFileContent(
+    pathBytesBase64: string,
+    view: ReviewLiveFileContentView,
+    anchorLine?: number,
+    windowLine?: number,
+  ): void {
     const review = this.state.review;
     if (
       review === undefined ||
@@ -4067,6 +4099,15 @@ export class ReviewingApplicationModel {
     // have hidden the old content while waiting for this exact source.
     if (requestedLine !== undefined) this.unchangedContentLineTo(requestedLine);
     else if (!previouslyLoadedSamePath) this.state.unchangedContentLine = 1;
+    if (
+      view.status === 'available' &&
+      windowLine !== undefined &&
+      !contentWindowContainsLine(view, this.state.unchangedContentLine)
+    ) {
+      this.unchangedContentLineTo(
+        clamp(windowLine, view.content.firstLine, view.content.firstLine + view.content.lineCount - 1),
+      );
+    }
   }
 
   failUnchangedFileContent(pathBytesBase64: string): void {
@@ -4139,9 +4180,7 @@ export class ReviewingApplicationModel {
   unchangedContentLineTo(line: number): void {
     const view = this.state.unchangedContent?.view;
     if (view?.status !== 'available') return;
-    const lines = decodeBytesBase64(view.content.bytesBase64).toString('utf8').split('\n');
-    if (lines.at(-1) === '') lines.pop();
-    const total = Math.max(1, lines.length);
+    const total = view.content.totalLines;
     const selected = clamp(Math.floor(line), 1, total);
     this.state.unchangedContentLine = selected;
     const pageSize = this.state.unchangedContentPageSize;
@@ -4152,7 +4191,18 @@ export class ReviewingApplicationModel {
 
   moveUnchangedContentLine(delta: number): readonly ReviewingModelEffect[] {
     this.unchangedContentLineTo(this.state.unchangedContentLine + delta);
-    return this.openMessagesOn(messagesOnLines(this.state).new.get(this.state.unchangedContentLine) ?? []);
+    const content = this.state.unchangedContent?.view;
+    const file = this.selectedFileEntry();
+    const load =
+      content?.status === 'available' &&
+      file?.status === 'unchanged' &&
+      !contentWindowContainsLine(content, this.state.unchangedContentLine)
+        ? this.previewUnchangedFile(file, this.state.unchangedContentLine)
+        : [];
+    return [
+      ...load,
+      ...this.openMessagesOn(messagesOnLines(this.state).new.get(this.state.unchangedContentLine) ?? []),
+    ];
   }
 
   /**

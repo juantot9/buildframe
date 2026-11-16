@@ -21,7 +21,6 @@ import type { DefaultReviewMessageInspectionView } from '@buildframe/workspace/h
 import type {
   ReviewBasisItem,
   ReviewHistoryStep,
-  ReviewLiveFileContentView,
   ReviewMessageListItem,
   ReviewProjectedDiffRow,
   ReviewProjectedQuestionItem,
@@ -30,6 +29,7 @@ import type {
   WorkspaceHomeReviewItem,
 } from '@buildframe/workspace/projection';
 
+import { reviewLiveContentLines } from './reviewingContent.js';
 import { reviewingInputFromKeyEvent, reviewingInputFromPasteEvent } from './reviewingInput.js';
 import {
   diffMinimumWidth,
@@ -2168,16 +2168,6 @@ function selectedDiscussionThread(state: ReviewingApplicationState): DiscussionT
   return { selected: selectedLine, items };
 }
 
-type AvailableReviewLiveFileContentView = Extract<ReviewLiveFileContentView, { readonly status: 'available' }>;
-
-/** Decoded source lines of one loaded unchanged-file view, without a trailing empty line. */
-function reviewLiveContentLines(view: AvailableReviewLiveFileContentView): readonly string[] {
-  const text = decodeBytesBase64(view.content.bytesBase64).toString('utf8');
-  const lines = text.split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  return lines.length === 0 ? [''] : lines;
-}
-
 interface MessageThread {
   readonly selected: ReviewMessageListItem;
   readonly items: readonly ReviewMessageListItem[];
@@ -2207,7 +2197,7 @@ function selectedMessageThread(state: ReviewingApplicationState): MessageThread 
   if (file.status === 'unchanged') {
     const content = state.unchangedContent;
     if (content?.pathBytesBase64 !== file.pathBytesBase64 || content.view.status !== 'available') return undefined;
-    const code = reviewLiveContentLines(content.view)[selected.location.line - 1];
+    const code = reviewLiveContentLines(content.view)[selected.location.line - content.view.content.firstLine];
     if (code === undefined) return undefined;
     return { selected, items, code };
   }
@@ -2841,8 +2831,13 @@ function diffPane(
     const content = state.unchangedContent;
     if (content?.view.status === 'available') {
       const lines = reviewLiveContentLines(content.view);
+      const { firstLine, totalLines, truncated } = content.view.content;
+      const lastLine = firstLine + lines.length - 1;
       onContentPage(Math.max(1, availableHeight - 2));
-      const contentGutterWidth = 8 + markWidth;
+      // Windows of large files reach line numbers wider than four digits.
+      const lineNumberWidth = Math.max(4, String(totalLines).length);
+      const lineGutterWidth = lineNumberWidth + 4;
+      const contentGutterWidth = lineGutterWidth + markWidth;
       const codeWidth = Math.max(4, paneContentWidth - contentGutterWidth);
       const filetype = reviewingFiletype(path);
       const items: ReviewingVisualItem[] = [
@@ -2855,7 +2850,7 @@ function diffPane(
       let selectionStart: number | undefined;
       let selectionSize: number | undefined;
       lines.forEach((line, index) => {
-        const lineNumber = index + 1;
+        const lineNumber = firstLine + index;
         const selected = lineNumber === state.unchangedContentLine;
         const anchoredThread =
           messageThread !== undefined &&
@@ -2888,9 +2883,9 @@ function diffPane(
                 id: reviewRenderableId(state, `reviewing-content-line-${lineNumber}`),
                 ...pointerMouseHandlers(interaction, { kind: 'content-line', line: lineNumber }),
               },
-              label(state, ` ${marker}${String(lineNumber).padStart(4)}  `, {
+              label(state, ` ${marker}${String(lineNumber).padStart(lineNumberWidth)}  `, {
                 fg: selected ? selectionColors(state, 'diff').fg : colors.muted,
-                width: 8,
+                width: lineGutterWidth,
                 height: 1,
                 flexShrink: 0,
               }),
@@ -2946,10 +2941,14 @@ function diffPane(
       items.push({
         size: 1,
         render: () =>
-          label(state, `${lines.length} ${lines.length === 1 ? 'line' : 'lines'} · j/k selects · a composes at it`, {
-            fg: colors.muted,
-            paddingLeft: 1,
-          }),
+          label(
+            state,
+            `${truncated ? `Lines ${firstLine}–${lastLine} of ${totalLines}` : `${totalLines} ${totalLines === 1 ? 'line' : 'lines'}`} · j/k selects · a composes at it`,
+            {
+              fg: colors.muted,
+              paddingLeft: 1,
+            },
+          ),
       });
       column = scrollingColumn(
         state,
@@ -2962,11 +2961,12 @@ function diffPane(
         interaction,
         lines.length,
         {
-          contentKey: `reviewing-content:${sourceIdentity}:${content.pathBytesBase64}`,
+          contentKey: `reviewing-content:${sourceIdentity}:${content.pathBytesBase64}:${firstLine}`,
           ...(selectionStart === undefined ? {} : { selectionStart }),
           ...(selectionSize === undefined ? {} : { selectionSize }),
           pageItemSizes: lines.map(() => 1),
-          pageSelectedIndex: Math.max(0, state.unchangedContentLine - 1),
+          // While the next window loads, the selection may sit just outside this one.
+          pageSelectedIndex: Math.min(lines.length - 1, Math.max(0, state.unchangedContentLine - firstLine)),
         },
       );
     } else {
