@@ -255,10 +255,12 @@ Nothing else from WF-050's candidate gate list is required for 0.1.0.
     then `npm publish` the same tarballs (as `latest`) and push the commit
     the plugin marketplace serves. Date the CHANGELOG entry first.
 
-    Tarballs packed 2026-11-14 from 42f37ff (byte-identical on a second
-    pack), SHA-256:
+    Tarballs repacked 2026-11-16 from ef3bbdf, after two display fixes
+    (changed-line tints on the terminal background, a steady Configuration
+    dialog); the first pack, from 42f37ff on 2026-11-14, is superseded and the
+    gate's week restarts on this one. SHA-256:
     - `buildframe-cli-0.1.0.tgz`
-      `0f0c2571882f3a85d0e18cdbecfd32af64102d5a429dd36fe8021d55d085c587`
+      `3162be64ce57604c6a2bb8f8d17ec6488083c90187fc9f0dfa46cfcabebb0fbd`
     - `buildframe-pi-0.1.0.tgz`
       `f3ed23d86195047b28d80cae7786235ad3a1ec15c3de2a722124903d94128722`
 
