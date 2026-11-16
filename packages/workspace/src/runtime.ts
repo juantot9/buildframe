@@ -161,6 +161,11 @@ export async function openWorkspaceRuntimeOwner(
     {},
     workspaceGitDirectory(bootstrapped.workspace),
   );
+  try {
+    await assembly.recoverLostInvocations();
+  } catch {
+    // Best effort: unrecovered work stays as it was, and the runtime still opens.
+  }
   return {
     status: 'ready',
     owner: new OpenWorkspaceRuntimeOwner(

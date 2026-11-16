@@ -324,6 +324,31 @@ export class HarnessInteractionOwner {
     });
   }
 
+  /**
+   * A new runtime starts with no Adapter connections, so every direct
+   * Invocation still awaiting start or active lost its correlation when the
+   * previous runtime ended. An orderly disconnect records that; a crash could
+   * not, which left a Message waiting forever and its session unable to Send.
+   * Record it before any Adapter attaches. User Pull keeps its own deadline.
+   */
+  async recoverLostInvocations(): Promise<void> {
+    const index = await this.#loadIndex();
+    const lost = index.payload.invocations.filter(
+      invocation =>
+        invocation.startObservationDeadline === undefined &&
+        (invocation.status === 'awaiting-start' || invocation.status === 'active'),
+    );
+    for (const invocation of lost) {
+      await this.#acceptEvidence(invocation.attachmentIdentity, {
+        kind: 'harness.invocation.correlation-lost',
+        evidenceIdentity: `workspace-runtime:${this.#runtimeGeneration}:${invocation.invocationIdentity}:correlation-lost`,
+        attachmentIdentity: invocation.attachmentIdentity,
+        invocationIdentity: invocation.invocationIdentity,
+        reason: 'attachment-lost',
+      });
+    }
+  }
+
   async execute(value: unknown): Promise<HarnessInteractionCommandResult> {
     const command = normalizeCommand(value);
     const normalized = JSON.stringify(command);
@@ -4965,7 +4990,7 @@ export class HarnessInteractionOwner {
     } catch {
       return;
     }
-    if (directive.kind === 'harness.direct-review.dispatch' && observation.status === 'proven-not-dispatched') {
+    if (observation.status === 'proven-not-dispatched') {
       await this.#acceptEvidence(directive.attachmentIdentity, {
         kind: 'harness.invocation.rejected',
         evidenceIdentity: observation.evidenceIdentity,

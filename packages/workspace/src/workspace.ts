@@ -226,7 +226,7 @@ export interface WorkspaceBootstrapRejected {
 
 export type WorkspaceBootstrapResult = WorkspaceBootstrapReady | WorkspaceBootstrapRejected;
 
-const harnessAdapterHosts = new WeakMap<Workspace, WorkspaceHarnessAdapterHost>();
+const harnessInteractionOwners = new WeakMap<Workspace, HarnessInteractionOwner>();
 const gitDirectories = new WeakMap<Workspace, string>();
 
 class OpenWorkspace implements Workspace {
@@ -332,7 +332,7 @@ class OpenWorkspace implements Workspace {
             ...(internal.harnessNow === undefined ? {} : { now: internal.harnessNow }),
           });
     if (this.#harnessInteraction !== undefined) {
-      harnessAdapterHosts.set(this, this.#harnessInteraction.adapterHost);
+      harnessInteractionOwners.set(this, this.#harnessInteraction);
     }
   }
 
@@ -460,6 +460,8 @@ export function workspaceGitDirectory(workspace: Workspace): string | undefined 
 export interface RuntimeWorkspaceAssembly {
   readonly workspace: Workspace;
   readonly harnessAdapters: WorkspaceHarnessAdapterHost;
+  /** Resolves work a previous runtime left in flight; run before Adapters attach. */
+  readonly recoverLostInvocations: () => Promise<void>;
 }
 
 /** Internal deterministic fault seam; absent from the package Interface. */
@@ -489,11 +491,15 @@ export function openRuntimeWorkspace(
   gitDirectory?: string,
 ): RuntimeWorkspaceAssembly {
   const workspace = new OpenWorkspace(workspaceIdentity, canonicalCheckout, state, internal, gitDirectory);
-  const harnessAdapters = harnessAdapterHosts.get(workspace);
-  if (harnessAdapters === undefined) {
+  const harnessInteraction = harnessInteractionOwners.get(workspace);
+  if (harnessInteraction === undefined) {
     throw new TypeError('Harness Adapter hosting requires the runtime-owned writer');
   }
-  return { workspace, harnessAdapters };
+  return {
+    workspace,
+    harnessAdapters: harnessInteraction.adapterHost,
+    recoverLostInvocations: async () => await harnessInteraction.recoverLostInvocations(),
+  };
 }
 
 /**

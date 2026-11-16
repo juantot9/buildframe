@@ -2612,6 +2612,9 @@ describe('Direct Harness Interaction path', () => {
     // Durable recall after owner restart must ignore caller insertion order and
     // precede dispatch, current-version checks, or any second durable effect.
     owner = await restart(owner, created.checkout);
+    // Restart records the lost in-flight turn once; recall must add nothing after it.
+    const afterRestart = (await owner.workspace.read({ kind: 'workspace.home', offset: 0, limit: 64 })).stateVersion;
+    expect(afterRestart).toBe(asked.stateVersion + 2);
     const reattached = await establish(owner);
     const reorderedAsk = reverseKeyOrder({
       ...askCommand,
@@ -2632,7 +2635,7 @@ describe('Direct Harness Interaction path', () => {
       offset: 0,
       limit: 64,
     });
-    expect(afterReplay.stateVersion).toBe(asked.stateVersion + 1);
+    expect(afterReplay.stateVersion).toBe(afterRestart);
     expect(afterReplay.invocations).toHaveLength(1);
     expect(afterReplay.invocations[0]?.interruptionIntentIdentities).toEqual([interrupted.interruptionIntentIdentity]);
     const afterQuestions = await owner.workspace.read({
@@ -2649,13 +2652,21 @@ describe('Direct Harness Interaction path', () => {
     const missing = await owner.workspace.execute({
       kind: 'harness.invocation.interruption.request',
       commandIdentity: 'interruption-missing-invocation',
-      expectedStateVersion: interrupted.stateVersion,
+      expectedStateVersion: afterRestart,
       invocationIdentity: `hin_${'0'.repeat(64)}` as HarnessInvocationIdentity,
     });
     expect(missing).toMatchObject({
       kind: 'harness.command.rejected',
       reason: 'invocation-not-found',
-      stateVersion: interrupted.stateVersion,
+      stateVersion: afterRestart,
+    });
+    // The turn's connection ended with the old runtime: its outcome is unknown,
+    // late evidence cannot rewrite that, and there is nothing left to interrupt.
+    expect(afterReplay.invocations[0]).toMatchObject({
+      invocationIdentity: asked.invocationIdentity,
+      status: 'unresolved',
+      terminalReason: 'attachment-lost',
+      interruptionIntentIdentities: [interrupted.interruptionIntentIdentity],
     });
     expect(
       await reattached.emit({
@@ -2664,46 +2675,18 @@ describe('Direct Harness Interaction path', () => {
         attachmentIdentity: reattached.attachment.attachmentIdentity,
         invocationIdentity: asked.invocationIdentity,
       }),
-    ).toMatchObject({
-      status: 'applied',
-      stateVersion: interrupted.stateVersion + 1,
-    });
-    expect(
-      await reattached.emit({
-        kind: 'harness.invocation.terminal-observed',
-        evidenceIdentity: 'interruption-terminal',
-        attachmentIdentity: reattached.attachment.attachmentIdentity,
-        invocationIdentity: asked.invocationIdentity,
-        outcome: 'interrupted',
-        reason: 'interruption-observed',
-      }),
-    ).toMatchObject({
-      status: 'applied',
-      stateVersion: interrupted.stateVersion + 2,
-    });
-    const terminal = await owner.workspace.read({
-      kind: 'harness.review-interaction',
-      reviewIdentity: started.reviewIdentity,
-      offset: 0,
-      limit: 64,
-    });
-    expect(terminal.invocations[0]).toMatchObject({
-      invocationIdentity: asked.invocationIdentity,
-      status: 'interrupted',
-      interruptionIntentIdentities: [interrupted.interruptionIntentIdentity],
-      terminalReason: 'interruption-observed',
-    });
+    ).toMatchObject({ status: 'refused', reason: 'illegal-evidence-order' });
     expect(
       await owner.workspace.execute({
         kind: 'harness.invocation.interruption.request',
         commandIdentity: 'interruption-terminal-invocation',
-        expectedStateVersion: terminal.stateVersion,
+        expectedStateVersion: afterRestart,
         invocationIdentity: asked.invocationIdentity,
       }),
     ).toMatchObject({
       kind: 'harness.command.rejected',
       reason: 'invocation-not-interruptible',
-      stateVersion: terminal.stateVersion,
+      stateVersion: afterRestart,
     });
     expect(adapter.directives).toHaveLength(2);
     expect(reattached.directives).toHaveLength(0);
@@ -2789,6 +2772,9 @@ describe('Direct Harness Interaction path', () => {
     });
 
     owner = await restart(owner, created.checkout);
+    // Restart records the lost in-flight turn once; recall must add nothing after it.
+    const afterRestart = (await owner.workspace.read({ kind: 'workspace.home', offset: 0, limit: 64 })).stateVersion;
+    expect(afterRestart).toBe(committed.stateVersion + 1);
     const reattached = await establish(owner);
     const reordered = reverseKeyOrder(command);
     expect(Object.keys(reordered)).toEqual(Object.keys(command).reverse());
@@ -2801,19 +2787,19 @@ describe('Direct Harness Interaction path', () => {
           limit: 64,
         })
       ).stateVersion,
-    ).toBe(committed.stateVersion);
+    ).toBe(afterRestart);
     const interaction = await owner.workspace.read({
       kind: 'harness.review-interaction',
       reviewIdentity: started.reviewIdentity,
       offset: 0,
       limit: 64,
     });
-    expect(interaction.stateVersion).toBe(committed.stateVersion);
+    expect(interaction.stateVersion).toBe(afterRestart);
     expect(interaction.invocations).toEqual([
       expect.objectContaining({
         invocationIdentity: committed.invocationIdentity,
         handoffIdentity: committed.handoffIdentity,
-        status: 'awaiting-start',
+        status: 'unresolved',
       }),
     ]);
     expect(adapter.directives).toHaveLength(1);
@@ -3455,7 +3441,7 @@ describe('Direct Harness Interaction path', () => {
     expect(adapter.directives).toHaveLength(1);
   });
 
-  it('reconstructs an awaiting-start Ask after restart without replay', async () => {
+  it('records an awaiting-start Ask as unknown after restart, without replay', async () => {
     const created = await fixture();
     let owner = await open(created.checkout);
     const adapter = await establish(owner);
@@ -3499,8 +3485,10 @@ describe('Direct Harness Interaction path', () => {
       invocations: [
         {
           invocationIdentity: asked.invocationIdentity,
-          status: 'awaiting-start',
-          missingStartEvidence: true,
+          // No connection survives a runtime, so the start can no longer be observed.
+          status: 'unresolved',
+          terminalReason: 'attachment-lost',
+          missingStartEvidence: false,
         },
       ],
     });
@@ -3515,6 +3503,86 @@ describe('Direct Harness Interaction path', () => {
       status: 'established',
     });
     expect(reattached.directives).toHaveLength(0);
+  });
+
+  it('lets a session Send again after a crash left its Message waiting, behind the unknown-turn gate', async () => {
+    const created = await fixture();
+    let owner = await open(created.checkout);
+    const adapter = await establish(owner);
+    const review = await startMessageReview(owner.workspace, 'crash-message-review');
+    const sent = await sendMessage(owner.workspace, review, 'crash-message-1');
+    expect(adapter.directives).toHaveLength(1);
+
+    // The runtime dies with no orderly disconnect, so nothing reported the lost turn.
+    owner = await restart(owner, created.checkout);
+    const interaction = await owner.workspace.read({
+      kind: 'harness.review-interaction',
+      reviewIdentity: review.reviewIdentity,
+      offset: 0,
+      limit: 64,
+    });
+    expect(interaction).toMatchObject({
+      invocations: [
+        { invocationIdentity: sent.invocationIdentity, status: 'unresolved', terminalReason: 'attachment-lost' },
+      ],
+    });
+
+    const identity = await owner.workspace.read({ kind: 'workspace.identity' });
+    const reattached = new ScriptedAdapter({
+      workspaceIdentity: identity.workspaceIdentity,
+      canonicalCheckout: identity.canonicalCheckout,
+      attachmentIdentity: adapter.attachment.attachmentIdentity,
+      evidenceIdentity: adapter.attachment.evidenceIdentity,
+    });
+    expect(await owner.harnessAdapters.establish(reattached)).toMatchObject({ status: 'established' });
+    expect(reattached.directives).toHaveLength(0);
+    const inspection = await owner.workspace.read({
+      kind: 'harness.review-message.inspect-default',
+      reviewIdentity: review.reviewIdentity,
+      originReviewBasisIdentity: review.liveBasisIdentity as never,
+      location: MESSAGE_LOCATION,
+      body: 'Still there?',
+    });
+    expect(inspection.status).toBe('available');
+    if (inspection.status !== 'available') return;
+    expect(inspection.commitment.requirements.length).toBeGreaterThan(0);
+    await sendMessage(owner.workspace, review, 'crash-message-2');
+    expect(reattached.directives).toHaveLength(1);
+  });
+
+  it('records a Message dispatch the session proved it never ran as rejected, so the next Send is free', async () => {
+    const created = await fixture();
+    const owner = await open(created.checkout);
+    const adapter = await establish(owner);
+    adapter.observations.push({
+      status: 'proven-not-dispatched',
+      evidenceIdentity: 'scripted-message-not-dispatched',
+      reason: 'harness-rejected',
+    });
+    const review = await startMessageReview(owner.workspace, 'refused-message-review');
+    const sent = await sendMessage(owner.workspace, review, 'refused-message-1');
+    await vi.waitFor(async () => {
+      expect(
+        await owner.workspace.read({
+          kind: 'harness.review-interaction',
+          reviewIdentity: review.reviewIdentity,
+          offset: 0,
+          limit: 64,
+        }),
+      ).toMatchObject({
+        invocations: [
+          { invocationIdentity: sent.invocationIdentity, status: 'rejected', terminalReason: 'harness-rejected' },
+        ],
+      });
+    });
+    const inspection = await owner.workspace.read({
+      kind: 'harness.review-message.inspect-default',
+      reviewIdentity: review.reviewIdentity,
+      originReviewBasisIdentity: review.liveBasisIdentity as never,
+      location: MESSAGE_LOCATION,
+      body: 'Try again?',
+    });
+    expect(inspection).toMatchObject({ status: 'available', commitment: { requirements: [] } });
   });
 
   it('reports a timed-out Ask as unknown, emits no directive, and recovers without replay', async () => {
