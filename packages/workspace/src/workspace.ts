@@ -254,6 +254,7 @@ class OpenWorkspace implements Workspace {
       workspaceIdentity,
       canonicalCheckout,
       ...(gitDirectory === undefined ? {} : { gitDirectory }),
+      ...(internal.evidenceLimits === undefined ? {} : { limits: internal.evidenceLimits }),
     });
     if (gitDirectory !== undefined) gitDirectories.set(this, gitDirectory);
     this.#legacyReviewImport =
@@ -480,6 +481,8 @@ export interface RuntimeWorkspaceInternalOptions {
   readonly liveBackgroundFallbackVerificationMilliseconds?: number;
   /** Private deterministic observation seam for bounded Projection cache tests. */
   readonly onSnapshotEvidenceIdentityCacheSize?: (size: number) => void;
+  /** Private small-limit seam, so scale contracts need no huge repositories. */
+  readonly evidenceLimits?: Partial<import('./workspaceEvidence/contracts.js').WorkspaceEvidenceLimits>;
 }
 
 /** State-private assembly used only by the launcher-owned runtime lifetime. */

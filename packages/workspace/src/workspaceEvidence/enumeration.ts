@@ -55,8 +55,15 @@ export async function inspect(context: GitInspectionContext, limits: WorkspaceEv
     });
   }
   const entries = parseStatus(statusResult.stdout, limits.maxManifestFiles);
-  const index = await enumerateIndex(context, limits);
   const affectedPaths = new Set(entries.map(entry => entry.path.toString('hex')));
+  // Capture needs index facts only for changed paths. Listing the whole index
+  // here capped repositories by tracked files instead of by changes.
+  const index =
+    (await enumerateIndexForPaths(
+      context,
+      limits,
+      entries.map(entry => entry.path),
+    )) ?? (await enumerateIndex(context, limits));
   const sparseCanonical = sparseAbsenceCanonical(index, affectedPaths);
   const fingerprint = sha256(
     Buffer.concat([Buffer.from(`${format}\0${head ?? 'unborn'}\0`, 'ascii'), statusResult.stdout, sparseCanonical]),
@@ -266,6 +273,71 @@ export async function enumerateIndex(
     canonical: indexCanonical(records),
     entryCount: paths.size,
     unmergedPaths,
+  };
+}
+
+const PATHSPEC_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * Index records for exactly these paths, listed in bounded argument chunks so
+ * the cost follows the change, not the repository. Returns undefined when a
+ * path cannot travel as a command-line argument (not valid UTF-8); the caller
+ * then lists the whole index.
+ */
+async function enumerateIndexForPaths(
+  context: GitInspectionContext,
+  limits: WorkspaceEvidenceLimits,
+  paths: readonly Buffer[],
+): Promise<IndexEnumeration | undefined> {
+  const wanted = new Set<string>();
+  const chunks: string[][] = [];
+  let chunk: string[] = [];
+  let chunkBytes = 0;
+  for (const pathBytes of paths) {
+    const key = pathBytes.toString('hex');
+    if (wanted.has(key)) continue;
+    const text = pathBytes.toString('utf8');
+    if (!Buffer.from(text, 'utf8').equals(pathBytes)) return undefined;
+    wanted.add(key);
+    if (chunk.length > 0 && chunkBytes + pathBytes.byteLength > PATHSPEC_CHUNK_BYTES) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkBytes = 0;
+    }
+    chunk.push(text);
+    chunkBytes += pathBytes.byteLength + 1;
+  }
+  if (chunk.length > 0) chunks.push(chunk);
+
+  const byPathAndStage = new Map<string, IndexRecord>();
+  for (const pathspecs of chunks) {
+    const result = await runGit(
+      context,
+      ['--literal-pathspecs', 'ls-files', '--stage', '-v', '-z', '--', ...pathspecs],
+      {
+        maxStdoutBytes: limits.maxManifestBytes,
+        allowedExitCodes: [0, 1, 128],
+      },
+    );
+    if (result.exitCode !== 0) {
+      throw new ComparisonResolutionError('index-unavailable');
+    }
+    // A literal pathspec also matches entries below a directory of that name;
+    // keep only the exact changed paths.
+    for (const record of parseIndexStage(result.stdout, limits.maxManifestBytes)) {
+      const key = record.path.toString('hex');
+      if (wanted.has(key)) byPathAndStage.set(`${key}:${record.stage}`, record);
+    }
+  }
+  const records = [...byPathAndStage.values()].sort((left, right) => {
+    const byPath = Buffer.compare(left.path, right.path);
+    return byPath !== 0 ? byPath : left.stage - right.stage;
+  });
+  return {
+    records,
+    canonical: indexCanonical(records),
+    entryCount: new Set(records.map(record => record.path.toString('hex'))).size,
+    unmergedPaths: new Set(records.filter(record => record.stage !== 0).map(record => record.path.toString('hex'))),
   };
 }
 
