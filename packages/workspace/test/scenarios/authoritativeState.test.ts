@@ -580,6 +580,33 @@ describe('Authoritative State transaction contract', () => {
 });
 
 describe('Authoritative State generation and recovery contract', () => {
+  it('adopts the empty first generation left by a crash before CURRENT was written', async () => {
+    const directory = await fixture();
+    await (await openState(directory)).close();
+    const { name } = await activeGeneration(directory);
+    await rm(path.join(stateRoot(directory), 'CURRENT'));
+
+    const recovered = await openState(directory);
+    expect((await activeGeneration(directory)).name).toBe(name);
+    await expect(
+      recovered.commit(
+        immutableCommit('command-after-recovery', 0, 'record-after-recovery', new Uint8Array([1]), new Uint8Array([2])),
+      ),
+    ).resolves.toMatchObject({ stateVersion: 1 });
+  });
+
+  it('still refuses a lone generation without CURRENT once it holds records', async () => {
+    const directory = await fixture();
+    const state = await openState(directory);
+    await state.commit(immutableCommit('command-kept', 0, 'record-kept', new Uint8Array([1]), new Uint8Array([2])));
+    await state.close();
+    await rm(path.join(stateRoot(directory), 'CURRENT'));
+
+    await expect(openState(directory)).rejects.toEqual(
+      expect.objectContaining<Partial<AuthoritativeStateError>>({ code: 'state-invalid' }),
+    );
+  });
+
   it('migrates the immutable format-1 golden generation before switching authority', async () => {
     const directory = await fixture();
     await installGoldenFormat1(directory);

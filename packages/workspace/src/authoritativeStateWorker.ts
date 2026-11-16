@@ -1076,6 +1076,41 @@ function authoritativeGenerationEntries(stateRoot: string): readonly string[] {
     .sort();
 }
 
+/**
+ * First creation renames the empty generation into place before writing
+ * CURRENT. A crash between the two leaves exactly that generation: still empty,
+ * first, and owned by this workspace. Anything else stays refused.
+ */
+function isInterruptedInitialGeneration(stateRoot: string, name: string): boolean {
+  if (!name.startsWith('generation-0001-')) return false;
+  let database: DatabaseSync | undefined;
+  try {
+    database = new DatabaseSync(path.join(stateRoot, name), {
+      readOnly: true,
+      enableForeignKeyConstraints: true,
+      timeout: 0,
+    });
+    configureReadOnlyDatabase(database);
+    checkContainer(database, true);
+    if (databaseFormatVersion(database) !== STORE_FORMAT_VERSION) return false;
+    const metadata = readStoreMetadata(database, STORE_FORMAT_VERSION);
+    const records = rowRecord(database.prepare('SELECT COUNT(*) AS count FROM records').get());
+    const commands = rowRecord(database.prepare('SELECT COUNT(*) AS count FROM command_ledger').get());
+    return (
+      metadata.formatVersion === STORE_FORMAT_VERSION &&
+      metadata.workspaceIdentity === data.workspaceIdentity &&
+      metadata.stateVersion === 0 &&
+      metadata.generationNumber === 1 &&
+      records?.count === 0 &&
+      commands?.count === 0
+    );
+  } catch {
+    return false;
+  } finally {
+    database?.close();
+  }
+}
+
 function startDatabases(): void {
   if (!WORKSPACE_ID_PATTERN.test(data.workspaceIdentity)) {
     throw new WorkerProblem('state-invalid');
@@ -1104,6 +1139,8 @@ function startDatabases(): void {
         throw new WorkerProblem('state-invalid');
       }
       installCurrent(stateRoot, generations[0], false);
+    } else if (generations.length === 1 && isInterruptedInitialGeneration(stateRoot, generations[0]!)) {
+      installCurrent(stateRoot, generations[0]!, false);
     } else {
       throw new WorkerProblem('state-invalid');
     }
