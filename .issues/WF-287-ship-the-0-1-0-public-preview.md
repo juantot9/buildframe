@@ -255,14 +255,39 @@ Nothing else from WF-050's candidate gate list is required for 0.1.0.
     then `npm publish` the same tarballs (as `latest`) and push the commit
     the plugin marketplace serves. Date the CHANGELOG entry first.
 
-    Tarballs repacked 2026-11-16 from ef3bbdf, after two display fixes
-    (changed-line tints on the terminal background, a steady Configuration
-    dialog); the first pack, from 42f37ff on 2026-11-14, is superseded and the
-    gate's week restarts on this one. SHA-256:
+    Tarballs repacked 2026-11-16 from 22d9ff1, after the 2026-11-16 codebase
+    health audit's correctness fixes (docs/audit/codebase-health-2026-11-16.md):
+    - repositories with harmless local Git settings such as husky's
+      `core.hooksPath` open (WS-01), and `doctor` never retires another
+      install's runtime (RT-01), in 63b8ecd;
+    - connecting never runs out after 64 sessions, and the app loads every
+      Message of a Review (HI-01, APP-01), in d372d5d;
+    - cached Diffs can't show old code under a current label (PERF-01), in
+      299faf5;
+    - large unchanged files load in pieces instead of disconnecting the app
+      (PERF-02), in 271043d;
+    - an interrupted first State creation recovers (ST-01), in b9b1d40;
+    - a crash right after a Send leaves the Message unknown, not waiting
+      forever (HI-02), in ed3f6a4;
+    - a frozen copy of the 0.1.0 State format is under test (ST-02), in
+      22d9ff1.
+
+    The Pi tarball changed too: it bundles the Git inspection fixed in
+    63b8ecd. The ef3bbdf pack (CLI `3162be64…`, Pi `f3ed23d8…`) and the
+    first pack, from 42f37ff on 2026-11-14, are superseded, and the gate's
+    week restarts on this one. Two packs were byte-identical. Before packing,
+    `pnpm verify` (590 tests) and `risk:state`, `risk:runtime`, `risk:pi`
+    (Pi 1.5.0) and `risk:dogfood` passed. SHA-256:
     - `buildframe-cli-0.1.0.tgz`
-      `3162be64ce57604c6a2bb8f8d17ec6488083c90187fc9f0dfa46cfcabebb0fbd`
+      `d15ccea3dce9c14f974742d4f46813ae772aad367d5a954e775130ea25040287`
     - `buildframe-pi-0.1.0.tgz`
-      `f3ed23d86195047b28d80cae7786235ad3a1ec15c3de2a722124903d94128722`
+      `9a47f878c6ad0bc4bb5da47ae527f8255a1d20eb8a1d75cb245948a80a0edf2b`
+
+    A scratch global install of this CLI tarball from registry.npmjs.org took
+    7s and gave `buildframe`, `bframe` and `buildframe-claude-helper`;
+    `--version` (0.1.0), `--help` and `doctor --json` (`ok`) ran in an
+    isolated repository and state folder. Pass `--registry` for that check:
+    the owner's company mirror stalls the install.
 
     A scratch global install from npmjs.com took 14s and gave `buildframe`,
     `bframe` and `buildframe-claude-helper`; `--version`, `--help` and
