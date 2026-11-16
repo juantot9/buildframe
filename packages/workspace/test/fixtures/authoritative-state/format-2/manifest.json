@@ -1,0 +1,43 @@
+{
+  "fixtureFormat": 2,
+  "storeFormatVersion": 2,
+  "producedBy": "BuildFrame 0.1.0",
+  "workspaceIdentity": "wsp_a1884f21-799e-4de2-b453-6291e2b15ad9",
+  "currentGeneration": "generation-0001-9bb89ae3-6a8d-4b2d-aeb9-bb9863fe6e98.sqlite",
+  "generationSha256": "c052fc510d0d5d763a52c793941d77234d87337dfda0b659e294ea39d59729a9",
+  "stateVersion": 12,
+  "reviewIdentity": "rev_25e7787a11ad0314c6432550b38cd8c837313e87aac441f6c840a597cd1eef80",
+  "sessions": {
+    "pi": {
+      "attachmentIdentity": "att_288c13b3f254c998bba8414548e12622ae50af8e903936437ce8203d65d8d652",
+      "hostVersion": "0.80.6"
+    },
+    "claude": {
+      "attachmentIdentity": "att_34e075506e539fdf6bcd9570ccb08060f34f9c44bf57c932b3db5447a1d70fce",
+      "hostVersion": "2.1.310"
+    }
+  },
+  "messages": [
+    {
+      "reviewMessageIdentity": "rmg_e60210f470455a17f88a7a8757433a8ccf7bb13cf63ab305547e91f6462723e5",
+      "invocationIdentity": "hin_ab2dc8d18b5bcd05dba445b990fc1e02feb30e338ad21edb98b6647d00219af1",
+      "attachmentIdentity": "att_288c13b3f254c998bba8414548e12622ae50af8e903936437ce8203d65d8d652",
+      "status": "ended-normally",
+      "response": "It now says \"after\"; the revision keeps the second line unchanged.",
+      "changeObservation": "forked"
+    },
+    {
+      "reviewMessageIdentity": "rmg_aa01a81220111c4aaead588145c5f787e5bd4e0d3b20b8b4ae44670393017dfc",
+      "invocationIdentity": "hin_52b705b4ae69f22a416b42ab3056d26b0f85b2770cebfc3d3c93fc77aac34a88",
+      "attachmentIdentity": "att_288c13b3f254c998bba8414548e12622ae50af8e903936437ce8203d65d8d652",
+      "status": "unresolved"
+    },
+    {
+      "reviewMessageIdentity": "rmg_91f7215c16769c0312eb9469957bb2e86d5c3d0bbc8765a885862bc93cba27e8",
+      "invocationIdentity": "hin_a0ca708719c54962768fa7782f51517197e19d30211a9789dd3b783e8e4da032",
+      "attachmentIdentity": "att_34e075506e539fdf6bcd9570ccb08060f34f9c44bf57c932b3db5447a1d70fce",
+      "status": "ended-normally",
+      "response": "One line changed twice; nothing else in the Review changed."
+    }
+  ]
+}

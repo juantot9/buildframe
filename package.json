@@ -21,6 +21,7 @@
     "risk:dogfood": "pnpm check:node && pnpm --filter @buildframe/workspace --filter @buildframe/local-runtime --filter @buildframe/pi-adapter-source --filter @buildframe/app-source -r build && node --experimental-ffi scripts/probe-dogfood.mjs",
     "dogfood": "pnpm check:node && pnpm build && pnpm --filter @buildframe/app-source dogfood",
     "fixture:state": "node scripts/generate-authoritative-state-golden.mjs",
+    "fixture:state:format-2": "pnpm build && node --experimental-ffi scripts/generate-authoritative-state-format-2.mjs",
     "lint": "oxlint",
     "format:check": "oxfmt --check .",
     "format": "oxfmt .",
