@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, rm } from 'node:fs/promises';
-import { createConnection } from 'node:net';
+import { createConnection, type Server } from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
+import { isMainThread } from 'node:worker_threads';
 
 import type { WorkspaceIdentity } from '@buildframe/workspace';
 
@@ -211,6 +212,40 @@ export async function removeStaleRuntimeEndpoint(location: RuntimeLocation): Pro
 
   await removeOwnedEndpoint(location, owned);
   return 'removed';
+}
+
+/**
+ * Binds the endpoint already owner-private. Without this the socket exists
+ * with the default umask until `secureBoundEndpoint` tightens it, and a
+ * connector checking in that gap sees an insecure runtime and stops retrying.
+ * A Unix socket binds synchronously inside `listen()`, so the narrowed process
+ * umask is restored before any other file is created.
+ */
+export async function listenPrivateEndpoint(server: Server, endpoint: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error): void => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+    const onListening = (): void => {
+      server.off('error', onError);
+      resolve();
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    // Worker threads cannot change the umask; there the bind keeps the
+    // default mode and secureBoundEndpoint tightens it, as before.
+    if (!isMainThread) {
+      server.listen(endpoint);
+      return;
+    }
+    const previous = process.umask(0o777 & ~PRIVATE_SOCKET_MODE);
+    try {
+      server.listen(endpoint);
+    } finally {
+      process.umask(previous);
+    }
+  });
 }
 
 export async function secureBoundEndpoint(location: RuntimeLocation): Promise<OwnedEndpoint> {

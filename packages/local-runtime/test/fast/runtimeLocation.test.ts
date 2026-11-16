@@ -1,6 +1,9 @@
 import { chmod, lstat, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -67,5 +70,20 @@ describe('the shared fallback runtime base', () => {
     await expect(validatePrivateRuntimeEndpoint(location)).rejects.toMatchObject({
       code: 'runtime-directory-insecure',
     });
+  });
+});
+
+describe('the runtime endpoint', () => {
+  it('is owner-private from the moment it exists, so a connector never sees it insecure', async () => {
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [
+        '--conditions=development',
+        '--import=tsx',
+        fileURLToPath(new URL('./privateEndpointProcess.ts', import.meta.url)),
+      ],
+      { cwd: fileURLToPath(new URL('../../../../', import.meta.url)), encoding: 'utf8', timeout: 30_000 },
+    );
+    expect(JSON.parse(stdout)).toEqual({ mode: 0o600, validation: 'valid', umaskAfter: 0o022 });
   });
 });

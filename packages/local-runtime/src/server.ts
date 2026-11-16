@@ -53,6 +53,7 @@ import {
 } from './protocol.js';
 import {
   RuntimeLocationProblem,
+  listenPrivateEndpoint,
   preparePrivateRuntimeDirectory,
   removeOwnedEndpoint,
   runtimeLocationForWorkspace,
@@ -807,22 +808,6 @@ function mapLocationProblem(error: RuntimeLocationProblem): LocalRuntimeServerEr
   return new LocalRuntimeServerError('runtime-directory-insecure');
 }
 
-async function listen(server: Server, endpoint: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error): void => {
-      server.off('listening', onListening);
-      reject(error);
-    };
-    const onListening = (): void => {
-      server.off('error', onError);
-      resolve();
-    };
-    server.once('error', onError);
-    server.once('listening', onListening);
-    server.listen(endpoint);
-  });
-}
-
 /**
  * Starts only the semantic IPC server. P08 owns process convergence, writer
  * readiness, idle policy, and replacement after failure.
@@ -889,7 +874,7 @@ export async function startLocalRuntimeServer(request: StartLocalRuntimeServerRe
   });
 
   try {
-    await listen(server, location.endpoint);
+    await listenPrivateEndpoint(server, location.endpoint);
   } catch (error) {
     const code = error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : undefined;
     throw new LocalRuntimeServerError(code === 'EADDRINUSE' ? 'runtime-already-active' : 'runtime-listen-failed');
