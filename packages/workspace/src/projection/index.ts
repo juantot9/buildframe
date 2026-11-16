@@ -344,6 +344,8 @@ export interface ProjectionOptions {
   readonly liveBackgroundFallbackVerificationMilliseconds?: number;
   /** Private deterministic observation seam for the bounded cache regression. */
   readonly onSnapshotEvidenceIdentityCacheSize?: (size: number) => void;
+  /** Private observation seam: counts full live recaptures. */
+  readonly onLiveChangesCapture?: () => void;
 }
 
 /** Read-only deep Projection Module behind Workspace.read and subscribe. */
@@ -392,6 +394,7 @@ export class WorkspaceProjection {
   /** What each answered Message's Response changed; immutable once observed. */
   readonly #stepChangeSets = new Map<string, Promise<StepChangeSet>>();
   readonly #onSnapshotEvidenceIdentityCacheSize: ((size: number) => void) | undefined;
+  readonly #onLiveChangesCapture: (() => void) | undefined;
   #unsubscribeFromEvidenceInvalidation: (() => void) | undefined;
   #liveFallbackTimer: ReturnType<typeof setInterval> | undefined;
   #liveInvalidationTimer: ReturnType<typeof setTimeout> | undefined;
@@ -415,6 +418,7 @@ export class WorkspaceProjection {
     }
     this.#liveBackgroundFallbackVerificationMilliseconds = liveBackgroundFallbackVerificationMilliseconds;
     this.#onSnapshotEvidenceIdentityCacheSize = options.onSnapshotEvidenceIdentityCacheSize;
+    this.#onLiveChangesCapture = options.onLiveChangesCapture;
   }
 
   async read<Request extends WorkspaceProjectionViewRequest>(
@@ -2467,6 +2471,7 @@ export class WorkspaceProjection {
   }
 
   async #captureLiveChanges(reviewIdentity: ReviewIdentity): Promise<LiveCaptureEntry | undefined> {
+    this.#onLiveChangesCapture?.();
     const captured = await this.#snapshotTransition.capture({
       kind: 'current-changes',
     });
@@ -2531,7 +2536,7 @@ export class WorkspaceProjection {
     const retained = [...this.#liveCaptures.values()]
       .reverse()
       .find(candidate => candidate.reviewIdentity === reviewIdentity);
-    if (retained !== undefined && (await this.#snapshotTransition.verify(retained.captured))) {
+    if (retained !== undefined && (await this.#snapshotTransition.stillDescribes(retained.captured))) {
       const key = `${reviewIdentity}:${retained.liveChangesIdentity}`;
       this.#liveCaptures.delete(key);
       this.#liveCaptures.set(key, retained);

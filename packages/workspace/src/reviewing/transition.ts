@@ -1027,6 +1027,21 @@ export class ReviewSnapshotTransition {
     };
   }
 
+  /**
+   * Whether a retained live capture still describes the repository: current,
+   * or incomplete with nothing changed since. Recapturing unchanged incomplete
+   * evidence would reproduce the same limitation at full cost.
+   */
+  async stillDescribes(captured: CapturedReviewSnapshot): Promise<boolean> {
+    if (captured.capture.kind !== 'workspace.current-changes.capture') return await this.verify(captured);
+    const verified = await this.#evidence.read({
+      kind: 'workspace.current-changes.verify',
+      evidenceIdentity: captured.capture.evidenceIdentity,
+    });
+    const { state, reason } = verified.verification;
+    return state === 'current' || (state === 'unverified' && reason === 'capture-incomplete');
+  }
+
   async verify(captured: CapturedReviewSnapshot): Promise<boolean> {
     if (captured.capture.kind === 'workspace.current-changes.capture') {
       const verified = await this.#evidence.read({

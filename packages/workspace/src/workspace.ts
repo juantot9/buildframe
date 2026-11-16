@@ -301,6 +301,9 @@ class OpenWorkspace implements Workspace {
               : {
                   onSnapshotEvidenceIdentityCacheSize: internal.onSnapshotEvidenceIdentityCacheSize,
                 }),
+            ...(internal.onLiveChangesCapture === undefined
+              ? {}
+              : { onLiveChangesCapture: internal.onLiveChangesCapture }),
           });
     this.#reviewing =
       state === undefined || this.#legacyReviewImport === undefined
@@ -481,6 +484,8 @@ export interface RuntimeWorkspaceInternalOptions {
   readonly liveBackgroundFallbackVerificationMilliseconds?: number;
   /** Private deterministic observation seam for bounded Projection cache tests. */
   readonly onSnapshotEvidenceIdentityCacheSize?: (size: number) => void;
+  /** Private observation seam: counts full live recaptures. */
+  readonly onLiveChangesCapture?: () => void;
   /** Private small-limit seam, so scale contracts need no huge repositories. */
   readonly evidenceLimits?: Partial<import('./workspaceEvidence/contracts.js').WorkspaceEvidenceLimits>;
 }

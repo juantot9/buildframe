@@ -1038,14 +1038,6 @@ export class WorkspaceEvidence {
         verification: verification('unverified', 'inspection-failed'),
       });
     }
-    if (!capture.baselineComplete) {
-      return deepFreeze({
-        kind: 'workspace.current-changes.verify',
-        evidenceIdentity: request.evidenceIdentity,
-        verification: verification('unverified', 'capture-incomplete'),
-      });
-    }
-
     let current: Inspection;
     let inspectabilityChanged = false;
     try {
@@ -1105,7 +1097,11 @@ export class WorkspaceEvidence {
       evidenceIdentity: request.evidenceIdentity,
       verification:
         working === 'same'
-          ? verification('current', 'captured-coherently')
+          ? // Incomplete evidence is never current; unchanged incomplete
+            // evidence keeps saying why, so callers need not recapture it.
+            capture.baselineComplete
+            ? verification('current', 'captured-coherently')
+            : verification('unverified', 'capture-incomplete')
           : working === 'different'
             ? verification('stale', 'content-changed')
             : verification('unverified', 'inspection-failed'),

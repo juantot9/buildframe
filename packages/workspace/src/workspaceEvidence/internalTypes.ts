@@ -235,6 +235,12 @@ export interface WorkingBaseline {
   readonly specialEntryKind?: EvidenceSpecialEntryKind;
   readonly expectedBytes: number | null;
   readonly digest?: string;
+  /**
+   * File-system facts for a working file this capture could not digest. A
+   * changed witness means the uncaptured file changed; equal facts mean it is
+   * still the file the incomplete capture described.
+   */
+  readonly witness?: string;
 }
 
 export interface CapturedEvidence {

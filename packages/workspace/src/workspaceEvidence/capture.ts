@@ -655,9 +655,51 @@ export async function captureWorkingSides(
   readonly retry: boolean;
   readonly remainingVerificationBytes: number;
 }> {
-  let remainingVerification = limits.maxVerifiedContentBytes;
   const baselines: WorkingBaseline[] = [];
+  const result = await digestWorkingSides(drafts, limits, baselines);
+  if (result.retry || result.complete) return { ...result, baselines };
+  // In an incomplete capture every working side without a digest gets a
+  // witness, so verification can tell "unchanged" from "changed" without
+  // reading what the capture could not.
+  const baselined = new Set(baselines.map(baseline => baseline.fileIdentity));
+  for (const draft of drafts) {
+    const side = draft.newSide;
+    if (side?.workingPath === undefined || baselined.has(draft.fileIdentity)) continue;
+    baselines.push({
+      fileIdentity: draft.fileIdentity,
+      path: Buffer.from(side.workingPath),
+      kind: side.kind,
+      gitMode: side.gitMode,
+      expectedBytes: null,
+      witness: await statWitness(side.workingPath),
+    });
+  }
+  return { ...result, baselines };
+}
+
+/** Device, inode, size, mode and both timestamps; any rewrite, chmod or replacement changes it. */
+async function statWitness(filename: Buffer): Promise<string> {
+  try {
+    const status = await lstat(filename, { bigint: true });
+    return [status.dev, status.ino, status.size, status.mode, status.mtimeNs, status.ctimeNs].join(':');
+  } catch (cause) {
+    return `unreadable:${cause instanceof Error ? ((cause as NodeJS.ErrnoException).code ?? 'error') : 'error'}`;
+  }
+}
+
+/** Reads and digests every working side within the verification budgets, appending its baseline. */
+async function digestWorkingSides(
+  drafts: readonly FileDraft[],
+  limits: WorkspaceEvidenceLimits,
+  baselines: WorkingBaseline[],
+): Promise<{ readonly complete: boolean; readonly retry: boolean; readonly remainingVerificationBytes: number }> {
+  let remainingVerification = limits.maxVerifiedContentBytes;
   let complete = true;
+  const finish = (retry: boolean) => ({
+    complete: complete && !retry,
+    retry,
+    remainingVerificationBytes: remainingVerification,
+  });
   for (const draft of drafts) {
     const side = draft.newSide;
     if (side === undefined) continue;
@@ -709,12 +751,7 @@ export async function captureWorkingSides(
     remainingVerification -= expectedSize;
     const result = await readWorkingSide(side, limits.maxVerifiedFileBytes);
     if (result.status === 'limit') {
-      return {
-        baselines,
-        complete: false,
-        retry: true,
-        remainingVerificationBytes: remainingVerification,
-      };
+      return finish(true);
     }
     if (result.status === 'failed') {
       side.contentAvailability = 'unavailable';
@@ -724,12 +761,7 @@ export async function captureWorkingSides(
       continue;
     }
     if (result.bytesRead !== expectedSize) {
-      return {
-        baselines,
-        complete: false,
-        retry: true,
-        remainingVerificationBytes: remainingVerification,
-      };
+      return finish(true);
     }
     if (result.content !== undefined) {
       recordSideBytes(side, result.content, result.digest, result.classification);
@@ -750,12 +782,7 @@ export async function captureWorkingSides(
       digest: result.digest,
     });
   }
-  return {
-    baselines,
-    complete,
-    retry: false,
-    remainingVerificationBytes: remainingVerification,
-  };
+  return finish(false);
 }
 
 export async function revalidateWorking(
@@ -764,6 +791,10 @@ export async function revalidateWorking(
 ): Promise<'same' | 'different' | 'unverified'> {
   let remaining = limits.maxVerifiedContentBytes;
   for (const baseline of baselines) {
+    if (baseline.witness !== undefined) {
+      if ((await statWitness(baseline.path)) !== baseline.witness) return 'different';
+      continue;
+    }
     let status: Stats;
     try {
       status = await lstat(baseline.path);
