@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   codeRowStarts,
+  segmentedCodeRowStarts,
   displayCells,
   fitDisplayCellsEnd,
   fitDisplayCellsStart,
@@ -89,5 +90,22 @@ describe('bounded terminal cell policy', () => {
     expect(rows('a'.repeat(25), 10)).toEqual(['a'.repeat(10), 'a'.repeat(10), 'a'.repeat(5)]);
     expect(rows('界界界', 3)).toEqual(['界', '界', '界']);
     expect(codeRowStarts('fits', 10)).toEqual([]);
+  });
+
+  it('wraps printable ASCII exactly as the grapheme path does', () => {
+    // A fixed linear congruential sequence keeps the cases reproducible.
+    let seed = 0x2f6b;
+    const next = (limit: number): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed % limit;
+    };
+    const alphabet = ' abcXYZ019_.,;:()[]{}<>/=+-*&|!?\'"`~@#$%^';
+    for (let sample = 0; sample < 2_000; sample += 1) {
+      const text = Array.from({ length: next(300) }, () => alphabet[next(alphabet.length)]).join('');
+      const width = 1 + next(120);
+      expect(codeRowStarts(text, width), `${JSON.stringify(text)} at ${width}`).toEqual(
+        segmentedCodeRowStarts(text, width),
+      );
+    }
   });
 });

@@ -2539,14 +2539,46 @@ function wrappedCode(source: string | StyledText, width: number): string | Style
   );
 }
 
+/** Where the selection starts, in rows, and how many rows it spans: one running total. */
+function selectionSpan(
+  items: readonly ReviewingVisualItem[],
+  first: number,
+  last: number,
+): { readonly selectionStart?: number; readonly selectionSize?: number } {
+  if (first < 0) return {};
+  let start = 0;
+  for (let index = 0; index < first; index += 1) start += items[index]!.size;
+  if (last < first) return { selectionStart: start };
+  let size = 0;
+  for (let index = first; index <= last; index += 1) size += items[index]!.size;
+  return { selectionStart: start, selectionSize: size };
+}
+
+/**
+ * Wrapped heights by row object. Rows are immutable and stay the same objects
+ * between redraws, so cursor moves, glides and spinners re-measure nothing.
+ */
+const wrappedRowHeights = new WeakMap<ReviewProjectedDiffRow, Map<string, number>>();
+
 function wrappedDiffRowHeight(
   state: ReviewingApplicationState,
   row: ReviewProjectedDiffRow,
   codeWidth: number,
 ): number {
   if (!state.wrapDiffLines) return 1;
-  const code = decodeDiffRow(row, state.presentation.ascii);
-  return codeRowStarts(code, codeWidth).length + 1;
+  const key = `${codeWidth}:${state.presentation.ascii ? 'ascii' : 'unicode'}`;
+  let heights = wrappedRowHeights.get(row);
+  const known = heights?.get(key);
+  if (known !== undefined) return known;
+  const height = codeRowStarts(decodeDiffRow(row, state.presentation.ascii), codeWidth).length + 1;
+  if (heights === undefined) {
+    heights = new Map();
+    wrappedRowHeights.set(row, heights);
+  }
+  // A resize sweep leaves at most a few widths per row; keep the newest few.
+  if (heights.size >= 4) heights.delete(heights.keys().next().value!);
+  heights.set(key, height);
+  return height;
 }
 
 function diffLine(
@@ -3052,8 +3084,8 @@ function diffPane(
     type BuiltDiffItems = {
       readonly items: readonly ReviewingVisualItem[];
       readonly selectedIndex: number;
-      readonly selectionStart: number | undefined;
-      readonly selectionSize: number | undefined;
+      readonly selectionStart?: number;
+      readonly selectionSize?: number;
       readonly pageSizes: readonly number[];
       readonly pageSelectedIndex: number;
     };
@@ -3108,7 +3140,8 @@ function diffPane(
       if (state.diffMode === 'side-by-side') {
         const pairs = sidePairs(rows);
         const sideCodeWidth = Math.max(1, Math.floor(contentWidth / 2) - 8 - markWidth);
-        pairs.forEach(pair => {
+        const pairHeights = pairs.map(pair => sidePairHeight(state, pair, sideCodeWidth));
+        pairs.forEach((pair, pairOrdinal) => {
           const selected =
             pair.old?.rowIdentity === state.selectedRowIdentity || pair.next?.rowIdentity === state.selectedRowIdentity;
           if (selected && selectionFirst < 0) selectionFirst = items.length;
@@ -3119,7 +3152,7 @@ function diffPane(
             return local < 0 ? [] : [rowOffset + local];
           });
           items.push({
-            size: sidePairHeight(state, pair, sideCodeWidth),
+            size: pairHeights[pairOrdinal]!,
             ordinals,
             render: () => sideBySideLine(state, pair, sideCodeWidth, interaction, lineMessages),
           });
@@ -3143,16 +3176,11 @@ function diffPane(
             if (anchorRow !== undefined) pushMessage(anchorRow);
           }
         });
-        const starts = items.map((_, index) => items.slice(0, index).reduce((total, item) => total + item.size, 0));
         return {
           items,
           selectedIndex,
-          selectionStart: selectionFirst < 0 ? undefined : starts[selectionFirst],
-          selectionSize:
-            selectionFirst < 0 || selectionLast < selectionFirst
-              ? undefined
-              : items.slice(selectionFirst, selectionLast + 1).reduce((total, item) => total + item.size, 0),
-          pageSizes: pairs.map(pair => sidePairHeight(state, pair, sideCodeWidth)),
+          ...selectionSpan(items, selectionFirst, selectionLast),
+          pageSizes: pairHeights,
           pageSelectedIndex: Math.max(
             0,
             pairs.findIndex(
@@ -3165,12 +3193,14 @@ function diffPane(
       }
 
       const codeWidth = Math.max(1, contentWidth - 14 - markWidth);
+      // Wrapping a row is the costly part of a redraw: measure each row once.
+      const rowHeights = rows.map(row => wrappedDiffRowHeight(state, row, codeWidth));
       rows.forEach((row, index) => {
         const selected = row.rowIdentity === state.selectedRowIdentity;
         if (selected && selectionFirst < 0) selectionFirst = items.length;
         const itemIndex = items.length;
         items.push({
-          size: wrappedDiffRowHeight(state, row, codeWidth),
+          size: rowHeights[index]!,
           ordinals: [rowOffset + index],
           render: () => diffLine(state, row, codeWidth, interaction, lineMessages),
         });
@@ -3190,16 +3220,11 @@ function diffPane(
         pushComposer();
         selectedIndex = items.length - 1;
       }
-      const starts = items.map((_, index) => items.slice(0, index).reduce((total, item) => total + item.size, 0));
       return {
         items,
         selectedIndex,
-        selectionStart: selectionFirst < 0 ? undefined : starts[selectionFirst],
-        selectionSize:
-          selectionFirst < 0 || selectionLast < selectionFirst
-            ? undefined
-            : items.slice(selectionFirst, selectionLast + 1).reduce((total, item) => total + item.size, 0),
-        pageSizes: rows.map(row => wrappedDiffRowHeight(state, row, codeWidth)),
+        ...selectionSpan(items, selectionFirst, selectionLast),
+        pageSizes: rowHeights,
         pageSelectedIndex: Math.max(
           0,
           rows.findIndex(row => row.rowIdentity === state.selectedRowIdentity),
@@ -3207,11 +3232,7 @@ function diffPane(
       };
     };
 
-    const preliminary = buildItems(paneContentWidth);
-    const hasOverflow =
-      view.window.totalRows > rows.length ||
-      preliminary.items.reduce((total, item) => total + item.size, 0) > availableHeight;
-    const built = hasOverflow ? buildItems(paneContentWidth) : preliminary;
+    const built = buildItems(paneContentWidth);
     const selectionKey =
       state.selectedRowIdentity === undefined
         ? undefined

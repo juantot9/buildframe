@@ -160,6 +160,42 @@ const CODE_BREAK_AFTER = /[\s.,;:()[\]{}<>/=+\-*&|!?]/u;
  * is cut at the width. Wide graphemes never straddle a row.
  */
 export function codeRowStarts(text: string, width: number): readonly number[] {
+  // Most code is printable ASCII: one character, one grapheme, one cell. Skip
+  // grapheme segmentation there; the result is identical (see the tests).
+  return PRINTABLE_ASCII.test(text) ? asciiCodeRowStarts(text, width) : segmentedCodeRowStarts(text, width);
+}
+
+const PRINTABLE_ASCII = /^[\x20-\x7e]*$/u;
+const ASCII_BREAK_AFTER = new Set([...' .,;:()[]{}<>/=+-*&|!?'].map(character => character.charCodeAt(0)));
+
+function asciiCodeRowStarts(text: string, width: number): readonly number[] {
+  const columns = Math.max(1, width);
+  const starts: number[] = [];
+  if (text.length <= columns) return starts;
+  let rowStart = 0;
+  let used = 0;
+  let boundary = -1;
+  let boundaryUsed = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (used > 0 && used + 1 > columns) {
+      const breakAt = boundary > rowStart && boundaryUsed * 2 >= columns ? boundary : index;
+      starts.push(breakAt);
+      used = breakAt === index ? 0 : used - boundaryUsed;
+      rowStart = breakAt;
+      boundary = -1;
+      boundaryUsed = 0;
+    }
+    used += 1;
+    if (ASCII_BREAK_AFTER.has(text.charCodeAt(index))) {
+      boundary = index + 1;
+      boundaryUsed = used;
+    }
+  }
+  return starts;
+}
+
+/** The general path, by grapheme; exported only so tests can prove the ASCII path equal. */
+export function segmentedCodeRowStarts(text: string, width: number): readonly number[] {
   const columns = Math.max(1, width);
   const starts: number[] = [];
   let rowStart = 0;
