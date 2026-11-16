@@ -265,7 +265,7 @@
       },
       {
         "name": "The Transparent Terminal Rule",
-        "body": "With `background: terminal`, every fill (ground, pane, raised, washes) becomes transparent and only foreground colors remain. Under `--no-color`, every role collapses to plain white on transparent.",
+        "body": "With `background: terminal`, the surfaces (ground, pane, raised, and the selection's Harbor Cyan Wash) become transparent, so the terminal's own background shows through. The state washes stay: Sage Wash and Rose Wash still fill added and removed rows, because they say which lines changed and a lone `+`/`-` glyph is too faint to scan by. Under `--no-color`, every role collapses to plain white on transparent.",
         "section": "colors"
       },
       {

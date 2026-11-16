@@ -372,14 +372,14 @@ function theme(state: ReviewingApplicationState): SemanticTheme {
   if (!state.presentation.noColor) {
     const resolved = configuredTheme(state);
     if (state.background === 'theme') return resolved;
+    // Surfaces give way to the terminal's own background; the Sage and Rose
+    // washes stay, because they say which lines changed.
     return {
       ...resolved,
       background: 'transparent',
       surface: 'transparent',
       raised: 'transparent',
       accentSoft: 'transparent',
-      successSoft: 'transparent',
-      dangerSoft: 'transparent',
     };
   }
   return {
@@ -5461,6 +5461,37 @@ function detailsOverlay(state: ReviewingApplicationState): VChild[] {
   ];
 }
 
+/** Every description the Configuration dialog can show, so its height can be fixed to the longest. */
+const CONFIGURATION_DESCRIPTIONS = {
+  theme: {
+    presets: 'Built-in presets and named custom themes.',
+    unreported: 'Your terminal didn’t report its background, so Quiet Graphite (dark) is in use.',
+    matchedLight: 'Quiet Graphite on dark terminals, Quiet Paper on light. Now: Quiet Paper.',
+    matchedDark: 'Quiet Graphite on dark terminals, Quiet Paper on light. Now: Quiet Graphite.',
+  },
+  background: {
+    terminal: 'Use the terminal’s own background; changed lines keep their tint.',
+    theme: 'Use the selected theme background and pane surfaces.',
+  },
+  arrangement: {
+    codeSpotlight: 'Give the Diff most of the terminal; context stays secondary.',
+    reviewNotebook: 'Lead with History and keep the Diff beside it as evidence.',
+    workspace: 'Keep Files, Diff, and History visible side by side.',
+  },
+  icons: {
+    nerd: 'Nerd Font glyphs for folders and file states; needs a patched terminal font.',
+    text: 'Plain text markers that render in every terminal font.',
+  },
+  header: {
+    shown: 'One row with where you are and whether the agent is connected.',
+    hidden: 'Hidden; the agent’s status moves to the end of the history row.',
+  },
+  motion: {
+    smooth: 'Panes glide to their new place when they scroll.',
+    instant: 'Panes jump straight to their new place; best over slow connections.',
+  },
+} as const;
+
 function configurationOverlay(state: ReviewingApplicationState, bodyHeight: number): VChild[] {
   const configuration = state.configurationWindow;
   if (configuration === undefined) return [];
@@ -5488,35 +5519,26 @@ function configurationOverlay(state: ReviewingApplicationState, bodyHeight: numb
       : state.arrangement === 'review-notebook'
         ? 'Review Notebook'
         : 'Workspace';
-  const arrangementDescription =
-    state.arrangement === 'code-spotlight'
-      ? 'Give the Diff most of the terminal; context stays secondary.'
-      : state.arrangement === 'review-notebook'
-        ? 'Lead with History and keep the Diff beside it as evidence.'
-        : 'Keep Files, Diff, and History visible side by side.';
+  const described = CONFIGURATION_DESCRIPTIONS;
   const selectedDescription: Record<ConfigurationSetting, string> = {
     theme:
       state.reviewingTheme.inherits !== MATCH_TERMINAL_THEME
-        ? 'Built-in presets and named custom themes.'
+        ? described.theme.presets
         : state.terminalThemeMode === undefined
-          ? 'Your terminal didn’t report its background, so Quiet Graphite (dark) is in use.'
-          : `Quiet Graphite on dark terminals, Quiet Paper on light. Now: ${state.terminalThemeMode === 'light' ? 'Quiet Paper' : 'Quiet Graphite'}.`,
-    background:
-      state.background === 'terminal'
-        ? 'Use the terminal default background; pane borders carry emphasis.'
-        : 'Use the selected theme background and pane surfaces.',
-    arrangement: arrangementDescription,
-    icons:
-      state.icons === 'nerd'
-        ? 'Nerd Font glyphs for folders and file states; needs a patched terminal font.'
-        : 'Plain text markers that render in every terminal font.',
-    'header-visibility': state.header.visible
-      ? 'One row with where you are and whether the agent is connected.'
-      : 'Hidden; the agent’s status moves to the end of the history row.',
-    motion:
-      state.motion === 'smooth'
-        ? 'Panes glide to their new place when they scroll.'
-        : 'Panes jump straight to their new place; best over slow connections.',
+          ? described.theme.unreported
+          : state.terminalThemeMode === 'light'
+            ? described.theme.matchedLight
+            : described.theme.matchedDark,
+    background: state.background === 'terminal' ? described.background.terminal : described.background.theme,
+    arrangement:
+      state.arrangement === 'code-spotlight'
+        ? described.arrangement.codeSpotlight
+        : state.arrangement === 'review-notebook'
+          ? described.arrangement.reviewNotebook
+          : described.arrangement.workspace,
+    icons: state.icons === 'nerd' ? described.icons.nerd : described.icons.text,
+    'header-visibility': state.header.visible ? described.header.shown : described.header.hidden,
+    motion: state.motion === 'smooth' ? described.motion.smooth : described.motion.instant,
   };
   const row = (setting: ConfigurationSetting, settingLabel: string, value: string): VChild => {
     const selected = configuration.selected === setting;
@@ -5535,11 +5557,19 @@ function configurationOverlay(state: ReviewingApplicationState, bodyHeight: numb
   };
   // Every line of the description sits under the same indent, however it wraps.
   const descriptionRows = wrapDisplayCellRows(selectedDescription[configuration.selected], textWidth - 2);
+  // The box keeps the height of its longest description, so moving between
+  // settings or changing one never makes it grow, shrink or move.
+  const reservedDescriptionRows = Math.max(
+    descriptionRows.length,
+    ...Object.values(CONFIGURATION_DESCRIPTIONS)
+      .flatMap(variants => Object.values(variants))
+      .map(variant => wrapDisplayCellRows(variant, textWidth - 2).length),
+  );
   const description = Box(
     {
       id: 'reviewing-configuration-description',
       width: '100%',
-      height: descriptionRows.length,
+      height: reservedDescriptionRows,
       flexDirection: 'column',
     },
     ...descriptionRows.map(row => label(state, `  ${row}`, { fg: colors.muted })),
@@ -5556,7 +5586,7 @@ function configurationOverlay(state: ReviewingApplicationState, bodyHeight: numb
     description,
   ];
   // As tall as its content, centred in the body like every other dialog.
-  const height = Math.min(Math.max(1, bodyHeight), rows.length - 1 + descriptionRows.length + 2);
+  const height = Math.min(Math.max(1, bodyHeight), rows.length - 1 + reservedDescriptionRows + 2);
   return [
     borderedBox(
       state,

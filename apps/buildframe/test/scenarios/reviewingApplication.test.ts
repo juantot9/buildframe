@@ -1904,6 +1904,69 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await waitFor(() => overlayBackground()?.equals(RGBA.fromHex(QUIET_GRAPHITE.raised)) === true, 'dark terminal');
   });
 
+  it('keeps Configuration one size and in one place while settings move and change', async () => {
+    const created = await emptyFixture();
+    const userConfiguration = createFileUserConfiguration(path.join(created.root, 'config', 'config.json'));
+    // Narrow enough that some descriptions wrap to two rows and others fit on one.
+    const terminal = await ScriptedTerminal.create(60, 30);
+    const application = createReviewingApplicationForTest({
+      workspace: new FailingHomeWorkspace('immediate'),
+      renderer: terminal.renderer,
+      userConfiguration,
+    });
+    applications.add(application);
+    const geometry = (): string => {
+      const overlay = terminal.renderer.root.findDescendantById('reviewing-configuration-overlay') as
+        | BoxRenderable
+        | undefined;
+      return overlay === undefined ? 'closed' : `${overlay.screenY}:${overlay.height}`;
+    };
+
+    await application.start();
+    terminal.send('c');
+    await waitForOutput(terminal, 'Match terminal');
+    await terminal.flush();
+    const opened = geometry();
+    expect(opened).not.toBe('closed');
+    const seen = new Set<string>([opened]);
+    // Every setting, then every value of the two-way settings and back.
+    for (const keys of ['j', 'l', 'l', 'j', 'l', 'l', 'l', 'j', 'l', 'l', 'j', 'l', 'l', 'j', 'l', 'l', 'j']) {
+      terminal.send(keys);
+      await terminal.flush();
+      seen.add(geometry());
+    }
+    expect([...seen]).toEqual([opened]);
+  });
+
+  it('keeps the added and removed row tint on the terminal background', async () => {
+    const created = await fixture();
+    const owner = await open(created.checkout);
+    const configurationPath = path.join(created.root, 'terminal-background-config.json');
+    await writeFile(configurationPath, JSON.stringify({ version: 1, reviewing: { background: 'terminal' } }));
+    const terminal = await ScriptedTerminal.create(132, 32);
+    const application = createReviewingApplicationForTest({
+      workspace: owner.workspace,
+      renderer: terminal.renderer,
+      userConfiguration: createFileUserConfiguration(configurationPath),
+    });
+    applications.add(application);
+    await application.start();
+    terminal.send('\r');
+    await waitForOutput(terminal, 'Current Review · ');
+    await waitForOutput(terminal, 'new three');
+    const rowBackground = (needle: string): RGBA | undefined =>
+      (
+        descendantsWithIdPrefix(terminal.renderer.root, 'reviewing-diff-row-').find(row =>
+          renderableTreeText(row).includes(needle),
+        ) as BoxRenderable | undefined
+      )?.backgroundColor;
+
+    // The surfaces give way to the terminal; the state washes don't.
+    expect(rowBackground('new three')?.equals(RGBA.fromHex(QUIET_GRAPHITE.successSoft))).toBe(true);
+    expect(rowBackground('old three')?.equals(RGBA.fromHex(QUIET_GRAPHITE.dangerSoft))).toBe(true);
+    expect(rowBackground('shared')?.a).toBe(0);
+  });
+
   it('shows pending before Workspace I/O and leaves a retained Review without Finish ceremony', async () => {
     const created = await fixture();
     await writeFile(path.join(created.checkout, 'second.txt'), 'captured second\n');

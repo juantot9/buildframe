@@ -115,7 +115,7 @@ Syntax highlighting has its own small token palette per theme (keyword, string, 
 
 **The Contrast Floor Rule.** Text clears 4.5:1 on every fill in its theme, washes included, and a new theme or role is checked against that matrix before it ships. Quiet Paper meets it fully. The dark presets' Pewter and comment text fall to 3.8–4.4:1 on row washes, which is a known gap to close, not a precedent.
 
-**The Transparent Terminal Rule.** With `background: terminal`, every fill (ground, pane, raised, washes) becomes transparent and only foreground colors remain. Under `--no-color`, every role collapses to plain white on transparent.
+**The Transparent Terminal Rule.** With `background: terminal`, the surfaces (ground, pane, raised, and the selection's Harbor Cyan Wash) become transparent, so the terminal's own background shows through. The state washes stay: Sage Wash and Rose Wash still fill added and removed rows, because they say which lines changed and a lone `+`/`-` glyph is too faint to scan by. Under `--no-color`, every role collapses to plain white on transparent.
 
 ## Typography
 
@@ -181,7 +181,7 @@ Under `--ascii`, every interface character has a stand-in (`·`→`-`, `…`→`
 
 ### Diff rows
 - **Gutter:** `▌` when selected, then old and new line numbers right-aligned to 4 cells, then the `+`/`-` marker.
-- **Added and removed:** Sage Wash and Rose Wash fill the row. Syntax colors stay intact on top.
+- **Added and removed:** Sage Wash and Rose Wash fill the row, on the theme background and the terminal's alike. Syntax colors stay intact on top.
 - **Selected:** Harbor Cyan Wash, which takes precedence over add and remove washes.
 
 ### State badge
@@ -194,6 +194,7 @@ Under `--ascii`, every interface character has a stand-in (`·`→`-`, `…`→`
 ### Cards and dialogs
 - **Background:** Graphite Raised, with a Harbor Cyan border. The send confirmation uses a Brass border, because it is a caution.
 - **Placement:** the Question composer and a saved Message's card both open directly beneath their anchored line, never above it. Dialogs are centred in the body and are as tall as their content; their hints sit inside the box, never in a border.
+- **Steady size:** a dialog whose text changes as you move through it keeps the height of its longest text. Configuration reserves the rows of the longest description any setting or value can show, so moving between settings or changing one never makes the box grow, shrink or move.
 - **Focus while writing:** the composer lives in the Diff, so the Diff shows `FOCUSED` while a Message is being written, wherever it was started from.
 - **Send confirmation:** only when an earlier Message never reported back, so sending may repeat work. Plain words ("An earlier Message here never reported back."), never internal names. A Message's content never triggers it: BuildFrame does not scan for secrets. A plain backdrop hides the panes behind it, so nothing competes with the question.
 - **Use:** the expanded Question or Message card, the Question composer, the action lookup, Configuration, and confirmation and preflight dialogs.
