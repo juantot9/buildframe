@@ -25,6 +25,7 @@ import type { Workspace, WorkspaceIdentity } from '../../src/index.js';
 import type {
   DirectReviewHandoffAvailableView,
   DirectReviewHandoffCommitted,
+  ReviewMessageCommitted,
 } from '@buildframe/workspace/harness-interaction';
 import type {
   CurrentChangesReviewStarted,
@@ -45,6 +46,7 @@ import {
 } from '../../src/authoritativeState.js';
 import { resolveGitExecutable } from '../../src/gitProcess.js';
 import { reviewMessageAcknowledgementIdentity } from '../../src/harness-interaction/commitmentPolicy.js';
+import { stableIdentity } from '../../src/harness-interaction/utils.js';
 import {
   parseReviewIndex,
   parseReviewSnapshot,
@@ -462,6 +464,166 @@ class HeldReadState implements AuthoritativeState {
   }
 }
 
+const MESSAGE_LOCATION = { pathBytesBase64: Buffer.from('review.txt').toString('base64'), line: 1 } as const;
+
+interface MessageReview {
+  readonly reviewIdentity: CurrentChangesReviewStarted['reviewIdentity'];
+  readonly liveBasisIdentity: string;
+}
+
+async function startMessageReview(workspace: Workspace, commandIdentity: string): Promise<MessageReview> {
+  const home = await workspace.read({ kind: 'workspace.home', offset: 0, limit: 64 });
+  const started = requireStarted(
+    await workspace.execute({
+      kind: 'review.current-changes.start',
+      commandIdentity,
+      expectedStateVersion: home.stateVersion,
+    }),
+  );
+  const bases = await workspace.read({
+    kind: 'review.bases',
+    reviewIdentity: started.reviewIdentity,
+    offset: 0,
+    limit: 64,
+  });
+  if (bases.status !== 'available') throw new Error('Review Bases unavailable');
+  const live = bases.bases.items.find(item => item.kind === 'live');
+  if (live === undefined) throw new Error('Live Basis unavailable');
+  return { reviewIdentity: started.reviewIdentity, liveBasisIdentity: live.reviewBasisIdentity };
+}
+
+/** Inspects and commits one Message, accepting whatever the inspection asks to confirm. */
+async function sendMessage(
+  workspace: Workspace,
+  review: MessageReview,
+  commandIdentity: string,
+): Promise<ReviewMessageCommitted> {
+  const body = `Is line one right? (${commandIdentity})`;
+  const inspection = await workspace.read({
+    kind: 'harness.review-message.inspect-default',
+    reviewIdentity: review.reviewIdentity,
+    originReviewBasisIdentity: review.liveBasisIdentity as never,
+    location: MESSAGE_LOCATION,
+    body,
+  });
+  if (inspection.status !== 'available') throw new Error(`Message unavailable: ${inspection.reason}`);
+  const committed = await workspace.execute({
+    kind: 'review.message.commit',
+    commandIdentity,
+    expectedStateVersion: inspection.stateVersion,
+    reviewIdentity: review.reviewIdentity,
+    originReviewBasisIdentity: review.liveBasisIdentity as never,
+    location: MESSAGE_LOCATION,
+    body,
+    attachmentIdentity: inspection.destination.attachmentIdentity,
+    inspectionIdentity: inspection.inspectionIdentity,
+    acceptedAcknowledgementRequirementIdentities: inspection.commitment.requirements.map(
+      requirement => requirement.requirementIdentity,
+    ),
+  });
+  if (committed.kind !== 'review.message.committed') {
+    throw new Error(`Message was not committed: ${'reason' in committed ? String(committed.reason) : committed.kind}`);
+  }
+  return committed;
+}
+
+function decodeJson(bytes: Uint8Array): unknown {
+  return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+}
+
+interface StoredIndexShape {
+  readonly formatVersion: number;
+  readonly attachments: readonly { readonly attachmentIdentity: string }[];
+  readonly handoffs: readonly { readonly handoffIdentity: string; readonly reviewIdentity: string }[];
+  readonly invocations: readonly {
+    readonly invocationIdentity: string;
+    readonly handoffIdentity: string;
+    readonly status: string;
+  }[];
+  readonly preparations: readonly unknown[];
+}
+
+interface StoredHistoryShape {
+  readonly formatVersion: number;
+  readonly reviewIdentity: string;
+  readonly handoffs: readonly { readonly handoffIdentity: string }[];
+  readonly invocations: readonly { readonly invocationIdentity: string; readonly status: string }[];
+}
+
+/**
+ * Test-only State seam that writes the Harness index exactly as format 3 did:
+ * every entry stays in the one index forever, Attachments never retire, and no
+ * Review history exists. Turning it off lets the current code take over.
+ */
+class FormatThreeIndexState implements AuthoritativeState {
+  readonly delegate: AuthoritativeState;
+  legacy = true;
+
+  constructor(delegate: AuthoritativeState) {
+    this.delegate = delegate;
+  }
+
+  async commit(request: StateCommitRequest): Promise<StateCommitResult> {
+    if (!this.legacy) return await this.delegate.commit(request);
+    const histories = request.records.filter(record => record.kind === 'harness.review-history');
+    const indexRecord = request.records.find(record => record.kind === 'harness.index');
+    if (indexRecord === undefined) return await this.delegate.commit(request);
+    const priorRecord = (
+      await this.delegate.read({ recordIdentities: [indexRecord.recordIdentity], includeContent: false })
+    ).records[0];
+    const prior =
+      priorRecord === undefined
+        ? { attachments: [], handoffs: [], invocations: [], preparations: [] }
+        : (decodeJson(priorRecord.payload) as Record<string, readonly Record<string, unknown>[]>);
+    const next = decodeJson(indexRecord.payload) as Record<string, readonly Record<string, unknown>[]>;
+    const moved = histories.map(
+      record => decodeJson(record.payload) as Record<string, readonly Record<string, unknown>[]>,
+    );
+    const merge = (key: string, identity: string): readonly Record<string, unknown>[] => {
+      const latest = new Map<unknown, Record<string, unknown>>();
+      for (const item of [...(next[key] ?? []), ...moved.flatMap(history => history[key] ?? [])]) {
+        latest.set(item[identity], item);
+      }
+      const kept = (prior[key] ?? []).map(item => latest.get(item[identity]) ?? item);
+      const known = new Set(kept.map(item => item[identity]));
+      return [...kept, ...[...latest.values()].filter(item => !known.has(item[identity]))];
+    };
+    const legacyIndex = {
+      formatVersion: 3,
+      attachments: merge('attachments', 'attachmentIdentity'),
+      handoffs: merge('handoffs', 'handoffIdentity'),
+      invocations: merge('invocations', 'invocationIdentity'),
+      preparations: next['preparations'] ?? [],
+    };
+    return await this.delegate.commit({
+      ...request,
+      records: request.records
+        .filter(record => record.kind !== 'harness.review-history')
+        .map(record =>
+          record === indexRecord
+            ? { ...record, payload: new TextEncoder().encode(JSON.stringify(legacyIndex)) }
+            : record,
+        ),
+    });
+  }
+
+  async read(request: StateReadRequest): Promise<StateReadResult> {
+    return await this.delegate.read(request);
+  }
+
+  async readContent(request: StateContentReadRequest): Promise<StateContentReadResult> {
+    return await this.delegate.readContent(request);
+  }
+
+  async status(): Promise<StateStatus> {
+    return await this.delegate.status();
+  }
+
+  async close(): Promise<void> {
+    await this.delegate.close();
+  }
+}
+
 describe('Direct Harness Interaction path', () => {
   const owners = new Set<WorkspaceRuntimeOwner>();
   const standaloneStates = new Set<AuthoritativeState>();
@@ -489,6 +651,42 @@ describe('Direct Harness Interaction path', () => {
     await owner.dispose();
     owners.delete(owner);
     return await open(checkout);
+  }
+
+  async function openStoredState(checkout: string, workspaceIdentity: WorkspaceIdentity): Promise<AuthoritativeState> {
+    const state = await openAuthoritativeState({
+      workspaceIdentity,
+      privateStateDirectory: userStateDirectory(checkout),
+    });
+    standaloneStates.add(state);
+    return state;
+  }
+
+  async function readStoredHarness(
+    state: AuthoritativeState,
+    workspaceIdentity: WorkspaceIdentity,
+    reviewIdentities: readonly string[] = [],
+  ): Promise<{
+    readonly revision: number;
+    readonly index: StoredIndexShape;
+    readonly histories: readonly (StoredHistoryShape | undefined)[];
+  }> {
+    const read = await state.read({
+      recordIdentities: [
+        stableIdentity('hix', workspaceIdentity),
+        ...reviewIdentities.map(reviewIdentity => stableIdentity('hrh', reviewIdentity, 'review-harness-history')),
+      ],
+      includeContent: false,
+    });
+    const [indexRecord, ...historyRecords] = read.records;
+    if (indexRecord === undefined) throw new Error('Harness index missing');
+    return {
+      revision: indexRecord.revision,
+      index: decodeJson(indexRecord.payload) as StoredIndexShape,
+      histories: historyRecords.map(record =>
+        record === undefined ? undefined : (decodeJson(record.payload) as StoredHistoryShape),
+      ),
+    };
   }
 
   afterEach(async () => {
@@ -3875,5 +4073,575 @@ describe('Direct Harness Interaction path', () => {
     if (next.status !== 'available') throw new Error('Next unresolved Message inspection unavailable');
     expect(next.commitment.status).toBe('gate');
     expect(next.commitment.requirements[0]?.requirementIdentity).not.toBe(requirement.requirementIdentity);
+  });
+
+  it('retires each earlier idle session from the live index, so connecting never runs out', async () => {
+    const created = await fixture();
+    const owner = await open(created.checkout);
+    const identity = await owner.workspace.read({ kind: 'workspace.identity' });
+    let latest: ScriptedAdapter | undefined;
+    for (let session = 0; session < 70; session += 1) {
+      latest = await establish(owner, {
+        attachmentIdentity: attachmentIdentity(`sequential-session-${session}`),
+        evidenceIdentity: `sequential-session-establishment-${session}`,
+      });
+    }
+    if (latest === undefined) throw new Error('No session connected');
+    await expect(owner.workspace.read({ kind: 'harness.connection' })).resolves.toMatchObject({
+      harnesses: [{ attachmentIdentity: latest.attachment.attachmentIdentity, connected: true }],
+    });
+    const review = await startMessageReview(owner.workspace, 'sequential-session-review');
+    await sendMessage(owner.workspace, review, 'sequential-session-message');
+    expect(latest.directives).toHaveLength(1);
+
+    await owner.dispose();
+    owners.delete(owner);
+    const stored = await readStoredHarness(
+      await openStoredState(created.checkout, identity.workspaceIdentity),
+      identity.workspaceIdentity,
+    );
+    expect(stored.index.formatVersion).toBe(4);
+    expect(stored.index.attachments.map(item => item.attachmentIdentity)).toEqual([
+      latest.attachment.attachmentIdentity,
+    ]);
+  });
+
+  it('keeps sending from a format-3 index holding the old 512 cap of settled work across Reviews', async () => {
+    const created = await fixture();
+    let owner = await open(created.checkout);
+    const identity = await owner.workspace.read({ kind: 'workspace.identity' });
+    const adapter = await establish(owner);
+    const review = await startMessageReview(owner.workspace, 'old-cap-review');
+
+    // A real Send costs about half a second of Git captures, so 512 earlier
+    // settled Sends in four other Reviews are written as format 3 kept them:
+    // all in the one index, where 512 refused every further Send.
+    await owner.dispose();
+    owners.delete(owner);
+    const state = await openStoredState(created.checkout, identity.workspaceIdentity);
+    const stored = await readStoredHarness(state, identity.workspaceIdentity);
+    const fake = (prefix: string, seed: string): string =>
+      `${prefix}_${createHash('sha256').update(seed).digest('hex')}`;
+    const otherReviews = [0, 1, 2, 3].map(index => fake('rev', `old-cap-other-review-${index}`));
+    const padding = Array.from({ length: 512 }, (_, index) => {
+      const reviewIdentity = otherReviews[Math.floor(index / 128)]!;
+      const handoffIdentity = fake('hho', `old-cap-handoff-${index}`);
+      const invocationIdentity = fake('hin', `old-cap-invocation-${index}`);
+      return {
+        handoff: {
+          handoffIdentity,
+          reviewIdentity,
+          reviewBatchIdentity: fake('rbt', `old-cap-batch-${index}`),
+          attachmentIdentity: adapter.attachment.attachmentIdentity,
+          commitmentReceiptIdentity: fake('hcr', `old-cap-receipt-${index}`),
+          capabilitySnapshotIdentity: fake('hcs', `old-cap-snapshot-${index}`),
+          invocationIdentity,
+          disclosure: { fileCount: 0, questionCount: 0, messageCount: 1, byteLength: 1, sha256: '0'.repeat(64) },
+        },
+        invocation: {
+          invocationIdentity,
+          handoffIdentity,
+          reviewIdentity,
+          attachmentIdentity: adapter.attachment.attachmentIdentity,
+          status: 'rejected',
+          evidenceIdentities: [`old-cap-refused-${index}`],
+          interruptionIntentIdentities: [],
+          terminalReason: 'harness-rejected',
+        },
+      };
+    });
+    const installed = await state.commit({
+      commandIdentity: 'install-format-three-old-cap',
+      expectedStateVersion: (await state.read({ recordIdentities: [], includeContent: false })).stateVersion,
+      records: [
+        {
+          recordClass: 'revisioned',
+          recordIdentity: stableIdentity('hix', identity.workspaceIdentity),
+          workflowIdentity: stableIdentity('hix', identity.workspaceIdentity),
+          kind: 'harness.index',
+          schemaVersion: 1,
+          expectedRevision: stored.revision,
+          payload: new TextEncoder().encode(
+            JSON.stringify({
+              ...stored.index,
+              formatVersion: 3,
+              handoffs: padding.map(item => item.handoff),
+              invocations: padding.map(item => item.invocation),
+            }),
+          ),
+          content: [],
+        },
+      ],
+      result: { kind: 'test.format-three-old-cap-installed', schemaVersion: 1, payload: new Uint8Array([1]) },
+    });
+    if (!('result' in installed)) throw new Error(`Format-3 fixture failed: ${installed.reason}`);
+    await state.close();
+    standaloneStates.delete(state);
+
+    owner = await open(created.checkout);
+    const returned = await establish(owner);
+    // The Send format 3 refused at 512 is the write that moves the settled work out.
+    const ended = await sendMessage(owner.workspace, review, 'old-cap-ended');
+    await returned.emit({
+      kind: 'harness.invocation.start-observed',
+      evidenceIdentity: 'old-cap-ended-start',
+      attachmentIdentity: returned.attachment.attachmentIdentity,
+      invocationIdentity: ended.invocationIdentity,
+    });
+    await returned.emit({
+      kind: 'harness.invocation.terminal-observed',
+      evidenceIdentity: 'old-cap-ended-end',
+      attachmentIdentity: returned.attachment.attachmentIdentity,
+      invocationIdentity: ended.invocationIdentity,
+      outcome: 'ended-normally',
+    });
+    const failed = await sendMessage(owner.workspace, review, 'old-cap-failed');
+    await returned.emit({
+      kind: 'harness.invocation.start-observed',
+      evidenceIdentity: 'old-cap-failed-start',
+      attachmentIdentity: returned.attachment.attachmentIdentity,
+      invocationIdentity: failed.invocationIdentity,
+    });
+    await returned.emit({
+      kind: 'harness.invocation.terminal-observed',
+      evidenceIdentity: 'old-cap-failed-end',
+      attachmentIdentity: returned.attachment.attachmentIdentity,
+      invocationIdentity: failed.invocationIdentity,
+      outcome: 'failed',
+      reason: 'harness-failed',
+    });
+    const refused = await sendMessage(owner.workspace, review, 'old-cap-refused');
+    await returned.emit({
+      kind: 'harness.invocation.rejected',
+      evidenceIdentity: 'old-cap-refused',
+      attachmentIdentity: returned.attachment.attachmentIdentity,
+      invocationIdentity: refused.invocationIdentity,
+      reason: 'harness-rejected',
+    });
+    const waiting = await sendMessage(owner.workspace, review, 'old-cap-waiting');
+    expect(returned.directives).toHaveLength(4);
+    const view = await owner.workspace.read({
+      kind: 'harness.review-interaction',
+      reviewIdentity: review.reviewIdentity,
+      offset: 0,
+      limit: 128,
+    });
+    expect(view.handoffs.map(item => item.handoffIdentity)).toEqual([
+      ended.handoffIdentity,
+      failed.handoffIdentity,
+      refused.handoffIdentity,
+      waiting.handoffIdentity,
+    ]);
+    expect(view.invocations.map(item => item.status)).toEqual([
+      'ended-normally',
+      'failed',
+      'rejected',
+      'awaiting-start',
+    ]);
+
+    await owner.dispose();
+    owners.delete(owner);
+    const converted = await readStoredHarness(
+      await openStoredState(created.checkout, identity.workspaceIdentity),
+      identity.workspaceIdentity,
+      [review.reviewIdentity, ...otherReviews],
+    );
+    expect(converted.index.formatVersion).toBe(4);
+    expect(converted.index.handoffs.map(item => item.handoffIdentity)).toEqual([waiting.handoffIdentity]);
+    expect(converted.histories.map(history => history?.handoffs.length)).toEqual([3, 128, 128, 128, 128]);
+  });
+
+  it('refuses a Send past the Review bound with its own reason', async () => {
+    const created = await fixture();
+    let owner = await open(created.checkout);
+    const identity = await owner.workspace.read({ kind: 'workspace.identity' });
+    await establish(owner);
+    const review = await startMessageReview(owner.workspace, 'review-bound-review');
+    // 127 earlier Review Batches, as Questions and Messages leave them, without 127 slow Sends.
+    await owner.dispose();
+    owners.delete(owner);
+    const state = await openStoredState(created.checkout, identity.workspaceIdentity);
+    const reviewIndexIdentity = reviewingRecordIdentity('rvi', identity.workspaceIdentity);
+    const read = await state.read({ recordIdentities: [reviewIndexIdentity], includeContent: false });
+    const indexRecord = read.records[0];
+    if (indexRecord?.kind !== 'review.index' || indexRecord.recordClass !== 'revisioned') {
+      throw new Error('Review index unavailable');
+    }
+    const reviewIndex = parseReviewIndex(decodeReviewingPayload(indexRecord.payload));
+    const padded = await state.commit({
+      commandIdentity: 'install-review-bound-batches',
+      expectedStateVersion: read.stateVersion,
+      records: [
+        {
+          recordClass: 'revisioned',
+          recordIdentity: reviewIndexIdentity,
+          workflowIdentity: reviewIndexIdentity,
+          kind: 'review.index',
+          schemaVersion: 1,
+          expectedRevision: indexRecord.revision,
+          payload: new TextEncoder().encode(
+            JSON.stringify({
+              ...reviewIndex,
+              reviews: reviewIndex.reviews.map(entry =>
+                entry.reviewIdentity === review.reviewIdentity
+                  ? {
+                      ...entry,
+                      batchIdentities: Array.from(
+                        { length: 127 },
+                        (_, index) => `rbt_${createHash('sha256').update(`review-bound-${index}`).digest('hex')}`,
+                      ),
+                    }
+                  : entry,
+              ),
+            }),
+          ),
+          content: [],
+        },
+      ],
+      result: { kind: 'test.review-bound-batches-installed', schemaVersion: 1, payload: new Uint8Array([1]) },
+    });
+    if (!('result' in padded)) throw new Error(`Review bound fixture failed: ${padded.reason}`);
+    await state.close();
+    standaloneStates.delete(state);
+
+    owner = await open(created.checkout);
+    const adapter = await establish(owner);
+    const last = await sendMessage(owner.workspace, review, 'review-bound-last');
+    await adapter.emit({
+      kind: 'harness.invocation.rejected',
+      evidenceIdentity: 'review-bound-last-refused',
+      attachmentIdentity: adapter.attachment.attachmentIdentity,
+      invocationIdentity: last.invocationIdentity,
+      reason: 'harness-rejected',
+    });
+    await expect(
+      owner.workspace.read({
+        kind: 'harness.review-message.inspect-default',
+        reviewIdentity: review.reviewIdentity,
+        originReviewBasisIdentity: review.liveBasisIdentity as never,
+        location: MESSAGE_LOCATION,
+        body: 'One more than this Review can hold.',
+      }),
+    ).resolves.toMatchObject({ status: 'unavailable', reason: 'review-handoff-limit-reached' });
+    expect(adapter.directives).toHaveLength(1);
+  });
+
+  it('reads a format-3 index unchanged and moves its settled work to Review history on the first write', async () => {
+    const created = await fixture();
+    const bootstrapped = await import('../../src/index.js').then(
+      async ({ bootstrapWorkspace }) => await bootstrapWorkspace({ startPath: created.checkout }),
+    );
+    if (bootstrapped.status !== 'ready') throw new Error('Workspace did not bootstrap');
+    const identity = await bootstrapped.workspace.read({ kind: 'workspace.identity' });
+    const state = new FormatThreeIndexState(
+      await openAuthoritativeState({
+        workspaceIdentity: identity.workspaceIdentity,
+        privateStateDirectory: userStateDirectory(created.checkout),
+      }),
+    );
+    standaloneStates.add(state);
+    let assembly = openRuntimeWorkspace(identity.workspaceIdentity, identity.canonicalCheckout, state);
+    const earlier = new ScriptedAdapter({
+      workspaceIdentity: identity.workspaceIdentity,
+      canonicalCheckout: identity.canonicalCheckout,
+      attachmentIdentity: attachmentIdentity('format-three-earlier'),
+      evidenceIdentity: 'format-three-earlier-establishment',
+    });
+    expect(await assembly.harnessAdapters.establish(earlier)).toMatchObject({ status: 'established' });
+    const adapter = new ScriptedAdapter({
+      workspaceIdentity: identity.workspaceIdentity,
+      canonicalCheckout: identity.canonicalCheckout,
+    });
+    expect(await assembly.harnessAdapters.establish(adapter)).toMatchObject({ status: 'established' });
+    const review = await startMessageReview(assembly.workspace, 'format-three-review');
+    const answered = await sendMessage(assembly.workspace, review, 'format-three-answered');
+    const answeredEnd = {
+      kind: 'harness.invocation.terminal-observed',
+      evidenceIdentity: 'format-three-answered-end',
+      attachmentIdentity: adapter.attachment.attachmentIdentity,
+      invocationIdentity: answered.invocationIdentity,
+      outcome: 'ended-normally',
+    } as const;
+    await adapter.emit({
+      kind: 'harness.invocation.start-observed',
+      evidenceIdentity: 'format-three-answered-start',
+      attachmentIdentity: adapter.attachment.attachmentIdentity,
+      invocationIdentity: answered.invocationIdentity,
+    });
+    const answeredAcknowledgement = await adapter.emit(answeredEnd);
+    expect(answeredAcknowledgement).toMatchObject({ status: 'applied' });
+    const refused = await sendMessage(assembly.workspace, review, 'format-three-refused');
+    await adapter.emit({
+      kind: 'harness.invocation.rejected',
+      evidenceIdentity: 'format-three-refused',
+      attachmentIdentity: adapter.attachment.attachmentIdentity,
+      invocationIdentity: refused.invocationIdentity,
+      reason: 'harness-rejected',
+    });
+    const lost = await sendMessage(assembly.workspace, review, 'format-three-lost');
+    await adapter.emit({
+      kind: 'harness.invocation.correlation-lost',
+      evidenceIdentity: 'format-three-lost-correlation',
+      attachmentIdentity: adapter.attachment.attachmentIdentity,
+      invocationIdentity: lost.invocationIdentity,
+      reason: 'correlation-lost',
+    });
+
+    const legacy = await readStoredHarness(state, identity.workspaceIdentity, [review.reviewIdentity]);
+    expect(legacy.index.formatVersion).toBe(3);
+    expect(legacy.index.attachments).toHaveLength(2);
+    expect(legacy.index.invocations.map(item => item.status)).toEqual(['ended-normally', 'rejected', 'unresolved']);
+    expect(legacy.histories).toEqual([undefined]);
+    const interaction = {
+      kind: 'harness.review-interaction',
+      reviewIdentity: review.reviewIdentity,
+      offset: 0,
+      limit: 128,
+    } as const;
+    const before = await assembly.workspace.read(interaction);
+
+    // The current code takes over this format-3 State after a restart.
+    state.legacy = false;
+    assembly = openRuntimeWorkspace(identity.workspaceIdentity, identity.canonicalCheckout, state);
+    expect(await assembly.harnessAdapters.establish(adapter)).toMatchObject({ status: 'established' });
+    await expect(assembly.workspace.read(interaction)).resolves.toEqual(before);
+    // Reading writes nothing.
+    expect((await readStoredHarness(state, identity.workspaceIdentity)).revision).toBe(legacy.revision);
+
+    // An exact duplicate of settled evidence is still the same acknowledgement.
+    await expect(adapter.emit(answeredEnd)).resolves.toEqual(answeredAcknowledgement);
+    await adapter.emit({
+      kind: 'harness.availability.observed',
+      evidenceIdentity: 'format-three-first-write',
+      attachmentIdentity: adapter.attachment.attachmentIdentity,
+      availability: { status: 'available' },
+    });
+    const converted = await readStoredHarness(state, identity.workspaceIdentity, [review.reviewIdentity]);
+    expect(converted.index.formatVersion).toBe(4);
+    // The unresolved turn stays live with its still-current session; the earlier idle session stays too,
+    // because only a new connection retires sessions.
+    expect(converted.index.attachments).toHaveLength(2);
+    expect(converted.index.handoffs.map(item => item.handoffIdentity)).toEqual([lost.handoffIdentity]);
+    expect(converted.histories[0]?.handoffs.map(item => item.handoffIdentity)).toEqual([
+      answered.handoffIdentity,
+      refused.handoffIdentity,
+    ]);
+    const after = await assembly.workspace.read(interaction);
+    expect(after.stateVersion).toBeGreaterThan(before.stateVersion);
+    expect({ ...after, stateVersion: before.stateVersion }).toEqual(before);
+
+    // Settled work answers late evidence as it always did.
+    await expect(adapter.emit(answeredEnd)).resolves.toEqual(answeredAcknowledgement);
+    await expect(
+      adapter.emit({
+        ...answeredEnd,
+        evidenceIdentity: 'format-three-answered-second-end',
+        outcome: 'interrupted',
+        reason: 'interruption-observed',
+      }),
+    ).resolves.toMatchObject({ status: 'refused', reason: 'conflicting-terminal-evidence' });
+    const settledStateVersion = (await assembly.workspace.read(interaction)).stateVersion;
+    await expect(
+      assembly.workspace.execute({
+        kind: 'harness.invocation.interruption.request',
+        commandIdentity: 'format-three-interrupt-settled',
+        expectedStateVersion: settledStateVersion,
+        invocationIdentity: answered.invocationIdentity,
+      }),
+    ).resolves.toMatchObject({ status: 'rejected', reason: 'invocation-not-interruptible' });
+  });
+
+  it('asks to confirm an unknown earlier turn only while its session is the connected one', async () => {
+    const created = await fixture();
+    const owner = await open(created.checkout);
+    const identity = await owner.workspace.read({ kind: 'workspace.identity' });
+    const first = await establish(owner);
+    const review = await startMessageReview(owner.workspace, 'unresolved-session-review');
+    const lost = await sendMessage(owner.workspace, review, 'unresolved-session-lost');
+    await first.emit({
+      kind: 'harness.invocation.correlation-lost',
+      evidenceIdentity: 'unresolved-session-lost-correlation',
+      attachmentIdentity: first.attachment.attachmentIdentity,
+      invocationIdentity: lost.invocationIdentity,
+      reason: 'correlation-lost',
+    });
+    const request = {
+      kind: 'harness.review-message.inspect-default',
+      reviewIdentity: review.reviewIdentity,
+      originReviewBasisIdentity: review.liveBasisIdentity as never,
+      location: MESSAGE_LOCATION,
+      body: 'Is the earlier turn still in the way?',
+    } as const;
+    await expect(owner.workspace.read(request)).resolves.toMatchObject({
+      status: 'available',
+      commitment: {
+        status: 'gate',
+        requirements: [{ kind: 'unresolved-invocation-risk', invocationIdentity: lost.invocationIdentity }],
+      },
+    });
+
+    // A new /buildframe is a new session; the earlier session's unknown turn no longer gates it.
+    const second = await establish(owner, {
+      attachmentIdentity: attachmentIdentity('unresolved-session-second'),
+      evidenceIdentity: 'unresolved-session-second-establishment',
+    });
+    const next = await owner.workspace.read(request);
+    if (next.status !== 'available') throw new Error('Message after a new session unavailable');
+    expect(next.destination.attachmentIdentity).toBe(second.attachment.attachmentIdentity);
+    expect(next.commitment.requirements).toEqual([]);
+    // The unknown outcome stays unknown in the Review.
+    const view = await owner.workspace.read({
+      kind: 'harness.review-interaction',
+      reviewIdentity: review.reviewIdentity,
+      offset: 0,
+      limit: 128,
+    });
+    expect(view.invocations).toMatchObject([{ invocationIdentity: lost.invocationIdentity, status: 'unresolved' }]);
+
+    // Its evidence now finds it in history and is refused as before.
+    await expect(
+      first.emit({
+        kind: 'harness.invocation.terminal-observed',
+        evidenceIdentity: 'unresolved-session-late-end',
+        attachmentIdentity: first.attachment.attachmentIdentity,
+        invocationIdentity: lost.invocationIdentity,
+        outcome: 'ended-normally',
+      }),
+    ).resolves.toMatchObject({ status: 'refused', reason: 'conflicting-terminal-evidence' });
+
+    await owner.dispose();
+    owners.delete(owner);
+    const stored = await readStoredHarness(
+      await openStoredState(created.checkout, identity.workspaceIdentity),
+      identity.workspaceIdentity,
+      [review.reviewIdentity],
+    );
+    expect(stored.index.attachments.map(item => item.attachmentIdentity)).toEqual([
+      second.attachment.attachmentIdentity,
+    ]);
+    expect(stored.index.handoffs).toEqual([]);
+    expect(stored.histories[0]?.invocations).toMatchObject([{ status: 'unresolved' }]);
+  });
+
+  it('restores the unresolved-work gate when the same retired session returns, even across Reviews and restarts', async () => {
+    const created = await fixture();
+    let owner = await open(created.checkout);
+    const first = await establish(owner);
+    const earlierReview = await startMessageReview(owner.workspace, 'returning-unresolved-earlier-review');
+    const lost = await sendMessage(owner.workspace, earlierReview, 'returning-unresolved-earlier-message');
+    await first.emit({
+      kind: 'harness.invocation.correlation-lost',
+      evidenceIdentity: 'returning-unresolved-correlation-lost',
+      attachmentIdentity: first.attachment.attachmentIdentity,
+      invocationIdentity: lost.invocationIdentity,
+      reason: 'correlation-lost',
+    });
+    await establish(owner, {
+      attachmentIdentity: attachmentIdentity('returning-unresolved-second'),
+      evidenceIdentity: 'returning-unresolved-second-establishment',
+    });
+    const currentReview = await startMessageReview(owner.workspace, 'returning-unresolved-current-review');
+    const request = {
+      kind: 'harness.review-message.inspect-default',
+      reviewIdentity: currentReview.reviewIdentity,
+      originReviewBasisIdentity: currentReview.liveBasisIdentity as never,
+      location: MESSAGE_LOCATION,
+      body: 'The same session still has an earlier turn whose outcome is unknown.',
+    } as const;
+    // A different session does not inherit the earlier one's risk.
+    await expect(owner.workspace.read(request)).resolves.toMatchObject({
+      status: 'available',
+      commitment: { status: 'direct', requirements: [] },
+    });
+
+    for (let restartCount = 0; restartCount < 2; restartCount += 1) {
+      owner = await restart(owner, created.checkout);
+      const returned = await establish(owner);
+      expect(returned.attachment).toEqual(first.attachment);
+      const inspection = await owner.workspace.read(request);
+      if (inspection.status !== 'available') throw new Error('Returning session inspection unavailable');
+      expect(inspection.commitment.status).toBe('gate');
+      expect(inspection.commitment.requirements).toEqual([
+        expect.objectContaining({ kind: 'unresolved-invocation-risk', invocationIdentity: lost.invocationIdentity }),
+      ]);
+      const interaction = await owner.workspace.read({
+        kind: 'harness.review-interaction',
+        reviewIdentity: earlierReview.reviewIdentity,
+        offset: 0,
+        limit: 128,
+      });
+      expect(interaction.invocations).toMatchObject([
+        { invocationIdentity: lost.invocationIdentity, status: 'unresolved' },
+      ]);
+      expect(interaction.handoffs).toHaveLength(1);
+      if (restartCount === 0) continue;
+
+      const command = {
+        kind: 'review.message.commit',
+        expectedStateVersion: inspection.stateVersion,
+        reviewIdentity: currentReview.reviewIdentity,
+        originReviewBasisIdentity: request.originReviewBasisIdentity,
+        location: request.location,
+        body: request.body,
+        attachmentIdentity: inspection.destination.attachmentIdentity,
+        inspectionIdentity: inspection.inspectionIdentity,
+      } as const;
+      await expect(
+        owner.workspace.execute({
+          ...command,
+          commandIdentity: 'returning-unresolved-unacknowledged',
+          acceptedAcknowledgementRequirementIdentities: [],
+        }),
+      ).resolves.toMatchObject({ status: 'rejected', reason: 'commitment-requirements-not-acknowledged' });
+      expect(returned.directives).toHaveLength(0);
+      await expect(
+        owner.workspace.execute({
+          ...command,
+          commandIdentity: 'returning-unresolved-acknowledged',
+          acceptedAcknowledgementRequirementIdentities: inspection.commitment.requirements.map(
+            requirement => requirement.requirementIdentity,
+          ),
+        }),
+      ).resolves.toMatchObject({ kind: 'review.message.committed', status: 'accepted' });
+      expect(returned.directives).toHaveLength(1);
+    }
+  });
+
+  it('lets a retired session reconnect with its own identity and take the connection back', async () => {
+    const created = await fixture();
+    let owner = await open(created.checkout);
+    const identity = await owner.workspace.read({ kind: 'workspace.identity' });
+    const first = await establish(owner);
+    const second = await establish(owner, {
+      attachmentIdentity: attachmentIdentity('returning-second'),
+      evidenceIdentity: 'returning-second-establishment',
+    });
+    expect(first.released).toEqual(['replaced']);
+    // The first session's reconnect loop, after a runtime restart, uses the same identity.
+    owner = await restart(owner, created.checkout);
+    const returned = await establish(owner);
+    expect(returned.attachment).toEqual(first.attachment);
+    await expect(owner.workspace.read({ kind: 'harness.connection' })).resolves.toMatchObject({
+      harnesses: [{ attachmentIdentity: first.attachment.attachmentIdentity, connected: true }],
+    });
+    const review = await startMessageReview(owner.workspace, 'returning-review');
+    const sent = await sendMessage(owner.workspace, review, 'returning-message');
+    expect(sent).toMatchObject({ status: 'accepted' });
+    expect(returned.directives).toHaveLength(1);
+    // Reconnecting again while it is live commits nothing.
+    const before = (await owner.workspace.read({ kind: 'workspace.home', offset: 0, limit: 64 })).stateVersion;
+    await establish(owner);
+    expect((await owner.workspace.read({ kind: 'workspace.home', offset: 0, limit: 64 })).stateVersion).toBe(before);
+    expect(second.directives).toEqual([]);
+
+    await owner.dispose();
+    owners.delete(owner);
+    const stored = await readStoredHarness(
+      await openStoredState(created.checkout, identity.workspaceIdentity),
+      identity.workspaceIdentity,
+    );
+    expect(stored.index.attachments.map(item => item.attachmentIdentity)).toEqual([
+      first.attachment.attachmentIdentity,
+    ]);
   });
 });

@@ -75,7 +75,8 @@ export const DIFF_KEEP_ROWS: number = DIFF_WINDOW_SIZE * 16;
 export const QUESTION_WINDOW_SIZE = 8;
 export const VERSION_WINDOW_SIZE = 64;
 export const SEARCH_RESULT_WINDOW_SIZE = 64;
-export const HARNESS_INTERACTION_WINDOW_SIZE = 64;
+/** The Workspace's whole per-Review bound, so every Message of a Review finds its Handoff. */
+export const HARNESS_INTERACTION_WINDOW_SIZE = 128;
 const MESSAGE_MAX_BYTES = 256 * 1024;
 /** Keys that write a Message or move the Review's own files or saved points; a shown step waits for Esc first. */
 const SHOWN_STEP_BLOCKED_KEYS: ReadonlySet<string> = new Set(['a', 'r', 'x', 'f', 't', 'R', 'C']);
@@ -1022,8 +1023,12 @@ export function messageInterrupting(invocation: HarnessInvocationView | undefine
 export function messageState(state: ReviewingApplicationState, item: ReviewMessageListItem): MessageState {
   if (item.response !== undefined) return 'answered';
   const invocation = messageInvocation(state, item);
+  // Without its Handoff on screen nothing is known about the turn; never claim one.
+  if (invocation === undefined) return 'not-loaded';
   if (messageInterrupting(invocation)) return 'stopping';
-  switch (invocation?.status) {
+  switch (invocation.status) {
+    case 'awaiting-start':
+      return 'waiting';
     case 'active':
       return 'working';
     case 'interrupted':
@@ -1036,8 +1041,6 @@ export function messageState(state: ReviewingApplicationState, item: ReviewMessa
       return 'unknown';
     case 'ended-normally':
       return 'no-answer';
-    default:
-      return 'waiting';
   }
 }
 

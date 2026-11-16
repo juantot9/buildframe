@@ -34,7 +34,9 @@ export type MessageState =
   | 'failed'
   | 'not-sent'
   | 'unknown'
-  | 'no-answer';
+  | 'no-answer'
+  /** Its Handoff is not in the loaded interaction window. */
+  | 'not-loaded';
 
 interface BadgeLook {
   readonly glyph: string;
@@ -54,6 +56,7 @@ const MESSAGE_LOOK: Record<MessageState, BadgeLook> = {
   'not-sent': { glyph: '✗', ascii: 'x', word: 'not sent', tone: 'danger' },
   unknown: { glyph: '?', ascii: '?', word: 'unknown', tone: 'warning' },
   'no-answer': { glyph: '·', ascii: '-', word: 'no answer', tone: 'muted' },
+  'not-loaded': { glyph: '?', ascii: '?', word: 'not loaded', tone: 'muted' },
 };
 
 /** A Message still on its way out, before the Workspace shows it as saved. */

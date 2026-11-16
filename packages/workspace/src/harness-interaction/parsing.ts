@@ -38,6 +38,7 @@ import {
   type HarnessHandoffIndexEntry,
   type HarnessIndexPayload,
   type HarnessInvocationIndexEntry,
+  type HarnessReviewHistoryPayload,
   type UserPullArmRecordPayload,
   type UserPullAttachmentRecordPayload,
   type UserPullContextBudgetRecord,
@@ -63,6 +64,7 @@ import {
   MAX_INTERRUPTION_INTENTS,
   MAX_INVOCATIONS,
   MAX_PREPARATIONS,
+  MAX_REVIEW_HANDOFFS,
   MAX_REVIEW_MESSAGE_ACKNOWLEDGEMENTS,
   PREPARATION_PATTERN,
   QUESTION_PATTERN,
@@ -98,6 +100,141 @@ export function parseAvailability(value: unknown): HarnessAvailability {
   }
 }
 
+function parseHandoffEntry(item: unknown): HarnessHandoffIndexEntry {
+  if (
+    !isRecord(item) ||
+    !hasOnlyKeys(
+      item,
+      [
+        'handoffIdentity',
+        'reviewIdentity',
+        'reviewBatchIdentity',
+        'attachmentIdentity',
+        'commitmentReceiptIdentity',
+        'capabilitySnapshotIdentity',
+        'disclosure',
+      ],
+      ['invocationIdentity'],
+    ) ||
+    typeof item.handoffIdentity !== 'string' ||
+    !HANDOFF_PATTERN.test(item.handoffIdentity) ||
+    typeof item.reviewIdentity !== 'string' ||
+    !REVIEW_PATTERN.test(item.reviewIdentity) ||
+    typeof item.reviewBatchIdentity !== 'string' ||
+    !BATCH_PATTERN.test(item.reviewBatchIdentity) ||
+    typeof item.attachmentIdentity !== 'string' ||
+    !ATTACHMENT_PATTERN.test(item.attachmentIdentity) ||
+    typeof item.commitmentReceiptIdentity !== 'string' ||
+    !RECEIPT_PATTERN.test(item.commitmentReceiptIdentity) ||
+    typeof item.capabilitySnapshotIdentity !== 'string' ||
+    !SNAPSHOT_PATTERN.test(item.capabilitySnapshotIdentity) ||
+    (item.invocationIdentity !== undefined &&
+      (typeof item.invocationIdentity !== 'string' || !INVOCATION_PATTERN.test(item.invocationIdentity))) ||
+    !isRecord(item.disclosure) ||
+    !hasOnlyKeys(item.disclosure, ['fileCount', 'questionCount', 'byteLength', 'sha256'], ['messageCount']) ||
+    !safeVersion(item.disclosure.fileCount) ||
+    !safeVersion(item.disclosure.questionCount) ||
+    (item.disclosure.messageCount === undefined
+      ? item.disclosure.questionCount < 1
+      : item.disclosure.messageCount !== 1 || item.disclosure.questionCount !== 0 || item.disclosure.fileCount !== 0) ||
+    !safeVersion(item.disclosure.byteLength) ||
+    typeof item.disclosure.sha256 !== 'string' ||
+    !SHA256_PATTERN.test(item.disclosure.sha256)
+  ) {
+    throw new HarnessStateProblem();
+  }
+  return {
+    handoffIdentity: item.handoffIdentity as HarnessHandoffIdentity,
+    reviewIdentity: item.reviewIdentity as ReviewIdentity,
+    reviewBatchIdentity: item.reviewBatchIdentity as ReviewBatchIdentity,
+    attachmentIdentity: item.attachmentIdentity as HarnessAttachmentIdentity,
+    commitmentReceiptIdentity: item.commitmentReceiptIdentity as HarnessCommitmentReceiptIdentity,
+    capabilitySnapshotIdentity: item.capabilitySnapshotIdentity as HarnessCapabilitySnapshotIdentity,
+    ...(item.invocationIdentity === undefined
+      ? {}
+      : { invocationIdentity: item.invocationIdentity as HarnessInvocationIdentity }),
+    disclosure: {
+      fileCount: item.disclosure.fileCount,
+      questionCount: item.disclosure.questionCount,
+      ...(item.disclosure.messageCount === undefined ? {} : { messageCount: 1 as const }),
+      byteLength: item.disclosure.byteLength,
+      sha256: item.disclosure.sha256,
+    },
+  } satisfies HarnessHandoffIndexEntry;
+}
+
+function parseInvocationEntry(item: unknown, allowStartObservationDeadline: boolean): HarnessInvocationIndexEntry {
+  if (
+    !isRecord(item) ||
+    !hasOnlyKeys(
+      item,
+      [
+        'invocationIdentity',
+        'handoffIdentity',
+        'reviewIdentity',
+        'attachmentIdentity',
+        'status',
+        'evidenceIdentities',
+        'interruptionIntentIdentities',
+      ],
+      allowStartObservationDeadline
+        ? ['startObservationDeadline', 'terminalReason', 'responseIdentity']
+        : ['terminalReason', 'responseIdentity'],
+    ) ||
+    typeof item.invocationIdentity !== 'string' ||
+    !INVOCATION_PATTERN.test(item.invocationIdentity) ||
+    typeof item.handoffIdentity !== 'string' ||
+    !HANDOFF_PATTERN.test(item.handoffIdentity) ||
+    typeof item.reviewIdentity !== 'string' ||
+    !REVIEW_PATTERN.test(item.reviewIdentity) ||
+    typeof item.attachmentIdentity !== 'string' ||
+    !ATTACHMENT_PATTERN.test(item.attachmentIdentity) ||
+    !memberOf(item.status, [
+      'awaiting-start',
+      'active',
+      'rejected',
+      'ended-normally',
+      'failed',
+      'interrupted',
+      'unresolved',
+    ] as const) ||
+    !Array.isArray(item.evidenceIdentities) ||
+    item.evidenceIdentities.length > MAX_EVIDENCE_PER_INVOCATION ||
+    !item.evidenceIdentities.every(identity => boundedEvidenceIdentity(identity)) ||
+    new Set(item.evidenceIdentities).size !== item.evidenceIdentities.length ||
+    !Array.isArray(item.interruptionIntentIdentities) ||
+    item.interruptionIntentIdentities.length > MAX_INTERRUPTION_INTENTS ||
+    !item.interruptionIntentIdentities.every(
+      identity => typeof identity === 'string' && INTERRUPTION_PATTERN.test(identity),
+    ) ||
+    (item.startObservationDeadline !== undefined && !isoTimestamp(item.startObservationDeadline)) ||
+    (item.terminalReason !== undefined && !boundedText(item.terminalReason)) ||
+    (item.responseIdentity !== undefined &&
+      (typeof item.responseIdentity !== 'string' || !RESPONSE_PATTERN.test(item.responseIdentity)))
+  ) {
+    throw new HarnessStateProblem();
+  }
+  return {
+    invocationIdentity: item.invocationIdentity as HarnessInvocationIdentity,
+    handoffIdentity: item.handoffIdentity as HarnessHandoffIdentity,
+    reviewIdentity: item.reviewIdentity as ReviewIdentity,
+    attachmentIdentity: item.attachmentIdentity as HarnessAttachmentIdentity,
+    status: item.status,
+    evidenceIdentities: item.evidenceIdentities.map(identity => {
+      if (!boundedEvidenceIdentity(identity)) throw new HarnessStateProblem();
+      return identity;
+    }),
+    interruptionIntentIdentities: item.interruptionIntentIdentities.map(
+      identity => identity as HarnessInterruptionIntentIdentity,
+    ),
+    ...(item.startObservationDeadline === undefined ? {} : { startObservationDeadline: item.startObservationDeadline }),
+    ...(item.terminalReason === undefined ? {} : { terminalReason: item.terminalReason }),
+    ...(item.responseIdentity === undefined
+      ? {}
+      : { responseIdentity: item.responseIdentity as ReviewResponseIdentity }),
+  } satisfies HarnessInvocationIndexEntry;
+}
+
 export function parseIndex(value: unknown): HarnessIndexPayload {
   if (!isRecord(value)) throw new HarnessStateProblem();
   const versionOne =
@@ -108,16 +245,20 @@ export function parseIndex(value: unknown): HarnessIndexPayload {
   const versionThree =
     value.formatVersion === 3 &&
     hasOnlyKeys(value, ['formatVersion', 'attachments', 'handoffs', 'invocations', 'preparations']);
+  // Older formats kept settled entries live; they stay live in memory until the next write moves them.
+  const versionFour =
+    value.formatVersion === 4 &&
+    hasOnlyKeys(value, ['formatVersion', 'attachments', 'handoffs', 'invocations', 'preparations']);
   if (
-    (!versionOne && !versionTwo && !versionThree) ||
+    (!versionOne && !versionTwo && !versionThree && !versionFour) ||
     !Array.isArray(value.attachments) ||
     !Array.isArray(value.handoffs) ||
     !Array.isArray(value.invocations) ||
-    ((versionTwo || versionThree) && !Array.isArray(value.preparations)) ||
+    (!versionOne && !Array.isArray(value.preparations)) ||
     value.attachments.length > MAX_ATTACHMENTS ||
     value.handoffs.length > MAX_HANDOFFS ||
     value.invocations.length > MAX_INVOCATIONS ||
-    ((versionTwo || versionThree) && (value.preparations as unknown[]).length > MAX_PREPARATIONS)
+    (!versionOne && (value.preparations as unknown[]).length > MAX_PREPARATIONS)
   ) {
     throw new HarnessStateProblem();
   }
@@ -147,144 +288,9 @@ export function parseIndex(value: unknown): HarnessIndexPayload {
       availability: parseAvailability(item.availability),
     } satisfies HarnessAttachmentIndexEntry;
   });
-  const handoffs = value.handoffs.map(item => {
-    if (
-      !isRecord(item) ||
-      !hasOnlyKeys(
-        item,
-        [
-          'handoffIdentity',
-          'reviewIdentity',
-          'reviewBatchIdentity',
-          'attachmentIdentity',
-          'commitmentReceiptIdentity',
-          'capabilitySnapshotIdentity',
-          'disclosure',
-        ],
-        ['invocationIdentity'],
-      ) ||
-      typeof item.handoffIdentity !== 'string' ||
-      !HANDOFF_PATTERN.test(item.handoffIdentity) ||
-      typeof item.reviewIdentity !== 'string' ||
-      !REVIEW_PATTERN.test(item.reviewIdentity) ||
-      typeof item.reviewBatchIdentity !== 'string' ||
-      !BATCH_PATTERN.test(item.reviewBatchIdentity) ||
-      typeof item.attachmentIdentity !== 'string' ||
-      !ATTACHMENT_PATTERN.test(item.attachmentIdentity) ||
-      typeof item.commitmentReceiptIdentity !== 'string' ||
-      !RECEIPT_PATTERN.test(item.commitmentReceiptIdentity) ||
-      typeof item.capabilitySnapshotIdentity !== 'string' ||
-      !SNAPSHOT_PATTERN.test(item.capabilitySnapshotIdentity) ||
-      (item.invocationIdentity !== undefined &&
-        (typeof item.invocationIdentity !== 'string' || !INVOCATION_PATTERN.test(item.invocationIdentity))) ||
-      !isRecord(item.disclosure) ||
-      !hasOnlyKeys(item.disclosure, ['fileCount', 'questionCount', 'byteLength', 'sha256'], ['messageCount']) ||
-      !safeVersion(item.disclosure.fileCount) ||
-      !safeVersion(item.disclosure.questionCount) ||
-      (item.disclosure.messageCount === undefined
-        ? item.disclosure.questionCount < 1
-        : item.disclosure.messageCount !== 1 ||
-          item.disclosure.questionCount !== 0 ||
-          item.disclosure.fileCount !== 0) ||
-      !safeVersion(item.disclosure.byteLength) ||
-      typeof item.disclosure.sha256 !== 'string' ||
-      !SHA256_PATTERN.test(item.disclosure.sha256)
-    ) {
-      throw new HarnessStateProblem();
-    }
-    return {
-      handoffIdentity: item.handoffIdentity as HarnessHandoffIdentity,
-      reviewIdentity: item.reviewIdentity as ReviewIdentity,
-      reviewBatchIdentity: item.reviewBatchIdentity as ReviewBatchIdentity,
-      attachmentIdentity: item.attachmentIdentity as HarnessAttachmentIdentity,
-      commitmentReceiptIdentity: item.commitmentReceiptIdentity as HarnessCommitmentReceiptIdentity,
-      capabilitySnapshotIdentity: item.capabilitySnapshotIdentity as HarnessCapabilitySnapshotIdentity,
-      ...(item.invocationIdentity === undefined
-        ? {}
-        : { invocationIdentity: item.invocationIdentity as HarnessInvocationIdentity }),
-      disclosure: {
-        fileCount: item.disclosure.fileCount,
-        questionCount: item.disclosure.questionCount,
-        ...(item.disclosure.messageCount === undefined ? {} : { messageCount: 1 as const }),
-        byteLength: item.disclosure.byteLength,
-        sha256: item.disclosure.sha256,
-      },
-    } satisfies HarnessHandoffIndexEntry;
-  });
-  const invocations = value.invocations.map(item => {
-    if (
-      !isRecord(item) ||
-      !hasOnlyKeys(
-        item,
-        [
-          'invocationIdentity',
-          'handoffIdentity',
-          'reviewIdentity',
-          'attachmentIdentity',
-          'status',
-          'evidenceIdentities',
-          'interruptionIntentIdentities',
-        ],
-        versionThree
-          ? ['startObservationDeadline', 'terminalReason', 'responseIdentity']
-          : ['terminalReason', 'responseIdentity'],
-      ) ||
-      typeof item.invocationIdentity !== 'string' ||
-      !INVOCATION_PATTERN.test(item.invocationIdentity) ||
-      typeof item.handoffIdentity !== 'string' ||
-      !HANDOFF_PATTERN.test(item.handoffIdentity) ||
-      typeof item.reviewIdentity !== 'string' ||
-      !REVIEW_PATTERN.test(item.reviewIdentity) ||
-      typeof item.attachmentIdentity !== 'string' ||
-      !ATTACHMENT_PATTERN.test(item.attachmentIdentity) ||
-      !memberOf(item.status, [
-        'awaiting-start',
-        'active',
-        'rejected',
-        'ended-normally',
-        'failed',
-        'interrupted',
-        'unresolved',
-      ] as const) ||
-      !Array.isArray(item.evidenceIdentities) ||
-      item.evidenceIdentities.length > MAX_EVIDENCE_PER_INVOCATION ||
-      !item.evidenceIdentities.every(identity => boundedEvidenceIdentity(identity)) ||
-      new Set(item.evidenceIdentities).size !== item.evidenceIdentities.length ||
-      !Array.isArray(item.interruptionIntentIdentities) ||
-      item.interruptionIntentIdentities.length > MAX_INTERRUPTION_INTENTS ||
-      !item.interruptionIntentIdentities.every(
-        identity => typeof identity === 'string' && INTERRUPTION_PATTERN.test(identity),
-      ) ||
-      (item.startObservationDeadline !== undefined && !isoTimestamp(item.startObservationDeadline)) ||
-      (item.terminalReason !== undefined && !boundedText(item.terminalReason)) ||
-      (item.responseIdentity !== undefined &&
-        (typeof item.responseIdentity !== 'string' || !RESPONSE_PATTERN.test(item.responseIdentity)))
-    ) {
-      throw new HarnessStateProblem();
-    }
-    return {
-      invocationIdentity: item.invocationIdentity as HarnessInvocationIdentity,
-      handoffIdentity: item.handoffIdentity as HarnessHandoffIdentity,
-      reviewIdentity: item.reviewIdentity as ReviewIdentity,
-      attachmentIdentity: item.attachmentIdentity as HarnessAttachmentIdentity,
-      status: item.status,
-      evidenceIdentities: item.evidenceIdentities.map(identity => {
-        if (!boundedEvidenceIdentity(identity)) throw new HarnessStateProblem();
-        return identity;
-      }),
-      interruptionIntentIdentities: item.interruptionIntentIdentities.map(
-        identity => identity as HarnessInterruptionIntentIdentity,
-      ),
-      ...(item.startObservationDeadline === undefined
-        ? {}
-        : { startObservationDeadline: item.startObservationDeadline }),
-      ...(item.terminalReason === undefined ? {} : { terminalReason: item.terminalReason }),
-      ...(item.responseIdentity === undefined
-        ? {}
-        : { responseIdentity: item.responseIdentity as ReviewResponseIdentity }),
-    } satisfies HarnessInvocationIndexEntry;
-  });
-  const rawPreparations = versionTwo || versionThree ? (value.preparations as unknown[]) : [];
+  const handoffs = value.handoffs.map(parseHandoffEntry);
+  const invocations = value.invocations.map(item => parseInvocationEntry(item, versionThree || versionFour));
+  const rawPreparations = versionOne ? [] : (value.preparations as unknown[]);
   const preparations = rawPreparations.map(item => {
     if (
       !isRecord(item) ||
@@ -451,7 +457,45 @@ export function parseIndex(value: unknown): HarnessIndexPayload {
   ) {
     throw new HarnessStateProblem();
   }
-  return { formatVersion: 3, attachments, handoffs, invocations, preparations };
+  return { formatVersion: 4, attachments, handoffs, invocations, preparations };
+}
+
+export function parseReviewHistory(value: unknown, reviewIdentity: ReviewIdentity): HarnessReviewHistoryPayload {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ['formatVersion', 'reviewIdentity', 'handoffs', 'invocations']) ||
+    value.formatVersion !== 1 ||
+    value.reviewIdentity !== reviewIdentity ||
+    !Array.isArray(value.handoffs) ||
+    !Array.isArray(value.invocations) ||
+    value.handoffs.length > MAX_REVIEW_HANDOFFS ||
+    value.invocations.length !== value.handoffs.length
+  ) {
+    throw new HarnessStateProblem();
+  }
+  const handoffs = value.handoffs.map(parseHandoffEntry);
+  const invocations = value.invocations.map(item => parseInvocationEntry(item, false));
+  if (
+    new Set(handoffs.map(item => item.handoffIdentity)).size !== handoffs.length ||
+    new Set(handoffs.map(item => item.reviewBatchIdentity)).size !== handoffs.length ||
+    new Set(invocations.map(item => item.invocationIdentity)).size !== invocations.length ||
+    handoffs.some((handoff, position) => {
+      const invocation = invocations[position];
+      return (
+        handoff.reviewIdentity !== reviewIdentity ||
+        invocation === undefined ||
+        handoff.invocationIdentity !== invocation.invocationIdentity ||
+        invocation.handoffIdentity !== handoff.handoffIdentity ||
+        invocation.reviewIdentity !== reviewIdentity ||
+        invocation.attachmentIdentity !== handoff.attachmentIdentity ||
+        invocation.status === 'awaiting-start' ||
+        invocation.status === 'active'
+      );
+    })
+  ) {
+    throw new HarnessStateProblem();
+  }
+  return { formatVersion: 1, reviewIdentity, handoffs, invocations };
 }
 
 export function parseUserPullAttachmentRecord(value: unknown): UserPullAttachmentRecordPayload {

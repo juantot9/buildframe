@@ -28,9 +28,9 @@ afterEach(async () => {
 });
 
 describe('Claude User Pull Preparation lifecycle', () => {
-  it('upgrades bounded v1 and v2 Harness indexes in memory and writes only v3 thereafter', () => {
+  it('upgrades bounded v1, v2 and v3 Harness indexes in memory and writes only v4 thereafter', () => {
     const upgraded = {
-      formatVersion: 3,
+      formatVersion: 4,
       attachments: [],
       handoffs: [],
       invocations: [],
@@ -38,6 +38,9 @@ describe('Claude User Pull Preparation lifecycle', () => {
     };
     expect(parseIndex({ formatVersion: 1, attachments: [], handoffs: [], invocations: [] })).toEqual(upgraded);
     expect(parseIndex({ formatVersion: 2, attachments: [], handoffs: [], invocations: [], preparations: [] })).toEqual(
+      upgraded,
+    );
+    expect(parseIndex({ formatVersion: 3, attachments: [], handoffs: [], invocations: [], preparations: [] })).toEqual(
       upgraded,
     );
   });
@@ -81,7 +84,7 @@ describe('Claude User Pull Preparation lifecycle', () => {
       handoffs: Array<{ handoffIdentity: string }>;
       preparations: unknown[];
     };
-    expect(index.formatVersion).toBe(3);
+    expect(index.formatVersion).toBe(4);
     expect(index.preparations).toHaveLength(1);
     const handoffIdentity = index.handoffs[0]?.handoffIdentity;
     if (handoffIdentity === undefined) throw new Error('Handoff identity missing');
@@ -592,7 +595,7 @@ describe('Claude User Pull Preparation lifecycle', () => {
       invocations: storedIndex.invocations.map(({ startObservationDeadline: _deadline, ...invocation }) => invocation),
     };
     const upgradedV2 = parseIndex(legacyV2);
-    expect(upgradedV2.formatVersion).toBe(3);
+    expect(upgradedV2.formatVersion).toBe(4);
     expect(upgradedV2.invocations[0]).not.toHaveProperty('startObservationDeadline');
   });
 

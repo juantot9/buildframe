@@ -53,6 +53,10 @@ export function reasonSentence(reason: string, agent: string = 'The agent'): str
       return 'Your Message template is invalid. Use {{message}} once, with {{location}}, or with {{source}} and {{origin}}; delete the template file to use the default.';
     case 'review-message-limit-reached':
       return 'This Review has reached its Message limit. Start a new Review to keep going.';
+    case 'review-handoff-limit-reached':
+      return 'This Review has reached its Message limit. Start a new Review to keep sending.';
+    case 'harness-index-limit-reached':
+      return `Too many earlier Messages in this repository have an unknown outcome. Run /buildframe in ${lowerAgent} again to start fresh, then send.`;
     case 'message-file-not-found':
     case 'anchor-file-not-found':
       return 'That file is no longer there. Pick another file or line.';

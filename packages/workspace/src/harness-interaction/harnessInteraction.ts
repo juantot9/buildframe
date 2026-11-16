@@ -156,8 +156,10 @@ import {
   type HarnessHandoffIndexEntry,
   type HarnessIndexPayload,
   type HarnessInvocationIndexEntry,
+  type HarnessReviewHistoryPayload,
   type LiveAdapter,
   type LoadedHarnessIndex,
+  type LoadedReviewHistory,
   type LoadedReviewIndex,
   type PreparedAskInspection,
   type PreparedInspection,
@@ -215,6 +217,7 @@ import {
   parseHarnessCommandRecord,
   parseHarnessEvidenceRecord,
   parseIndex,
+  parseReviewHistory,
   parseUserPullArmRecord,
   parseUserPullAttachmentRecord,
   parseUserPullObservabilityRecord,
@@ -224,9 +227,14 @@ import {
 import {
   emptyIndex,
   immutableRecord,
+  liveWorkCounts,
+  moveSettledInteractions,
   replaceAttachment,
   replaceInvocation,
   replacePreparation,
+  restoreUnresolvedInteractions,
+  reviewHistoryIdentity,
+  reviewsWithMovableInteractions,
   revisionedRecord,
 } from './records.js';
 import {
@@ -578,6 +586,8 @@ export class HarnessInteractionOwner {
       if (!sameValue(prior.normalizedAttachment, attachment) || !sameValue(prior.manifest, manifest)) {
         return { status: 'refused', reason: 'evidence-identity-conflict' };
       }
+      const refused = await this.#returnRetiredAttachment(prior);
+      if (refused !== undefined) return refused;
       this.#releaseOtherSessions(attachment.attachmentIdentity);
       this.#liveAdapters.set(attachment.attachmentIdentity, {
         manifest,
@@ -586,7 +596,7 @@ export class HarnessInteractionOwner {
         compatibilityIdentity,
         connection,
       });
-      // Reconnecting commits nothing, but the agent is back.
+      // The agent is back; reconnecting never replays a workflow action.
       this.#scheduleConnectionSubscriptions();
       return prior.result;
     }
@@ -597,9 +607,6 @@ export class HarnessInteractionOwner {
     );
     if (priorAttachment !== undefined && !sameValue(priorAttachment.destination, attachment.destination)) {
       return { status: 'refused', reason: 'attachment-identity-conflict' };
-    }
-    if (priorAttachment === undefined && index.payload.attachments.length >= MAX_ATTACHMENTS) {
-      return { status: 'refused', reason: 'state-conflict' };
     }
 
     const nextStateVersion = index.stateVersion + 1;
@@ -624,6 +631,26 @@ export class HarnessInteractionOwner {
       destination: attachment.destination,
       availability: attachment.availability,
     };
+    // Newest wins: every other Attachment with nothing in flight retires from the live index.
+    let moved: { readonly payload: HarnessIndexPayload; readonly records: StateRecordWrite[] };
+    try {
+      moved = await this.#movedIndexWrites(
+        index,
+        replaceAttachment(index.payload, nextAttachment),
+        attachment.attachmentIdentity,
+      );
+    } catch (error) {
+      if (error instanceof HarnessProjectionVersionChanged) {
+        return { status: 'refused', reason: 'state-version-changed' };
+      }
+      throw error;
+    }
+    if (moved.payload.attachments.length > MAX_ATTACHMENTS) {
+      return { status: 'refused', reason: 'attachment-limit-reached' };
+    }
+    if (moved.payload.handoffs.length > MAX_HANDOFFS || moved.payload.invocations.length > MAX_INVOCATIONS) {
+      return { status: 'refused', reason: 'state-conflict' };
+    }
 
     let committed: StateCommitResult;
     try {
@@ -637,7 +664,7 @@ export class HarnessInteractionOwner {
             'harness.attachment-compatibility',
             compatibility,
           ),
-          this.#indexWrite(index, replaceAttachment(index.payload, nextAttachment)),
+          ...moved.records,
         ],
         result: {
           kind: 'harness.attachment-establishment',
@@ -672,6 +699,90 @@ export class HarnessInteractionOwner {
     });
     this.#publish(committed.stateVersion);
     return result;
+  }
+
+  /**
+   * A session reconnecting with an Attachment that retired from the live index
+   * (a newer `/buildframe` connected meanwhile) takes its place again, and the
+   * others retire as for any newest connection. Its unresolved turns return
+   * too, even from Previous Reviews: retirement never clears their consent gate.
+   * Its immutable compatibility record already exists, so this commit has its own command identity per
+   * State version: the original establishment command is never replayed, and a
+   * retry after a lost State version is a new command, not a ledger conflict.
+   */
+  async #returnRetiredAttachment(
+    prior: AttachmentCompatibilityPayload,
+  ): Promise<Extract<HarnessAttachmentEstablishment, { readonly status: 'refused' }> | undefined> {
+    const attachment = prior.normalizedAttachment;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let index: LoadedHarnessIndex;
+      let moved: { readonly payload: HarnessIndexPayload; readonly records: StateRecordWrite[] };
+      try {
+        index = await this.#loadIndex();
+        const current = index.payload.attachments.find(
+          item => item.attachmentIdentity === attachment.attachmentIdentity,
+        );
+        const histories = await this.#allReviewHistories(index.stateVersion);
+        const hasHistoricalUnresolved = [...histories.values()].some(history =>
+          history.payload.invocations.some(
+            invocation =>
+              invocation.attachmentIdentity === attachment.attachmentIdentity && invocation.status === 'unresolved',
+          ),
+        );
+        if (current !== undefined && !hasHistoricalUnresolved) return undefined;
+        moved = await this.#movedIndexWrites(
+          index,
+          current === undefined
+            ? replaceAttachment(index.payload, {
+                attachmentIdentity: attachment.attachmentIdentity,
+                compatibilityIdentity: prior.compatibilityIdentity,
+                establishmentEvidenceIdentity: attachment.evidenceIdentity,
+                destination: attachment.destination,
+                availability: attachment.availability,
+              })
+            : index.payload,
+          attachment.attachmentIdentity,
+          histories,
+        );
+      } catch (error) {
+        if (error instanceof HarnessProjectionVersionChanged) continue;
+        if (error instanceof HarnessStateProblem) throw error;
+        return { status: 'refused', reason: 'state-unavailable' };
+      }
+      if (moved.payload.attachments.length > MAX_ATTACHMENTS) {
+        return { status: 'refused', reason: 'attachment-limit-reached' };
+      }
+      if (moved.payload.handoffs.length > MAX_HANDOFFS || moved.payload.invocations.length > MAX_INVOCATIONS) {
+        // Refuse rather than forget risk or persist an index its parser cannot read.
+        return { status: 'refused', reason: 'state-conflict' };
+      }
+      let committed: StateCommitResult;
+      try {
+        committed = await this.#state.commit({
+          commandIdentity: `harness-attachment-return:${index.stateVersion}:${prior.compatibilityIdentity}`,
+          expectedStateVersion: index.stateVersion,
+          records: moved.records,
+          result: {
+            kind: 'harness.attachment-return',
+            schemaVersion: 1,
+            payload: encode(prior.result),
+          },
+        });
+      } catch {
+        return { status: 'refused', reason: 'state-unavailable' };
+      }
+      if (!('result' in committed)) {
+        if (committed.reason === 'state-version-mismatch') continue;
+        return { status: 'refused', reason: this.#attachmentCommitReason(committed.reason) };
+      }
+      if (committed.status === 'duplicate') {
+        // Only a commit at this exact State version could match; read again rather than trust it.
+        continue;
+      }
+      this.#publish(committed.stateVersion);
+      return undefined;
+    }
+    return { status: 'refused', reason: 'state-version-changed' };
   }
 
   /**
@@ -776,10 +887,14 @@ export class HarnessInteractionOwner {
     }
     const attachment = index.payload.attachments.find(item => item.attachmentIdentity === evidence.attachmentIdentity);
     if (attachment === undefined) {
+      const settled =
+        evidence.kind === 'harness.availability.observed'
+          ? undefined
+          : await this.#settledEvidenceRefusal(index, evidence);
       return {
         status: 'refused',
         evidenceIdentity: evidence.evidenceIdentity,
-        reason: 'attachment-not-found',
+        reason: settled ?? 'attachment-not-found',
       };
     }
 
@@ -799,7 +914,10 @@ export class HarnessInteractionOwner {
         item => item.invocationIdentity === evidence.invocationIdentity,
       );
       if (invocation === undefined) {
-        return this.#evidenceRefused(evidence, 'invocation-not-found');
+        return this.#evidenceRefused(
+          evidence,
+          (await this.#settledEvidenceRefusal(index, evidence)) ?? 'invocation-not-found',
+        );
       }
       if (invocation.attachmentIdentity !== evidence.attachmentIdentity) {
         return this.#evidenceRefused(evidence, 'attachment-identity-mismatch');
@@ -842,6 +960,16 @@ export class HarnessInteractionOwner {
       normalizedEvidence: normalized,
       acknowledgement,
     };
+    let indexWrites: StateRecordWrite[];
+    try {
+      // A settled Invocation moves to its Review's history in this same commit.
+      indexWrites = await this.#indexWrites(index, nextIndex);
+    } catch (error) {
+      if (error instanceof HarnessProjectionVersionChanged) {
+        return this.#evidenceRefused(evidence, 'state-version-changed');
+      }
+      throw error;
+    }
     let committed: StateCommitResult;
     try {
       committed = await this.#state.commit({
@@ -855,7 +983,7 @@ export class HarnessInteractionOwner {
                 ...preparedResponse.records,
                 this.#reviewIndexWrite(preparedResponse.reviewIndex, preparedResponse.nextReviewIndex),
               ]),
-          this.#indexWrite(index, nextIndex),
+          ...indexWrites,
         ],
         result: {
           kind: 'harness.evidence-acknowledgement',
@@ -1255,6 +1383,48 @@ export class HarnessInteractionOwner {
     });
   }
 
+  /**
+   * New evidence for an Invocation that already settled into its Review's
+   * history is refused exactly as it was while the Invocation was live. The
+   * Invocation's own immutable record names its Review. An exact duplicate
+   * never reaches here: its evidence record answers it first.
+   */
+  async #settledEvidenceRefusal(
+    index: LoadedHarnessIndex,
+    evidence: Exclude<NormalizedHarnessEvidence, { readonly kind: 'harness.availability.observed' }>,
+  ): Promise<HarnessEvidenceRefusalReason | undefined> {
+    let invocation: HarnessInvocationIndexEntry | undefined;
+    try {
+      invocation = await this.#settledInvocation(index.stateVersion, evidence.invocationIdentity);
+    } catch (error) {
+      if (error instanceof HarnessProjectionVersionChanged) return 'state-version-changed';
+      throw error;
+    }
+    if (invocation === undefined) return undefined;
+    if (invocation.attachmentIdentity !== evidence.attachmentIdentity) return 'attachment-identity-mismatch';
+    const transitioned = this.#applyInvocationEvidence(invocation, evidence);
+    return typeof transitioned === 'string' ? transitioned : 'conflicting-terminal-evidence';
+  }
+
+  /** A settled Invocation from its Review's history, found through its immutable record. */
+  async #settledInvocation(
+    stateVersion: number,
+    invocationIdentity: HarnessInvocationIdentity,
+  ): Promise<HarnessInvocationIndexEntry | undefined> {
+    const [record] = await this.#readOptionalRecordsAtVersion(stateVersion, [invocationIdentity]);
+    if (
+      record === undefined ||
+      record.recordClass !== 'immutable' ||
+      (record.kind !== 'harness.direct-invocation' && record.kind !== 'harness.user-pull-invocation') ||
+      !REVIEW_PATTERN.test(record.workflowIdentity)
+    ) {
+      return undefined;
+    }
+    const reviewIdentity = record.workflowIdentity as ReviewIdentity;
+    const history = (await this.#loadReviewHistories(stateVersion, [reviewIdentity])).get(reviewIdentity);
+    return history?.payload.invocations.find(item => item.invocationIdentity === invocationIdentity);
+  }
+
   #applyInvocationEvidence(
     invocation: HarnessInvocationIndexEntry,
     evidence: Exclude<NormalizedHarnessEvidence, { readonly kind: 'harness.availability.observed' }>,
@@ -1315,6 +1485,12 @@ export class HarnessInteractionOwner {
       evidenceIdentities: [...invocation.evidenceIdentities, evidence.evidenceIdentity],
       ...(evidence.reason === undefined ? {} : { terminalReason: evidence.reason }),
     };
+  }
+
+  /** Whether one more Handoff and Invocation would overflow the live index once settled work moves out. */
+  #liveIndexFull(index: LoadedHarnessIndex): boolean {
+    const live = liveWorkCounts(index.payload);
+    return live.handoffs >= MAX_HANDOFFS || live.invocations >= MAX_INVOCATIONS;
   }
 
   /**
@@ -1509,13 +1685,11 @@ export class HarnessInteractionOwner {
     if ((entry.messageHistory?.messages.length ?? 0) >= MAX_REVIEW_MESSAGES) {
       return unavailable(stateVersion, 'review-message-limit-reached');
     }
-    if (
-      entry.batchIdentities.length >= MAX_REVIEW_BATCHES ||
-      index.payload.handoffs.length >= MAX_HANDOFFS ||
-      index.payload.invocations.length >= MAX_INVOCATIONS
-    ) {
-      return unavailable(stateVersion, 'state-conflict');
+    // Each Handoff spends one Review Batch, so this also bounds the Review's history.
+    if (entry.batchIdentities.length >= MAX_REVIEW_BATCHES) {
+      return unavailable(stateVersion, 'review-handoff-limit-reached');
     }
+    if (this.#liveIndexFull(index)) return unavailable(stateVersion, 'harness-index-limit-reached');
     const [basisRecord] = await this.#readRecordsAtVersion(stateVersion, [originReviewBasisIdentity], false);
     if (basisRecord?.recordClass !== 'immutable' || basisRecord.kind !== 'review.basis') {
       throw new HarnessStateProblem();
@@ -2037,14 +2211,10 @@ export class HarnessInteractionOwner {
     if (reviewIndex.payload.currentReviewIdentity !== reviewIdentity) {
       return unavailable(stateVersion, 'review-not-current');
     }
-    if (
-      entry.batchIdentities.length >= MAX_REVIEW_BATCHES ||
-      entry.questionIdentities.length >= MAX_REVIEW_QUESTIONS ||
-      index.payload.handoffs.length >= MAX_HANDOFFS ||
-      index.payload.invocations.length >= MAX_INVOCATIONS
-    ) {
-      return unavailable(stateVersion, 'state-conflict');
+    if (entry.batchIdentities.length >= MAX_REVIEW_BATCHES || entry.questionIdentities.length >= MAX_REVIEW_QUESTIONS) {
+      return unavailable(stateVersion, 'review-handoff-limit-reached');
     }
+    if (this.#liveIndexFull(index)) return unavailable(stateVersion, 'harness-index-limit-reached');
     const [snapshotRecord] = await this.#readRecordsAtVersion(stateVersion, [entry.reviewSnapshotIdentity], false);
     if (snapshotRecord?.kind !== 'review.snapshot' || snapshotRecord.recordClass !== 'immutable') {
       throw new HarnessStateProblem();
@@ -2577,7 +2747,7 @@ export class HarnessInteractionOwner {
         automaticReplay: 'prohibited',
       }),
       this.#reviewIndexWrite(prepared.reviewIndex, nextReviewIndex),
-      this.#indexWrite(index, nextHarnessIndex),
+      ...(await this.#indexWrites(index, nextHarnessIndex)),
       this.#commandRecord(command, normalized, result),
     ];
     // The code as it stood at send, so this Message's Response can later show
@@ -2885,7 +3055,7 @@ export class HarnessInteractionOwner {
         automaticReplay: 'prohibited',
       }),
       this.#reviewIndexWrite(prepared.reviewIndex, nextReviewIndex),
-      this.#indexWrite(index, nextHarnessIndex),
+      ...(await this.#indexWrites(index, nextHarnessIndex)),
       this.#commandRecord(command, normalized, result),
     ];
     if (prepared.captured !== undefined && !(await this.#snapshots.verify(prepared.captured))) {
@@ -3033,13 +3203,17 @@ export class HarnessInteractionOwner {
         open.map(item => item.preparationIdentity),
       );
     }
-    const priorHandoff = index.payload.handoffs.find(item => {
-      if (item.reviewBatchIdentity !== reviewBatchIdentity) return false;
-      const preparation = index.payload.preparations.find(
-        candidate => candidate.handoffIdentity === item.handoffIdentity,
-      );
-      return preparation === undefined || preparation.status === 'prepared' || preparation.status === 'claimed';
-    });
+    const priorHandoff =
+      index.payload.handoffs.find(item => {
+        if (item.reviewBatchIdentity !== reviewBatchIdentity) return false;
+        const preparation = index.payload.preparations.find(
+          candidate => candidate.handoffIdentity === item.handoffIdentity,
+        );
+        return preparation === undefined || preparation.status === 'prepared' || preparation.status === 'claimed';
+      }) ??
+      (await this.#loadReviewHistories(stateVersion, [reviewIdentity]))
+        .get(reviewIdentity)
+        ?.payload.handoffs.find(item => item.reviewBatchIdentity === reviewBatchIdentity);
     if (priorHandoff !== undefined) {
       return unavailableUserPullInspection(
         stateVersion,
@@ -3056,7 +3230,7 @@ export class HarnessInteractionOwner {
         reviewIdentity,
         reviewBatchIdentity,
         attachmentIdentity,
-        'state-conflict',
+        'harness-index-limit-reached',
       );
     }
 
@@ -3169,7 +3343,7 @@ export class HarnessInteractionOwner {
       return rejected(command, index.stateVersion, 'attachment-identity-conflict');
     }
     if (priorAttachment === undefined && index.payload.attachments.length >= MAX_ATTACHMENTS) {
-      return rejected(command, index.stateVersion, 'state-conflict');
+      return rejected(command, index.stateVersion, 'harness-index-limit-reached');
     }
 
     const nextAttachment: HarnessAttachmentIndexEntry = {
@@ -3279,7 +3453,7 @@ export class HarnessInteractionOwner {
           priorObservability?.revision ?? 0,
           nextObservability,
         ),
-        this.#indexWrite(index, replaceAttachment(index.payload, nextAttachment)),
+        ...(await this.#indexWrites(index, replaceAttachment(index.payload, nextAttachment))),
         this.#commandRecord(command, normalized, result),
       ],
       result: {
@@ -3477,7 +3651,7 @@ export class HarnessInteractionOwner {
         0,
         preparationRecord,
       ),
-      this.#indexWrite(index, nextIndex),
+      ...(await this.#indexWrites(index, nextIndex)),
       this.#commandRecord(command, normalized, result),
     ];
     const committed = await this.#state.commit({
@@ -3619,7 +3793,7 @@ export class HarnessInteractionOwner {
           loaded.revision,
           nextRecord,
         ),
-        this.#indexWrite(index, replacePreparation(index.payload, nextPreparation)),
+        ...(await this.#indexWrites(index, replacePreparation(index.payload, nextPreparation))),
         this.#commandRecord(command, normalized, result),
       ],
       result: { kind: 'harness.command-result', schemaVersion: 1, payload: encode(result) },
@@ -3700,7 +3874,7 @@ export class HarnessInteractionOwner {
       );
     }
     if (index.payload.invocations.length >= MAX_INVOCATIONS) {
-      return rejected(command, index.stateVersion, 'state-conflict');
+      return rejected(command, index.stateVersion, 'harness-index-limit-reached');
     }
 
     const loaded = await this.#loadUserPullPreparationAtVersion(index.stateVersion, preparation, index.payload);
@@ -3836,7 +4010,7 @@ export class HarnessInteractionOwner {
           startObservationDeadline,
           automaticReplay: 'prohibited',
         }),
-        this.#indexWrite(index, nextIndex),
+        ...(await this.#indexWrites(index, nextIndex)),
         this.#commandRecord(command, normalized, committedResult),
       ],
       result: { kind: 'harness.command-result', schemaVersion: 1, payload: encode(committedResult) },
@@ -3903,7 +4077,7 @@ export class HarnessInteractionOwner {
           loaded.revision,
           nextRecord,
         ),
-        this.#indexWrite(index, replacePreparation(index.payload, nextPreparation)),
+        ...(await this.#indexWrites(index, replacePreparation(index.payload, nextPreparation))),
         this.#commandRecord(command, normalized, result),
       ],
       result: { kind: 'harness.command-result', schemaVersion: 1, payload: encode(result) },
@@ -4666,7 +4840,7 @@ export class HarnessInteractionOwner {
         initialStatus: 'awaiting-start',
         automaticReplay: 'prohibited',
       }),
-      this.#indexWrite(index, nextIndex),
+      ...(await this.#indexWrites(index, nextIndex)),
       this.#commandRecord(command, normalized, result),
     ];
 
@@ -4708,7 +4882,12 @@ export class HarnessInteractionOwner {
   ): Promise<HarnessInteractionCommandResult> {
     const invocation = index.payload.invocations.find(item => item.invocationIdentity === command.invocationIdentity);
     if (invocation === undefined) {
-      return rejected(command, index.stateVersion, 'invocation-not-found');
+      const settled = await this.#settledInvocation(index.stateVersion, command.invocationIdentity);
+      return rejected(
+        command,
+        index.stateVersion,
+        settled === undefined ? 'invocation-not-found' : 'invocation-not-interruptible',
+      );
     }
     if (invocation.status !== 'awaiting-start' && invocation.status !== 'active') {
       return rejected(command, index.stateVersion, 'invocation-not-interruptible');
@@ -4747,7 +4926,7 @@ export class HarnessInteractionOwner {
           statusAtRequest: invocation.status,
           implication: 'intent-only',
         }),
-        this.#indexWrite(index, replaceInvocation(index.payload, nextInvocation)),
+        ...(await this.#indexWrites(index, replaceInvocation(index.payload, nextInvocation))),
         this.#commandRecord(command, normalized, result),
       ],
       result: {
@@ -5037,6 +5216,13 @@ export class HarnessInteractionOwner {
       reason,
       stateVersion: index.stateVersion + 1,
     });
+    let indexWrites: StateRecordWrite[];
+    try {
+      indexWrites = await this.#indexWrites(index, replacePreparation(index.payload, nextPreparation));
+    } catch (error) {
+      if (!(error instanceof HarnessProjectionVersionChanged)) throw error;
+      return (await this.#loadIndex()).stateVersion;
+    }
     const committed = await this.#state.commit({
       commandIdentity: `harness-user-pull-expire:${preparation.preparationIdentity}:${reason}`,
       expectedStateVersion: index.stateVersion,
@@ -5048,7 +5234,7 @@ export class HarnessInteractionOwner {
           loaded.revision,
           nextRecord,
         ),
-        this.#indexWrite(index, replacePreparation(index.payload, nextPreparation)),
+        ...indexWrites,
       ],
       result: { kind: 'harness.user-pull-expiry-result', schemaVersion: 1, payload: encode(result) },
     });
@@ -5207,7 +5393,11 @@ export class HarnessInteractionOwner {
         active.map(item => item.invocationIdentity),
       );
     }
-    const priorHandoff = index.payload.handoffs.find(item => item.reviewBatchIdentity === reviewBatchIdentity);
+    const priorHandoff =
+      index.payload.handoffs.find(item => item.reviewBatchIdentity === reviewBatchIdentity) ??
+      (await this.#loadReviewHistories(stateVersion, [reviewIdentity]))
+        .get(reviewIdentity)
+        ?.payload.handoffs.find(item => item.reviewBatchIdentity === reviewBatchIdentity);
     if (priorHandoff !== undefined) {
       return unavailableInspection(
         stateVersion,
@@ -5216,6 +5406,15 @@ export class HarnessInteractionOwner {
         attachmentIdentity,
         'batch-already-handed-off',
         [priorHandoff.handoffIdentity],
+      );
+    }
+    if (this.#liveIndexFull(index)) {
+      return unavailableInspection(
+        stateVersion,
+        reviewIdentity,
+        reviewBatchIdentity,
+        attachmentIdentity,
+        'harness-index-limit-reached',
       );
     }
 
@@ -5682,8 +5881,29 @@ export class HarnessInteractionOwner {
     offset: number,
     limit: number,
   ): Promise<ReviewHarnessInteractionView> {
+    // History, the live index and the Review index are read at one State version.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.#interactionViewOnce(reviewIdentity, offset, limit);
+      } catch (error) {
+        if (!(error instanceof HarnessProjectionVersionChanged) || attempt === 2) throw error;
+      }
+    }
+    throw new HarnessProjectionVersionChanged();
+  }
+
+  async #interactionViewOnce(
+    reviewIdentity: ReviewIdentity,
+    offset: number,
+    limit: number,
+  ): Promise<ReviewHarnessInteractionView> {
     const index = await this.#expireUserPullStartObservations(await this.#loadIndex());
-    const allHandoffs = index.payload.handoffs.filter(item => item.reviewIdentity === reviewIdentity);
+    const history = (await this.#loadReviewHistories(index.stateVersion, [reviewIdentity])).get(reviewIdentity);
+    const liveHandoffs = index.payload.handoffs.filter(item => item.reviewIdentity === reviewIdentity);
+    const allHandoffs = await this.#inSendOrder(index.stateVersion, reviewIdentity, [
+      ...(history?.payload.handoffs ?? []),
+      ...liveHandoffs,
+    ]);
     const handoffs = allHandoffs.slice(offset, offset + limit);
     const batchRecords = await this.#readRecordsAtVersion(
       index.stateVersion,
@@ -5728,7 +5948,7 @@ export class HarnessInteractionOwner {
       offset,
       nextOffset,
       handoffs: handoffs.map(item => projectionHandoff(item, messageIdentities.get(item.reviewBatchIdentity))),
-      invocations: index.payload.invocations
+      invocations: [...(history?.payload.invocations ?? []), ...index.payload.invocations]
         .filter(item => invocationIds.has(item.invocationIdentity))
         .map(projectionInvocation),
       userPull: {
@@ -5738,6 +5958,29 @@ export class HarnessInteractionOwner {
         preparations,
       },
     });
+  }
+
+  /**
+   * One Review's Handoffs from history and the live index, in the order their
+   * Review Batches were committed, so moving a Handoff to history never moves it
+   * in the view. Ties keep their stored order.
+   */
+  async #inSendOrder(
+    stateVersion: number,
+    reviewIdentity: ReviewIdentity,
+    handoffs: readonly HarnessHandoffIndexEntry[],
+  ): Promise<readonly HarnessHandoffIndexEntry[]> {
+    if (handoffs.length < 2) return handoffs;
+    const entry = (await this.#loadReviewIndexAtVersion(stateVersion)).payload.reviews.find(
+      item => item.reviewIdentity === reviewIdentity,
+    );
+    const position = new Map(entry?.batchIdentities.map((identity, order) => [identity, order]));
+    const order = (handoff: HarnessHandoffIndexEntry): number =>
+      position.get(handoff.reviewBatchIdentity) ?? Number.MAX_SAFE_INTEGER;
+    return handoffs
+      .map((handoff, stored) => ({ handoff, stored }))
+      .sort((left, right) => order(left.handoff) - order(right.handoff) || left.stored - right.stored)
+      .map(item => item.handoff);
   }
 
   async #loadReviewIndexAtVersion(expectedStateVersion: number): Promise<LoadedReviewIndex> {
@@ -5795,6 +6038,93 @@ export class HarnessInteractionOwner {
 
   #indexWrite(index: LoadedHarnessIndex, payload: HarnessIndexPayload): StateRecordWrite {
     return revisionedRecord(this.#indexIdentity, this.#indexIdentity, 'harness.index', index.revision, payload);
+  }
+
+  /** Every index write: settled work moves into its Review's history in the same commit. */
+  async #indexWrites(index: LoadedHarnessIndex, payload: HarnessIndexPayload): Promise<StateRecordWrite[]> {
+    return (await this.#movedIndexWrites(index, payload)).records;
+  }
+
+  async #movedIndexWrites(
+    index: LoadedHarnessIndex,
+    payload: HarnessIndexPayload,
+    keptAttachmentIdentity?: HarnessAttachmentIdentity,
+    returningHistories?: ReadonlyMap<ReviewIdentity, LoadedReviewHistory>,
+  ): Promise<{ readonly payload: HarnessIndexPayload; readonly records: StateRecordWrite[] }> {
+    // Only an attachment handshake needs all Reviews: an unknown turn may be
+    // in a Previous Review. Ordinary writes keep their bounded affected set.
+    const loaded =
+      returningHistories ??
+      (keptAttachmentIdentity === undefined
+        ? await this.#loadReviewHistories(index.stateVersion, reviewsWithMovableInteractions(payload))
+        : await this.#allReviewHistories(index.stateVersion));
+    const histories = new Map([...loaded].map(([reviewIdentity, history]) => [reviewIdentity, history.payload]));
+    const restored =
+      keptAttachmentIdentity === undefined
+        ? { index: payload, histories: new Map<ReviewIdentity, HarnessReviewHistoryPayload>() }
+        : restoreUnresolvedInteractions(payload, histories, keptAttachmentIdentity);
+    for (const [reviewIdentity, history] of restored.histories) histories.set(reviewIdentity, history);
+    const moved = moveSettledInteractions(restored.index, histories, keptAttachmentIdentity);
+    const changedHistories = new Map([...restored.histories, ...moved.histories]);
+    return {
+      payload: moved.index,
+      records: [
+        this.#indexWrite(index, moved.index),
+        ...[...changedHistories].map(([reviewIdentity, history]) =>
+          revisionedRecord(
+            reviewHistoryIdentity(reviewIdentity),
+            reviewIdentity,
+            'harness.review-history',
+            loaded.get(reviewIdentity)?.revision ?? 0,
+            history,
+          ),
+        ),
+      ],
+    };
+  }
+
+  async #allReviewHistories(stateVersion: number): Promise<ReadonlyMap<ReviewIdentity, LoadedReviewHistory>> {
+    const reviews = await this.#loadReviewIndexAtVersion(stateVersion);
+    return await this.#loadReviewHistories(
+      stateVersion,
+      reviews.payload.reviews.map(review => review.reviewIdentity),
+    );
+  }
+
+  async #loadReviewHistories(
+    stateVersion: number,
+    reviewIdentities: readonly ReviewIdentity[],
+  ): Promise<ReadonlyMap<ReviewIdentity, LoadedReviewHistory>> {
+    const records = await this.#readOptionalRecordsAtVersion(stateVersion, reviewIdentities.map(reviewHistoryIdentity));
+    const loaded = new Map<ReviewIdentity, LoadedReviewHistory>();
+    reviewIdentities.forEach((reviewIdentity, position) => {
+      const record = records[position];
+      if (record === undefined) return;
+      if (
+        record.kind !== 'harness.review-history' ||
+        record.recordClass !== 'revisioned' ||
+        record.schemaVersion !== 1 ||
+        record.workflowIdentity !== reviewIdentity
+      ) {
+        throw new HarnessStateProblem();
+      }
+      loaded.set(reviewIdentity, {
+        revision: record.revision,
+        payload: parseReviewHistory(decode(record.payload), reviewIdentity),
+      });
+    });
+    return loaded;
+  }
+
+  async #readOptionalRecordsAtVersion(
+    expectedStateVersion: number,
+    identities: readonly string[],
+  ): Promise<readonly (StateRecord | undefined)[]> {
+    if (identities.length === 0) return [];
+    const read = await this.#state.read({ recordIdentities: identities, includeContent: false });
+    if (read.stateVersion !== expectedStateVersion) throw new HarnessProjectionVersionChanged();
+    if (read.quarantineReports.length > 0) throw new HarnessStateProblem();
+    return read.records;
   }
 
   async #readOptionalRecord(identity: string): Promise<StateRecord | undefined> {

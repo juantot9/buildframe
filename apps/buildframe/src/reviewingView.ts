@@ -1213,6 +1213,8 @@ function messageOutcomeLabel(state: ReviewingApplicationState, item: ReviewMessa
       return `${badge.glyph} BuildFrame never heard back about this Message. Check ${lowerAgent}, or press r to send it again.`;
     case 'no-answer':
       return `${badge.glyph} The turn ended without a reply. Press r to send it again.`;
+    case 'not-loaded':
+      return `${badge.glyph} BuildFrame hasn’t loaded what happened to this Message.`;
   }
 }
 

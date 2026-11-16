@@ -482,6 +482,8 @@ export type HarnessAttachmentRefusalReason =
   | 'evidence-identity-conflict'
   | 'state-version-changed'
   | 'state-conflict'
+  /** Every live Attachment still has a turn in flight; none could retire for this one. */
+  | 'attachment-limit-reached'
   | 'state-unavailable';
 
 export type HarnessAttachmentEstablishment =
@@ -905,6 +907,10 @@ export type HarnessCommandRejectionReason =
   /** The Review was saved before Messages and has no review points to anchor one. */
   | 'review-predates-messages'
   | 'review-message-limit-reached'
+  /** The Review has spent every Review Batch, so it can take no more Handoffs. */
+  | 'review-handoff-limit-reached'
+  /** The repository's live index is full of unfinished or unresolved work. */
+  | 'harness-index-limit-reached'
   | 'message-file-not-found'
   | 'message-file-unavailable'
   | 'message-line-not-found'

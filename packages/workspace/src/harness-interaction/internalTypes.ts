@@ -97,12 +97,30 @@ export interface UserPullPreparationIndexEntry {
   readonly terminalReason?: UserPullPreparationTerminalReason;
 }
 
+/**
+ * The live index: current Attachments and the Handoffs and Invocations still
+ * in play. Format 4 moves every settled entry into its Review's history; older
+ * formats parse with every entry live and convert on their next write.
+ */
 export interface HarnessIndexPayload {
-  readonly formatVersion: 3;
+  readonly formatVersion: 4;
   readonly attachments: readonly HarnessAttachmentIndexEntry[];
   readonly handoffs: readonly HarnessHandoffIndexEntry[];
   readonly invocations: readonly HarnessInvocationIndexEntry[];
   readonly preparations: readonly UserPullPreparationIndexEntry[];
+}
+
+/** One Review's settled Handoffs and their Invocations, in the order they settled. */
+export interface HarnessReviewHistoryPayload {
+  readonly formatVersion: 1;
+  readonly reviewIdentity: ReviewIdentity;
+  readonly handoffs: readonly HarnessHandoffIndexEntry[];
+  readonly invocations: readonly HarnessInvocationIndexEntry[];
+}
+
+export interface LoadedReviewHistory {
+  readonly revision: number;
+  readonly payload: HarnessReviewHistoryPayload;
 }
 
 export interface LoadedReviewIndex {

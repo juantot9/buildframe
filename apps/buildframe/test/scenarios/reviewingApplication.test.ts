@@ -3162,6 +3162,97 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await waitForOutput(terminal, '#2 review.txt:1');
   });
 
+  it('shows how the newest Message stands when a Review holds more than 64 of them', async () => {
+    const created = await fixture();
+    const owner = await open(created.checkout);
+    const identity = await owner.workspace.read({ kind: 'workspace.identity' });
+    const adapter = new ScriptedDogfoodAdapter(identity.workspaceIdentity, identity.canonicalCheckout);
+    await expect(owner.harnessAdapters.establish(adapter)).resolves.toMatchObject({ status: 'established' });
+    const home = await owner.workspace.read({ kind: 'workspace.home', offset: 0, limit: 64 });
+    const started = await owner.workspace.execute({
+      kind: 'review.current-changes.start',
+      commandIdentity: 'many-messages-review',
+      expectedStateVersion: home.stateVersion,
+    });
+    if (started.kind !== 'review.current-changes.started') throw new Error('Review did not start');
+    const bases = await owner.workspace.read({
+      kind: 'review.bases',
+      reviewIdentity: started.reviewIdentity,
+      offset: 0,
+      limit: 64,
+    });
+    if (bases.status !== 'available') throw new Error('Review Bases unavailable');
+    const live = bases.bases.items.find(item => item.kind === 'live');
+    if (live === undefined) throw new Error('Live Basis unavailable');
+    const location = { pathBytesBase64: Buffer.from('review.txt').toString('base64'), line: 1 } as const;
+    // Saved through the Workspace directly: the same commit the composer makes, only faster.
+    for (let index = 0; index < 66; index += 1) {
+      const body = `Message ${index + 1} of many`;
+      const inspection = await owner.workspace.read({
+        kind: 'harness.review-message.inspect-default',
+        reviewIdentity: started.reviewIdentity,
+        originReviewBasisIdentity: live.reviewBasisIdentity,
+        location,
+        body,
+        // The commit itself still makes the full commitment-time check.
+        purpose: 'preview',
+      });
+      if (inspection.status !== 'available') throw new Error(`Message ${index + 1} unavailable: ${inspection.reason}`);
+      const committed = await owner.workspace.execute({
+        kind: 'review.message.commit',
+        commandIdentity: `many-messages-${index}`,
+        expectedStateVersion: inspection.stateVersion,
+        reviewIdentity: started.reviewIdentity,
+        originReviewBasisIdentity: live.reviewBasisIdentity,
+        location,
+        body,
+        attachmentIdentity: inspection.destination.attachmentIdentity,
+        inspectionIdentity: inspection.inspectionIdentity,
+        acceptedAcknowledgementRequirementIdentities: [],
+      });
+      if (committed.kind !== 'review.message.committed') throw new Error(`Message ${index + 1} was not saved`);
+      await adapter.emit(
+        index < 65
+          ? {
+              kind: 'harness.invocation.rejected',
+              evidenceIdentity: `many-messages-refused-${index}`,
+              attachmentIdentity: adapter.attachment.attachmentIdentity,
+              invocationIdentity: committed.invocationIdentity,
+              reason: 'harness-rejected',
+            }
+          : {
+              kind: 'harness.invocation.start-observed',
+              evidenceIdentity: `many-messages-start-${index}`,
+              attachmentIdentity: adapter.attachment.attachmentIdentity,
+              invocationIdentity: committed.invocationIdentity,
+            },
+      );
+    }
+
+    const terminal = await ScriptedTerminal.create(132, 40);
+    const application = createReviewingApplicationForTest({ workspace: owner.workspace, renderer: terminal.renderer });
+    applications.add(application);
+    await application.start();
+    terminal.send('\r');
+    await waitForOutput(terminal, 'Current Review · ');
+    const card = (): string =>
+      renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-expanded-message-card'));
+    const row = (ordinal: number): string =>
+      card()
+        .split('\n')
+        .find(line => line.includes(`#${ordinal} · Message ${ordinal} of many`))
+        ?.trimEnd() ?? '';
+    await waitFor(() => row(1) !== '', 'first Message card');
+    expect(row(1)).toMatch(/✗ not sent$/u);
+    // Up from the first Message wraps to the newest, #66: both it and #65 lie past the first 64 Handoffs.
+    await focusPane(terminal, 'History');
+    terminal.send('k');
+    await waitFor(() => row(66) !== '', 'newest Message card');
+    expect(row(66)).toMatch(/ working$/u);
+    expect(row(65)).toMatch(/✗ not sent$/u);
+    expect(card()).not.toContain('waiting');
+  }, 300_000);
+
   it('opens and resends a Message in a file outside the loaded part of the Files list', async () => {
     // More changed files than one window holds; the Message's file sorts last.
     const created = await fixture('zz-last.txt');
