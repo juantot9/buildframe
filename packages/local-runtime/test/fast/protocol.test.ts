@@ -42,6 +42,9 @@ describe('Local Runtime bootstrap protocol', () => {
 
     expect(parseBootstrapFrame(ordinary)).toEqual(ordinary);
     expect(parseBootstrapFrame(discovery)).toEqual(discovery);
+    const inspection = { ...discovery, runtimeCodeMismatch: 'report' };
+    expect(parseBootstrapFrame(inspection)).toEqual(inspection);
+    expect(parseBootstrapFrame({ ...ordinary, runtimeCodeMismatch: 'report' })).toBeUndefined();
     expect(parseBootstrapFrame({ ...ordinary, runtimeCodeIdentity: RUNTIME_CODE_IDENTITY })).toBeUndefined();
     expect(parseBootstrapFrame({ ...ordinary, runtimeCodeMismatch: 'retire' })).toBeUndefined();
     expect(parseBootstrapFrame({ ...discovery, runtimeCodeIdentity: 'rtc_not-a-digest' })).toBeUndefined();

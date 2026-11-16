@@ -439,6 +439,43 @@ function safeCrlf(value: string | null): boolean | 'warn' {
   return gitBoolean(value);
 }
 
+/**
+ * Checkout-local `core.*` keys that cannot change what an inspection reports.
+ * They are dropped with every other non-structural key, so admitting them only
+ * stops BuildFrame refusing common repositories: husky writes `core.hooksPath`,
+ * and many people set an editor or pager per repository. Keys that change how
+ * files are read, ignored or converted stay refused.
+ */
+const INSPECTION_IRRELEVANT_CORE_KEYS: ReadonlySet<string> = new Set([
+  'core.hookspath',
+  'core.editor',
+  'core.pager',
+  'core.askpass',
+  'core.sshcommand',
+  'core.gitproxy',
+  'core.whitespace',
+  'core.commentchar',
+  'core.commentstring',
+  'core.abbrev',
+  'core.notesref',
+  'core.warnambiguousrefs',
+  'core.sharedrepository',
+  'core.createobject',
+  'core.compression',
+  'core.loosecompression',
+  'core.bigfilethreshold',
+  'core.deltabasecachelimit',
+  'core.packedgitlimit',
+  'core.packedgitwindowsize',
+  'core.preloadindex',
+  'core.untrackedcache',
+  'core.multipackindex',
+  'core.commitgraph',
+  'core.fsync',
+  'core.fsyncmethod',
+  'core.fsyncobjectfiles',
+]);
+
 function structuralConfiguration(
   entries: readonly CheckoutConfigEntry[],
   allowConfiguredWorkTree: boolean,
@@ -597,6 +634,9 @@ function structuralConfiguration(
         break;
       }
       default: {
+        // Settings that only steer editors, hooks, transport or packing never
+        // reach the shadow config, so Git reports the same either way.
+        if (INSPECTION_IRRELEVANT_CORE_KEYS.has(entry.key)) break;
         if (entry.key.startsWith('core.') || entry.key.startsWith('extensions.') || entry.key.startsWith('index.')) {
           throw new GitInspectionError('unsupported-checkout-config');
         }

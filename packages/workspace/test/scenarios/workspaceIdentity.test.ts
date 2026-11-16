@@ -510,6 +510,37 @@ describe('Workspace Identity scenarios', () => {
     expect(await pathExists(included.marker)).toBe(false);
   });
 
+  it('opens a checkout whose local config sets hooks, an editor or a pager, without running them', async () => {
+    const { root } = await createFixture();
+    const repository = path.join(root, 'repository');
+    await createRepository(repository);
+    // husky's layout: a hooks folder named in the checkout's own config.
+    const hooks = path.join(root, 'hooks');
+    await mkdir(hooks, { mode: 0o700 });
+    const hook = await commandMarker(root, 'hook');
+    for (const name of ['pre-commit', 'post-checkout', 'post-index-change', 'reference-transaction']) {
+      await writeFile(path.join(hooks, name), await readFile(hook.command), { mode: 0o700 });
+    }
+    const editor = await commandMarker(root, 'editor');
+    const pager = await commandMarker(root, 'pager');
+    await runGit(repository, 'config', 'core.hooksPath', hooks);
+    await runGit(repository, 'config', 'core.editor', editor.command);
+    await runGit(repository, 'config', 'core.pager', pager.command);
+
+    const opened = await readyWorkspace(repository);
+    expect(opened.view.workspaceIdentity).toMatch(/^wsp_/u);
+    for (const marker of [hook.marker, editor.marker, pager.marker]) {
+      expect(await pathExists(marker)).toBe(false);
+    }
+
+    // A key that changes how files are read is still refused.
+    await runGit(repository, 'config', 'core.attributesFile', path.join(root, 'attributes'));
+    await expect(bootstrapWorkspace({ startPath: repository })).resolves.toMatchObject({
+      status: 'rejected',
+      diagnostic: { code: 'git-inspection-failed' },
+    });
+  });
+
   it('admits only sparse interpretation from worktree-specific config', async () => {
     const { root } = await createFixture();
     const repository = path.join(root, 'repository');

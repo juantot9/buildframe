@@ -603,6 +603,7 @@ export async function inspectWorkspaceRuntime(request: {
     workspaceIdentity: request.workspaceIdentity,
     role: 'cli',
     runtimeCodeIdentity,
+    runtimeCodeMismatch: 'report',
     signal: connection.signal,
   });
   if (found.status === 'connected') {

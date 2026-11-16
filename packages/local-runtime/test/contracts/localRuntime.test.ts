@@ -1919,6 +1919,33 @@ describe('semantic local-runtime client/server contract', () => {
     await expect(retirement).resolves.toBe('replacement-requested');
   });
 
+  it('reports a different code identity to a read-only inspection without retiring', async () => {
+    const { server } = await start();
+    const retirement = waitForLocalRuntimeServerIdle(server, 3_600_000, new AbortController().signal);
+    const peer = await connectRaw();
+    peer.send(
+      bootstrapFrame({
+        runtimeCodeIdentity: `rtc_${'2'.repeat(64)}`,
+        runtimeCodeMismatch: 'report',
+      }),
+    );
+
+    await expect(peer.next()).resolves.toEqual({
+      type: 'bootstrap.rejected',
+      code: 'runtime-code-mismatch',
+    });
+    await peer.closed();
+    // doctor from another install must leave this runtime and its clients alone.
+    const outcome = await Promise.race([
+      retirement,
+      new Promise<'still-running'>(resolve => setTimeout(() => resolve('still-running'), 300)),
+    ]);
+    expect(outcome).toBe('still-running');
+    await expect(
+      connectWorkspaceRuntime({ workspaceIdentity: WORKSPACE_IDENTITY, role: 'tui' }),
+    ).resolves.toMatchObject({ status: 'connected' });
+  });
+
   it('creates an owner-private endpoint and rejects oversized frames', async () => {
     await start();
     const location = runtimeLocationForWorkspace(WORKSPACE_IDENTITY);

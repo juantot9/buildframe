@@ -35,6 +35,8 @@ export const CLIENT_ROLES: readonly LocalRuntimeClientRole[] = Object.freeze([
   'editor-adapter',
 ]);
 
+export type RuntimeCodeMismatchPolicy = 'retire' | 'report';
+
 export interface BootstrapFrame {
   readonly type: 'bootstrap';
   readonly protocolVersion: number;
@@ -43,7 +45,11 @@ export interface BootstrapFrame {
   readonly role: string;
   /** Present only for launcher-owned discovery and replacement. */
   readonly runtimeCodeIdentity?: RuntimeCodeIdentity;
-  readonly runtimeCodeMismatch?: 'retire';
+  /**
+   * What a runtime from another build does on a mismatch: `retire` (a
+   * launcher replacing it) or `report` (a read-only inspection such as doctor).
+   */
+  readonly runtimeCodeMismatch?: RuntimeCodeMismatchPolicy;
 }
 
 interface WorkspaceExecuteFrame {
@@ -283,7 +289,8 @@ export function parseBootstrapFrame(value: unknown): BootstrapFrame | undefined 
     typeof value.role !== 'string' ||
     (value.runtimeCodeIdentity === undefined) !== (value.runtimeCodeMismatch === undefined) ||
     (value.runtimeCodeIdentity !== undefined &&
-      (!isRuntimeCodeIdentity(value.runtimeCodeIdentity) || value.runtimeCodeMismatch !== 'retire'))
+      (!isRuntimeCodeIdentity(value.runtimeCodeIdentity) ||
+        (value.runtimeCodeMismatch !== 'retire' && value.runtimeCodeMismatch !== 'report')))
   ) {
     return undefined;
   }

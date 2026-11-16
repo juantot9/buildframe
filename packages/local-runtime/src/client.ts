@@ -31,6 +31,7 @@ import {
   parseBootstrapRejectedFrame,
   parseServerSessionFrame,
   type BootstrapRejectedFrame,
+  type RuntimeCodeMismatchPolicy,
   type ServerSessionFrame,
 } from './protocol.js';
 import {
@@ -341,11 +342,14 @@ async function connectSocket(endpoint: string, signal: AbortSignal | undefined):
 
 interface DiscoverWorkspaceRuntimeRequest extends ConnectWorkspaceRuntimeRequest {
   readonly runtimeCodeIdentity: RuntimeCodeIdentity;
+  /** `retire` (the default) asks a runtime from another build to step aside; `report` only learns of it. */
+  readonly runtimeCodeMismatch?: RuntimeCodeMismatchPolicy;
 }
 
 async function connectWorkspaceRuntimeInternal(
   request: ConnectWorkspaceRuntimeRequest,
   runtimeCodeIdentity?: RuntimeCodeIdentity,
+  runtimeCodeMismatch: RuntimeCodeMismatchPolicy = 'retire',
 ): Promise<ConnectWorkspaceRuntimeResult> {
   if (request.role === 'harness-adapter') {
     return {
@@ -493,7 +497,7 @@ async function connectWorkspaceRuntimeInternal(
         ? {}
         : {
             runtimeCodeIdentity,
-            runtimeCodeMismatch: 'retire',
+            runtimeCodeMismatch,
           }),
     });
   });
@@ -542,5 +546,9 @@ export async function connectWorkspaceRuntime(
 export async function discoverWorkspaceRuntime(
   request: DiscoverWorkspaceRuntimeRequest,
 ): Promise<ConnectWorkspaceRuntimeResult> {
-  return await connectWorkspaceRuntimeInternal(request, request.runtimeCodeIdentity);
+  return await connectWorkspaceRuntimeInternal(
+    request,
+    request.runtimeCodeIdentity,
+    request.runtimeCodeMismatch ?? 'retire',
+  );
 }

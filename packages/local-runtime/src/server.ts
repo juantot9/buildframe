@@ -423,7 +423,12 @@ class RuntimeClientConnection {
       return;
     }
     if (bootstrap.runtimeCodeIdentity !== undefined && bootstrap.runtimeCodeIdentity !== this.#runtimeCodeIdentity) {
-      this.#rejectBootstrap(bootstrapRejection('runtime-code-mismatch'), this.#onRuntimeCodeMismatch);
+      // Only a launcher asks a runtime from another build to step aside; a
+      // read-only inspection learns of the mismatch and leaves it running.
+      this.#rejectBootstrap(
+        bootstrapRejection('runtime-code-mismatch'),
+        bootstrap.runtimeCodeMismatch === 'retire' ? this.#onRuntimeCodeMismatch : undefined,
+      );
       return;
     }
 
