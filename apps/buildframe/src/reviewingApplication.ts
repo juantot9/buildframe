@@ -36,6 +36,7 @@ import {
   firstListedFile,
   manifestFileItems,
   noticeToneOf,
+  reviewingSourceKey,
   type HomeMode,
   type ReviewLoadTarget,
   type ReviewSelectionHint,
@@ -450,11 +451,11 @@ class OpenReviewingApplication implements ReviewingApplication {
     const review = this.#model.state.review;
     const request = this.#model.diffPrefetch();
     if (review === undefined || request === undefined) return;
-    const key = `${review.stateVersion}:${request.fileIdentity}:${request.offset}`;
+    const changes = this.#model.state.shownStep;
+    const key = JSON.stringify([reviewingSourceKey(review), changes?.key, request.fileIdentity, request.offset]);
     if (key === this.#diffPrefetchDeclined) return;
     this.#diffPrefetchInFlight = true;
     const source = review.source;
-    const changes = this.#model.state.shownStep;
     const read: Promise<ReviewViewBundle['diff']> =
       changes !== undefined
         ? this.#workspace
@@ -489,7 +490,7 @@ class OpenReviewingApplication implements ReviewingApplication {
       .then(page => {
         this.#diffPrefetchInFlight = false;
         if (this.#stopped) return;
-        if (page?.status === 'available' && this.#model.extendDiff(page)) {
+        if (page?.status === 'available' && this.#model.extendDiff(page, changes?.key)) {
           this.#diffPrefetchDeclined = undefined;
           this.#render();
           return;

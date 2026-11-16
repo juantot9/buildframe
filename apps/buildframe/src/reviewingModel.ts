@@ -185,6 +185,40 @@ export interface ReviewViewBundle {
   readonly continuation?: ReviewContinuationView;
 }
 
+/** State commits and working-tree edits are independent; neither alone identifies source. */
+function sourceKey(
+  stateVersion: number,
+  reviewIdentity: ReviewIdentity,
+  kind: ReviewSource['kind'],
+  identity: string,
+): string {
+  return JSON.stringify([stateVersion, reviewIdentity, kind, identity]);
+}
+
+/** Shared by cache lookups and asynchronous prefetch bookkeeping. */
+export function reviewingSourceKey(review: ReviewViewBundle): string {
+  return sourceKey(
+    review.stateVersion,
+    review.manifest.header.reviewIdentity,
+    review.source.kind,
+    review.source.kind === 'live' ? review.source.liveChangesIdentity : review.source.reviewSnapshotIdentity,
+  );
+}
+
+function diffSourceKey(diff: AvailableReviewDiff): string {
+  return diff.kind === 'review.live-diff'
+    ? sourceKey(diff.stateVersion, diff.reviewIdentity, 'live', diff.liveChangesIdentity)
+    : sourceKey(diff.stateVersion, diff.header.reviewIdentity, 'snapshot', diff.header.reviewSnapshotIdentity);
+}
+
+function diffCacheKey(diff: AvailableReviewDiff): string {
+  return `${diffSourceKey(diff)}:${diff.file.fileIdentity}`;
+}
+
+function contentCacheKey(view: ReviewLiveFileContentView, pathBytesBase64: string): string {
+  return `${sourceKey(view.stateVersion, view.reviewIdentity, 'live', view.liveChangesIdentity)}:${pathBytesBase64}`;
+}
+
 export interface ReviewLoadTarget {
   readonly reviewIdentity: ReviewIdentity;
   readonly reviewSnapshotIdentity?: ReviewSnapshotIdentity;
@@ -1139,10 +1173,24 @@ export class ReviewingApplicationModel {
   #landingNotice: string | undefined;
   /** The Message r is reopening once its file, outside the loaded Files list, has loaded. */
   #sendAgainRequest: ReviewMessageIdentity | undefined;
-  /** Bounded Diff views already loaded this session, keyed by state version + file. */
+  /** Diff windows keyed by exact Review source and file; entry eviction is a separate policy. */
   readonly #diffCache = new Map<string, AvailableReviewDiff>();
-  /** Working-tree content for unchanged files, keyed by state version + path. */
+  /** Working-tree content keyed by exact live Review source and path. */
   readonly #contentCache = new Map<string, ReviewLiveFileContentView>();
+  #cacheSourceKey: string | undefined;
+  /** Preserve position during replacement loads without keeping stale bytes on screen. */
+  #unchangedContentReload:
+    | { readonly reviewIdentity: ReviewIdentity; readonly pathBytesBase64: string; readonly line: number }
+    | undefined;
+
+  #synchronizeSourceCaches(review: ReviewViewBundle): void {
+    const key = reviewingSourceKey(review);
+    if (key === this.#cacheSourceKey) return;
+    // Giving live edits distinct keys must not retain every superseded source.
+    this.#diffCache.clear();
+    this.#contentCache.clear();
+    this.#cacheSourceKey = key;
+  }
 
   constructor(presentation: Partial<ReviewingPresentation> = {}) {
     this.state = {
@@ -1272,18 +1320,17 @@ export class ReviewingApplicationModel {
 
   /**
    * Joins one more window onto the loaded Diff rows. Only an adjacent window
-   * of the same file and committed version joins; anything else is dropped and
+   * of the same file and exact source joins; anything else is dropped and
    * the next refresh reads afresh. Far rows fall away beyond DIFF_KEEP_ROWS.
    */
-  extendDiff(page: AvailableReviewDiff): boolean {
+  extendDiff(page: AvailableReviewDiff, shownStepKey?: string): boolean {
     const current = diffView(this.state);
     const review = this.state.review;
     if (
       review === undefined ||
       current === undefined ||
-      page.kind !== current.kind ||
-      page.stateVersion !== current.stateVersion ||
-      page.file.fileIdentity !== current.file.fileIdentity ||
+      diffCacheKey(page) !== diffCacheKey(current) ||
+      this.state.shownStep?.key !== shownStepKey ||
       page.window.rows.length === 0
     ) {
       return false;
@@ -1334,14 +1381,23 @@ export class ReviewingApplicationModel {
       return true;
     }
     this.state.review = { ...review, diff: merged };
-    this.#diffCache.set(`${merged.stateVersion}:${merged.file.fileIdentity}`, merged);
+    this.#synchronizeSourceCaches(review);
+    this.#diffCache.set(diffCacheKey(merged), merged);
     return true;
   }
 
   /** The next rows of a shown stretch, in the Diff pane's own shape. */
   stepChangeDiffPage(view: ReviewStepChangesDiffView): AvailableReviewDiff | undefined {
     const review = this.state.review;
-    return review === undefined || view.status !== 'available' ? undefined : stepChangeDiff(review, view);
+    const changes = this.state.shownStep;
+    return review === undefined ||
+      changes === undefined ||
+      view.status !== 'available' ||
+      view.reviewIdentity !== review.manifest.header.reviewIdentity ||
+      view.stateVersion !== review.stateVersion ||
+      historyStepKey(view.from, view.to) !== changes.key
+      ? undefined
+      : stepChangeDiff(review, view);
   }
 
   /**
@@ -1563,12 +1619,12 @@ export class ReviewingApplicationModel {
   }
 
   /**
-   * The same committed version has the same rows, so a refresh that reads one
-   * window of a file keeps the wider set already joined for it.
+   * A refresh of the same exact source keeps the wider window already joined
+   * for it. A new Live Changes or Snapshot identity must always start afresh.
    */
   #widenDiff<T extends ReviewViewBundle['diff']>(diff: T): T | AvailableReviewDiff {
     if (diff?.status !== 'available') return diff;
-    const cached = this.#diffCache.get(`${diff.stateVersion}:${diff.file.fileIdentity}`);
+    const cached = this.#diffCache.get(diffCacheKey(diff));
     if (cached === undefined || cached.kind !== diff.kind) return diff;
     const start = diff.window.offset;
     const end = start + diff.window.rows.length;
@@ -2000,6 +2056,7 @@ export class ReviewingApplicationModel {
     fromSearch: boolean,
   ): readonly ReviewingModelEffect[] {
     if (bundle.stateVersion < this.currentVersion()) return [];
+    this.#synchronizeSourceCaches(bundle);
     const fileRequest = this.#messageFileRequest;
     if (fileRequest !== undefined && fileRequest.path === target.filePathBytesBase64) fileRequest.landed = true;
     const oldPending = this.state.pending;
@@ -2050,6 +2107,7 @@ export class ReviewingApplicationModel {
       this.state.selectedQuestionBody = undefined;
       this.state.collapsedDirectories = Object.freeze([]);
       this.state.unchangedContent = undefined;
+      this.#unchangedContentReload = undefined;
       this.state.unchangedContentLine = 1;
       this.state.unchangedContentOffset = 0;
     }
@@ -2207,15 +2265,22 @@ export class ReviewingApplicationModel {
       diff.stateVersion !== review.stateVersion ||
       diffReviewIdentity !== review.manifest.header.reviewIdentity ||
       target.reviewIdentity !== diffReviewIdentity ||
-      (target.fileIdentity !== undefined && target.fileIdentity !== diffFileIdentity)
+      (target.fileIdentity !== undefined && target.fileIdentity !== diffFileIdentity) ||
+      (diff.kind === 'review.live-diff'
+        ? review.source.kind !== 'live' || diff.liveChangesIdentity !== review.source.liveChangesIdentity
+        : review.source.kind !== 'snapshot' ||
+          (diff.header !== undefined && diff.header.reviewSnapshotIdentity !== review.source.reviewSnapshotIdentity) ||
+          (target.reviewSnapshotIdentity !== undefined &&
+            target.reviewSnapshotIdentity !== review.source.reviewSnapshotIdentity))
     ) {
       return;
     }
+    this.#synchronizeSourceCaches(review);
     const widened = this.#widenDiff(diff);
     this.state.review = { ...review, diff: widened };
     this.state.loading = undefined;
     if (widened.status === 'available') {
-      this.#diffCache.set(`${widened.stateVersion}:${diffFileIdentity}`, widened);
+      this.#diffCache.set(diffCacheKey(widened), widened);
     }
     if (widened.status !== 'available') {
       this.state.selectedRowIdentity = undefined;
@@ -3868,9 +3933,15 @@ export class ReviewingApplicationModel {
     // A refreshed Review bundle can retain the already selected Diff. Do not
     // erase its row selection merely because preview reconciliation revisits
     // the same file after the row has been selected locally.
-    if (diffView(this.state)?.file.fileIdentity === file.diffFileIdentity) return [];
+    const shown = diffView(this.state);
+    if (
+      shown !== undefined &&
+      shown.file.fileIdentity === file.diffFileIdentity &&
+      diffSourceKey(shown) === reviewingSourceKey(review)
+    )
+      return [];
     this.state.selectedRowIdentity = undefined;
-    const cached = this.#diffCache.get(`${review.stateVersion}:${file.diffFileIdentity}`);
+    const cached = this.#diffCache.get(`${reviewingSourceKey(review)}:${file.diffFileIdentity}`);
     if (cached !== undefined && cached.status === 'available') {
       // Cached views passed applyReviewDiff's guards when they were first loaded.
       const anchorRow =
@@ -3917,34 +3988,54 @@ export class ReviewingApplicationModel {
     const review = this.state.review;
     if (review === undefined || review.source.kind !== 'live' || file?.status !== 'unchanged') {
       this.state.unchangedContent = undefined;
+      this.#unchangedContentReload = undefined;
       return [];
     }
     const retainedContent = this.state.unchangedContent;
-    const previouslyLoadedSamePath = retainedContent?.pathBytesBase64 === file.pathBytesBase64;
-    if (previouslyLoadedSamePath && retainedContent?.view.stateVersion === review.stateVersion) {
+    const retainedSamePath = retainedContent?.pathBytesBase64 === file.pathBytesBase64;
+    const reload = this.#unchangedContentReload;
+    const reloadingSamePath =
+      reload?.reviewIdentity === review.manifest.header.reviewIdentity &&
+      reload.pathBytesBase64 === file.pathBytesBase64;
+    const previouslyLoadedSamePath = retainedSamePath || reloadingSamePath;
+    const requestedLine =
+      anchorLine ?? (retainedSamePath ? this.state.unchangedContentLine : reloadingSamePath ? reload?.line : undefined);
+    if (
+      retainedSamePath &&
+      retainedContent !== undefined &&
+      contentCacheKey(retainedContent.view, file.pathBytesBase64) ===
+        `${reviewingSourceKey(review)}:${file.pathBytesBase64}`
+    ) {
       if (anchorLine !== undefined) this.unchangedContentLineTo(anchorLine);
       return [];
     }
-    const cached = this.#contentCache.get(`${review.stateVersion}:${file.pathBytesBase64}`);
+    const cached = this.#contentCache.get(`${reviewingSourceKey(review)}:${file.pathBytesBase64}`);
     if (cached !== undefined) {
       this.state.unchangedContent = { pathBytesBase64: file.pathBytesBase64, view: cached };
-      if (anchorLine !== undefined) this.unchangedContentLineTo(anchorLine);
+      this.#unchangedContentReload = undefined;
+      if (requestedLine !== undefined) this.unchangedContentLineTo(requestedLine);
       else if (!previouslyLoadedSamePath) this.state.unchangedContentLine = 1;
       return [];
     }
+    // Remember position across repeated refreshes, but never present old bytes
+    // under the new source's label while a replacement load is pending.
+    this.#unchangedContentReload =
+      requestedLine === undefined
+        ? undefined
+        : {
+            reviewIdentity: review.manifest.header.reviewIdentity,
+            pathBytesBase64: file.pathBytesBase64,
+            line: requestedLine,
+          };
+    this.state.unchangedContent = undefined;
     return [
       {
         type: 'preview-file-content',
         reviewIdentity: review.manifest.header.reviewIdentity,
         liveChangesIdentity: review.source.liveChangesIdentity,
         pathBytesBase64: file.pathBytesBase64,
-        // A refresh of the already selected file keeps the operator's content
-        // line; a new selection still starts at line one.
-        ...(anchorLine === undefined
-          ? previouslyLoadedSamePath
-            ? { anchorLine: this.state.unchangedContentLine }
-            : {}
-          : { anchorLine }),
+        // A refresh keeps the selected line; a new file starts at line one.
+        ...(requestedLine === undefined ? {} : { anchorLine: requestedLine }),
       },
     ];
   }
@@ -3956,17 +4047,25 @@ export class ReviewingApplicationModel {
       review.source.kind !== 'live' ||
       review.manifest.header.reviewIdentity !== view.reviewIdentity ||
       view.stateVersion !== review.stateVersion ||
-      view.liveChangesIdentity !== review.source.liveChangesIdentity
+      view.liveChangesIdentity !== review.source.liveChangesIdentity ||
+      (view.status === 'available' && view.path.bytesBase64 !== pathBytesBase64)
     ) {
       return;
     }
-    const previouslyLoadedSamePath = this.state.unchangedContent?.pathBytesBase64 === pathBytesBase64;
-    this.#contentCache.set(`${view.stateVersion}:${pathBytesBase64}`, view);
+    const reload = this.#unchangedContentReload;
+    const reloadingSamePath =
+      reload?.reviewIdentity === review.manifest.header.reviewIdentity && reload.pathBytesBase64 === pathBytesBase64;
+    const previouslyLoadedSamePath =
+      this.state.unchangedContent?.pathBytesBase64 === pathBytesBase64 || reloadingSamePath;
+    const requestedLine = anchorLine ?? (reloadingSamePath ? reload?.line : undefined);
+    this.#synchronizeSourceCaches(review);
+    this.#contentCache.set(contentCacheKey(view, pathBytesBase64), view);
     if (this.selectedFileEntry()?.pathBytesBase64 !== pathBytesBase64) return;
     this.state.unchangedContent = { pathBytesBase64, view };
-    // A stale refresh for the already selected file must not discard a line the
-    // operator moved to while the read was in flight.
-    if (anchorLine !== undefined) this.unchangedContentLineTo(anchorLine);
+    this.#unchangedContentReload = undefined;
+    // A replacement keeps its selected line, even after intermediate refreshes
+    // have hidden the old content while waiting for this exact source.
+    if (requestedLine !== undefined) this.unchangedContentLineTo(requestedLine);
     else if (!previouslyLoadedSamePath) this.state.unchangedContentLine = 1;
   }
 
@@ -3979,16 +4078,19 @@ export class ReviewingApplicationModel {
   warmDiff(diff: ReviewDiffView | ReviewLiveDiffView): void {
     if (diff.status !== 'available') return;
     const review = this.state.review;
-    if (review === undefined || diff.stateVersion !== review.stateVersion) return;
-    this.#diffCache.set(`${diff.stateVersion}:${diff.file.fileIdentity}`, this.#widenDiff(diff));
+    if (review === undefined || diffSourceKey(diff) !== reviewingSourceKey(review)) return;
+    this.#synchronizeSourceCaches(review);
+    this.#diffCache.set(diffCacheKey(diff), this.#widenDiff(diff));
   }
 
   /** Stores prefetched unchanged-file content. */
   warmContent(view: ReviewLiveFileContentView): void {
     const review = this.state.review;
     if (review?.source.kind !== 'live' || view.status !== 'available') return;
-    if (view.stateVersion !== review.stateVersion) return;
-    this.#contentCache.set(`${view.stateVersion}:${view.path.bytesBase64}`, view);
+    const key = contentCacheKey(view, view.path.bytesBase64);
+    if (key !== `${reviewingSourceKey(review)}:${view.path.bytesBase64}`) return;
+    this.#synchronizeSourceCaches(review);
+    this.#contentCache.set(key, view);
   }
 
   /** The visible files adjacent to the selection, for idle prefetch. */
@@ -4020,7 +4122,7 @@ export class ReviewingApplicationModel {
       }
       if (
         file.diffFileIdentity !== undefined &&
-        this.#diffCache.get(`${review.stateVersion}:${file.diffFileIdentity}`) === undefined
+        this.#diffCache.get(`${reviewingSourceKey(review)}:${file.diffFileIdentity}`) === undefined
       ) {
         result.push({ kind: 'diff', fileIdentity: file.diffFileIdentity });
       }
