@@ -3406,6 +3406,85 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await waitForOutput(terminal, 'New Message · review.txt:3');
   });
 
+  it('names a commit made while answering and still shows what changed', async () => {
+    const created = await fixture();
+    const owner = await open(created.checkout);
+    const identity = await owner.workspace.read({ kind: 'workspace.identity' });
+    const adapter = new ScriptedDogfoodAdapter(identity.workspaceIdentity, identity.canonicalCheckout);
+    await expect(owner.harnessAdapters.establish(adapter)).resolves.toMatchObject({ status: 'established' });
+    const terminal = await ScriptedTerminal.create(132, 40);
+    const application = createReviewingApplicationForTest({ workspace: owner.workspace, renderer: terminal.renderer });
+    applications.add(application);
+    await application.start();
+    terminal.send('\r');
+    await waitForOutput(terminal, 'since last commit · review.txt');
+
+    terminal.send('a');
+    await waitForOutput(terminal, 'New Message · review.txt:');
+    terminal.send('Tidy this and commit it');
+    await waitForOutput(terminal, 'Tidy this and commit it');
+    terminal.send('\r');
+    await waitFor(() => adapter.directives.length === 1, 'directive');
+
+    // While answering, the agent edits the file and commits everything.
+    await writeFile(path.join(created.checkout, 'review.txt'), 'tidied one\nshared\nnew three\n');
+    const previous = (await gitOutput(created.checkout, 'rev-parse', 'HEAD')).trim().slice(0, 7);
+    await git(created.checkout, 'add', '.');
+    await git(created.checkout, 'commit', '-qm', 'Tidy review');
+    const short = (await gitOutput(created.checkout, 'rev-parse', 'HEAD')).trim().slice(0, 7);
+    const directive = adapter.directives[0]!;
+    await adapter.emit({
+      kind: 'harness.invocation.start-observed',
+      evidenceIdentity: 'commit-while-answering-start',
+      attachmentIdentity: directive.attachmentIdentity,
+      invocationIdentity: directive.invocationIdentity,
+    });
+    const body = 'Tidied and committed.';
+    await adapter.emit({
+      kind: 'harness.invocation.terminal-observed',
+      evidenceIdentity: 'commit-while-answering-terminal',
+      attachmentIdentity: directive.attachmentIdentity,
+      invocationIdentity: directive.invocationIdentity,
+      outcome: 'ended-normally',
+      result: {
+        contractVersion: 1,
+        contractIdentity: 'pi-settled-final-assistant-review-response-v1',
+        source: 'settled-final-assistant-text',
+        body,
+        byteLength: Buffer.byteLength(body),
+        sha256: createHash('sha256').update(body).digest('hex'),
+      },
+    });
+
+    // The moment is said once on the status line, after the answer.
+    await waitForOutput(terminal, `answered #1. “Tidy review” (${short}) was committed during #1.`);
+    // Live changes are empty now; the Diff names the commit that took them and the way on.
+    await waitForOutput(terminal, `No changes since “Tidy review” (${short})`);
+    await waitForOutput(terminal, '[ and ] history shows what changed');
+    await waitForOutput(terminal, `since ${short} · no changes`);
+    // History's Message says code changed and names the commit, in its own short form.
+    const historyText = (): string =>
+      renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-messages-viewport'))
+        .replace(/[│┃]/gu, ' ')
+        .replace(/\s+/gu, ' ');
+    await waitFor(
+      () => historyText().includes(`Code changed while answering · committed ${short}`),
+      'changed-code note names the commit',
+    );
+    // Once HEAD moved, start names its own commit rather than a second "last commit".
+    await waitForOutput(terminal, `start · ${previous}`);
+    const railText = (): string =>
+      renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-history-rail')).replace(/\s+/gu, ' ');
+    await waitFor(() => railText().includes('#1◆'), 'rail marks the commit on #1');
+
+    // [ shows everything that changed while #1 was answered, committed or not; the commit leads.
+    const checkpoint = terminal.checkpoint();
+    terminal.send('[');
+    await waitForOutput(terminal, 'during #1 · review.txt', checkpoint);
+    await waitForOutput(terminal, 'tidied one', checkpoint);
+    await waitForOutput(terminal, `“Tidy review” (${short}) was committed during #1. Everything`, checkpoint);
+  });
+
   it('says whether the agent changed code while answering and shows what it changed', async () => {
     const created = await fixture();
     const owner = await open(created.checkout);

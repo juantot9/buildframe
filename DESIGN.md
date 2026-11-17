@@ -95,7 +95,7 @@ The palette is cool and low-chroma, with roles ahead of hues. Quiet Graphite's v
 - **Rose** (`rose-danger`) with **Rose Wash** (`rose-wash`): failed, not sent, and removed diff lines. It also marks blocking conditions inside dialogs.
 
 ### Tertiary
-- **Brass** (`brass-warning`): caution and uncertain outcomes (stopping, interrupted, unknown, confirm), files that changed during a Message, `✎ Code changed while answering`, and the Diff pane border while it shows a past step, so history can't pass for current code. Your own edits between answers (`○ edits before #1`, `○ edits outside answers`) are routine, so they stay Pewter.
+- **Brass** (`brass-warning`): caution and uncertain outcomes (stopping, interrupted, unknown, confirm), HEAD moving somewhere other than new commits on top (a reset, checkout or rebase: "HEAD moved to …"), files that changed during a Message, `✎ Code changed while answering`, and the Diff pane border while it shows a past step, so history can't pass for current code. Your own edits between answers (`○ edits before #1`, `○ edits outside answers`) are routine, so they stay Pewter.
 
 ### Neutral
 - **Graphite Ground** (`graphite-ground`): the app background behind everything.
@@ -163,6 +163,7 @@ The terminal's box-drawing set is the whole shape language. Pane borders are rou
 - `›` the selected list row (`>`)
 - `▸ ▾` collapsed and expanded tree nodes (`> v`)
 - `● ○ ◆ ▶ │ ┃` history rail nodes and lines (current, other, start, now)
+- `◆` after a rail node (`#1◆`) marks the step in which HEAD moved; `◆` always means a commit. Its ASCII twin is `@`, for start too, so it never shares `*` with the connection or the `✎` change mark
 
 Under `--ascii`, every interface character has a stand-in (`·`→`-`, `…`→`...`, `↳`→`->`, `✎`→`*`, `◀`→`<`, and so on). `?` is reserved for the unknown state and for characters in source code that have no ASCII form; source code never gets stand-ins, because they could pass for real syntax.
 
@@ -241,6 +242,7 @@ Under `--ascii`, every interface character has a stand-in (`·`→`-`, `…`→`
 - **Do** let a key that acts on the Review (write, copy, switch, send, interrupt, quit) wait while it loads: say "Still loading (…); press a again in a moment." rather than act on the wrong thing or do nothing. Movement keeps working, and `q` quits only when nothing is loading or saving.
 - **Do** fit text to the width it actually has. Wrap instructions and recovery sentences; never let OpenTUI's middle truncation cut them.
 - **Do** state an empty result plainly in Pewter with the way on ("No changes since your last commit. [f] shows all files."). Nothing changed is a fact, not a caution.
+- **Do** name a commit once HEAD has moved during a Review, subject first and then the 7-character hash (`“Tidy review” (f32adef)`), and only say "committed" when new commits landed on top. The Diff then says where the changes went ("No changes since “Tidy review” (f32adef), committed during #1.") with the way on on its own line, the start row and the Diff title name their own commits instead of two "last commit"s, and the status line says the move once, after the answer it came with. Who made a commit is never claimed.
 
 ### Don't:
 - **Don't** use the accent for anything except focus and selection.

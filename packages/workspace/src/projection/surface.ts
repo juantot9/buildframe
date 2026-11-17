@@ -8,6 +8,7 @@ export type {
   ReviewBasisItem,
   ReviewMessageBodyView,
   ReviewMessageBodyViewRequest,
+  ReviewHistoryHeadMove,
   ReviewHistoryPoint,
   ReviewHistoryStep,
   ReviewHistoryView,

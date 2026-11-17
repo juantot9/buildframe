@@ -892,9 +892,29 @@ export interface ReviewHistoryStep {
         readonly total: number;
       }
     | { readonly status: 'unchanged' }
-    /** A commit was made in this stretch, so its two ends compare against different commits. */
+    /** A commit was made in this stretch and BuildFrame couldn't read what it changed. */
     | { readonly status: 'unavailable'; readonly reason: 'commit-moved' };
+  /**
+   * Where HEAD moved in this stretch, when it moved. The changes then count
+   * what the move brought in as well as what was left uncommitted. Whoever
+   * moved it is not known.
+   */
+  readonly headMove?: ReviewHistoryHeadMove;
 }
+
+/**
+ * HEAD moving within one stretch of history: `commits` when the new HEAD
+ * descends from the old one (`count` commits were added on top), `moved` for
+ * anything else, such as a reset, checkout or rebase.
+ */
+export type ReviewHistoryHeadMove =
+  | {
+      readonly kind: 'commits';
+      readonly from: ReviewBasisCommit;
+      readonly to: ReviewBasisCommit;
+      readonly count: number;
+    }
+  | { readonly kind: 'moved'; readonly from: ReviewBasisCommit; readonly to: ReviewBasisCommit };
 
 export type ReviewHistoryView =
   | {

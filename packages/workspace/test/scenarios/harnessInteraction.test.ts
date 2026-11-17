@@ -2136,6 +2136,162 @@ describe('Direct Harness Interaction path', () => {
     });
   });
 
+  it('shows what changed during an answer that committed part of its work', async () => {
+    const created = await fixture();
+    const owner = await open(created.checkout);
+    const adapter = await establish(owner);
+    const home = await owner.workspace.read({ kind: 'workspace.home', offset: 0, limit: 64 });
+    const started = requireStarted(
+      await owner.workspace.execute({
+        kind: 'review.current-changes.start',
+        commandIdentity: 'commit-crossing-review-start',
+        expectedStateVersion: home.stateVersion,
+      }),
+    );
+    const bases = await owner.workspace.read({
+      kind: 'review.bases',
+      reviewIdentity: started.reviewIdentity,
+      offset: 0,
+      limit: 64,
+    });
+    if (bases.status !== 'available') throw new Error('Review Bases unavailable');
+    const live = bases.bases.items.find(item => item.kind === 'live');
+    if (live === undefined) throw new Error('Live Review Basis unavailable');
+    const body = 'Tidy this up and commit it.';
+    const location = { pathBytesBase64: Buffer.from('review.txt').toString('base64'), line: 1 } as const;
+    const inspection = await owner.workspace.read({
+      kind: 'harness.review-message.inspect-default',
+      reviewIdentity: started.reviewIdentity,
+      originReviewBasisIdentity: live.reviewBasisIdentity,
+      location,
+      body,
+    });
+    if (inspection.status !== 'available') throw new Error('Review Message unavailable');
+    const committed = await owner.workspace.execute({
+      kind: 'review.message.commit',
+      commandIdentity: 'commit-crossing-message',
+      expectedStateVersion: inspection.stateVersion,
+      reviewIdentity: started.reviewIdentity,
+      originReviewBasisIdentity: live.reviewBasisIdentity,
+      location,
+      body,
+      attachmentIdentity: inspection.destination.attachmentIdentity,
+      inspectionIdentity: inspection.inspectionIdentity,
+      acceptedAcknowledgementRequirementIdentities: inspection.commitment.requirements.map(
+        requirement => requirement.requirementIdentity,
+      ),
+    });
+    if (committed.kind !== 'review.message.committed') throw new Error('Review Message was not committed');
+
+    // While answering, the agent commits review.txt and leaves a new file uncommitted.
+    await writeFile(path.join(created.checkout, 'review.txt'), 'committed while answering\nsame\n');
+    await git(created.checkout, 'add', 'review.txt');
+    await git(created.checkout, 'commit', '-qm', 'Tidy review');
+    await writeFile(path.join(created.checkout, 'lexer.txt'), 'left uncommitted\n');
+    await adapter.emit({
+      kind: 'harness.invocation.start-observed',
+      evidenceIdentity: 'commit-crossing-start',
+      attachmentIdentity: adapter.attachment.attachmentIdentity,
+      invocationIdentity: committed.invocationIdentity,
+    });
+    const responseBody = 'Committed the tidy-up.';
+    const terminal = await adapter.emit({
+      kind: 'harness.invocation.terminal-observed',
+      evidenceIdentity: 'commit-crossing-terminal',
+      attachmentIdentity: adapter.attachment.attachmentIdentity,
+      invocationIdentity: committed.invocationIdentity,
+      outcome: 'ended-normally',
+      result: {
+        contractVersion: 1,
+        contractIdentity: 'pi-settled-final-assistant-review-response-v1',
+        source: 'settled-final-assistant-text',
+        body: responseBody,
+        byteLength: Buffer.byteLength(responseBody),
+        sha256: createHash('sha256').update(responseBody).digest('hex'),
+      },
+    });
+    if (terminal.status !== 'applied') throw new Error(JSON.stringify(terminal));
+
+    const sent = { kind: 'sent', reviewMessageIdentity: committed.reviewMessageIdentity } as const;
+    const answered = { kind: 'answered', reviewMessageIdentity: committed.reviewMessageIdentity } as const;
+    const headMove = { kind: 'commits', count: 1, from: { subject: 'basis' }, to: { subject: 'Tidy review' } };
+    // The answer's step counts the committed file and the uncommitted one, and names the commit.
+    await expect(
+      owner.workspace.read({ kind: 'review.history', reviewIdentity: started.reviewIdentity }),
+    ).resolves.toMatchObject({
+      status: 'available',
+      steps: [
+        { from: { kind: 'start' }, to: sent },
+        {
+          from: sent,
+          to: answered,
+          kind: 'answer',
+          changes: { status: 'changed', paths: [{ display: 'lexer.txt' }, { display: 'review.txt' }], total: 2 },
+          headMove,
+        },
+        { from: answered, to: { kind: 'now' }, changes: { status: 'unchanged' } },
+      ],
+    });
+    await expect(
+      owner.workspace.read({ kind: 'review.messages', reviewIdentity: started.reviewIdentity, offset: 0, limit: 8 }),
+    ).resolves.toMatchObject({
+      status: 'available',
+      messages: { items: [{ changeObservation: { outcome: 'forked', changedFiles: { total: 2 } } }] },
+    });
+
+    const changes = await owner.workspace.read({
+      kind: 'review.step-changes',
+      reviewIdentity: started.reviewIdentity,
+      from: sent,
+      to: answered,
+      offset: 0,
+      limit: 64,
+    });
+    if (changes.status !== 'available') throw new Error(`Step changes unavailable: ${JSON.stringify(changes)}`);
+    expect(changes.files.items.map(item => [item.path.display, item.change])).toEqual([
+      ['lexer.txt', 'added'],
+      ['review.txt', 'modified'],
+    ]);
+    const reviewFile = changes.files.items.find(item => item.path.display === 'review.txt')!;
+    const rows = await owner.workspace.read({
+      kind: 'review.step-changes-diff',
+      reviewIdentity: started.reviewIdentity,
+      from: sent,
+      to: answered,
+      fileIdentity: reviewFile.fileIdentity,
+      offset: 0,
+      limit: 64,
+    });
+    if (rows.status !== 'available') throw new Error('Step change rows unavailable');
+    // From the code at send (uncommitted "after") to the committed version.
+    expect(
+      rows.window.rows.map(
+        row => `${row.kind} ${Buffer.from(row.text.bytesBase64, 'base64').toString('utf8').trimEnd()}`,
+      ),
+    ).toEqual(['deletion after', 'addition committed while answering', 'context same']);
+
+    // Resetting HEAD back to where it was is a move, not a commit.
+    await git(created.checkout, 'reset', '-q', '--hard', 'HEAD~1');
+    await vi.waitFor(
+      async () => {
+        const later = await owner.workspace.read({ kind: 'review.history', reviewIdentity: started.reviewIdentity });
+        expect(later).toMatchObject({
+          status: 'available',
+          steps: [
+            {},
+            { headMove },
+            {
+              from: answered,
+              to: { kind: 'now' },
+              headMove: { kind: 'moved', from: { subject: 'Tidy review' }, to: { subject: 'basis' } },
+            },
+          ],
+        });
+      },
+      { timeout: 10_000, interval: 100 },
+    );
+  });
+
   it('quotes exact saved-origin bytes with a safe fence and anchors later Responses to the commitment-time repository', async () => {
     const created = await fixture();
     await writeFile(path.join(created.checkout, 'review.txt'), 'value = ```;\nsame\n');

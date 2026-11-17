@@ -37,6 +37,7 @@ import {
   type ReviewBasisIdentity,
   type ReviewBasisPayload,
   type ReviewDiffRowPayload,
+  type ReviewBasisCommit,
   type ReviewContextContributionIdentity,
   type ReviewContextContributionPayload,
   type ReviewContextRule,
@@ -63,6 +64,7 @@ import {
 } from '../workspaceEvidence/index.js';
 import type { WorkspaceAttention, WorkspaceIdentity } from '../workspace.js';
 import {
+  commitMovedBetween,
   historyPointKey,
   historyPosition,
   historySteps,
@@ -70,6 +72,7 @@ import {
   projectedStepChangeRows,
   stepChangedFiles,
   stepChangedPaths,
+  type CommitCrossing,
   type HistoryPointState,
   type StepChangedFile,
 } from './history.js';
@@ -258,6 +261,7 @@ export type {
   ReviewManifestViewRequest,
   ReviewMessageBodyView,
   ReviewMessageBodyViewRequest,
+  ReviewHistoryHeadMove,
   ReviewHistoryPoint,
   ReviewHistoryStep,
   ReviewHistoryView,
@@ -332,6 +336,15 @@ type StepChangeSet =
 
 const MAX_STEP_CHANGE_SETS = 8;
 const MAX_HISTORY_POINT_STATES = 1024;
+const MAX_COMMIT_CROSSINGS = 8;
+
+/** The commit a captured basis compares against; undefined unless it is HEAD. */
+function headObjectIdentity(basis: {
+  readonly kind: string;
+  readonly objectIdentity?: string | null;
+}): string | null | undefined {
+  return basis.kind === 'head' ? (basis.objectIdentity ?? null) : undefined;
+}
 
 type MessageChangedPaths = { readonly paths: readonly EvidencePath[]; readonly total: number } | undefined;
 
@@ -393,6 +406,8 @@ export class WorkspaceProjection {
   readonly #snapshotEvidenceIdentities = new Map<string, string>();
   /** What each answered Message's Response changed; immutable once observed. */
   readonly #stepChangeSets = new Map<string, Promise<StepChangeSet>>();
+  /** What changed between two commits HEAD moved across; commits never change. */
+  readonly #commitCrossings = new Map<string, Promise<CommitCrossing | undefined>>();
   readonly #onSnapshotEvidenceIdentityCacheSize: ((size: number) => void) | undefined;
   readonly #onLiveChangesCapture: (() => void) | undefined;
   #unsubscribeFromEvidenceInvalidation: (() => void) | undefined;
@@ -2175,9 +2190,15 @@ export class WorkspaceProjection {
           this.#readReviewMessage(entry, indexed, stateVersion),
           readMessageCodeState(this.#state, entry.reviewIdentity, point.reviewMessageIdentity, withContent),
         ]);
+        const basis = message.repositoryStateAtCommitment.basis;
         return files === undefined
           ? undefined
-          : { point, basisKey: JSON.stringify(message.repositoryStateAtCommitment.basis), files };
+          : {
+              point,
+              basisKey: JSON.stringify(basis),
+              basisObjectIdentity: headObjectIdentity(basis),
+              files,
+            };
       };
       if (point.kind === 'sent') return await sent();
       const observation = history.changeObservations.find(
@@ -2192,7 +2213,12 @@ export class WorkspaceProjection {
       const files = withContent
         ? await this.#snapshotTransition.reconstructComparisonFiles(snapshot)
         : await this.#snapshotTransition.comparisonFileList(snapshot);
-      return { point, basisKey: JSON.stringify(snapshot.basis), files };
+      return {
+        point,
+        basisKey: JSON.stringify(snapshot.basis),
+        basisObjectIdentity: headObjectIdentity(snapshot.basis),
+        files,
+      };
     })();
     if (withContent) return await pending;
     this.#historyPointStates.set(key, pending);
@@ -2238,7 +2264,12 @@ export class WorkspaceProjection {
     if (point.kind === 'now') {
       return now === undefined
         ? undefined
-        : { point, basisKey: JSON.stringify(now.captured.capture.basis), files: now.captured.files };
+        : {
+            point,
+            basisKey: JSON.stringify(now.captured.capture.basis),
+            basisObjectIdentity: headObjectIdentity(now.captured.capture.basis),
+            files: now.captured.files,
+          };
     }
     return await this.#messagePointState(entry, point, stateVersion, withContent);
   }
@@ -2276,13 +2307,83 @@ export class WorkspaceProjection {
       candidates.map(point => this.#pointState(entry, point, scope.now, index.stateVersion, false)),
     );
     const known = states.filter((state): state is HistoryPointState => state !== undefined);
+    const crossings = new Map<HistoryPointState, CommitCrossing | undefined>();
+    await Promise.all(
+      known.slice(1).map(async (later, index) => {
+        const earlier = known[index]!;
+        if (commitMovedBetween(earlier, later)) crossings.set(later, await this.#commitCrossing(earlier, later));
+      }),
+    );
     return {
       ...base,
       status: 'available',
       reachesNow: known.at(-1)?.point.kind === 'now',
       messages: (entry.messageHistory?.messages ?? []).map(message => message.reviewMessageIdentity),
-      steps: historySteps(known, this.#positionOf(entry)),
+      steps: historySteps(known, this.#positionOf(entry), (_earlier, later) => crossings.get(later)),
     };
+  }
+
+  /**
+   * What changed between the commits two points compare against; undefined
+   * when either is unknown or unborn, or Git can no longer read them.
+   */
+  async #commitCrossing(earlier: HistoryPointState, later: HistoryPointState): Promise<CommitCrossing | undefined> {
+    const from = earlier.basisObjectIdentity;
+    const to = later.basisObjectIdentity;
+    if (typeof from !== 'string' || typeof to !== 'string') return undefined;
+    const key = `${from}>${to}`;
+    const cached = this.#commitCrossings.get(key);
+    if (cached !== undefined) return await cached;
+    const pending = (async (): Promise<CommitCrossing | undefined> => {
+      const captured = await this.#snapshotTransition.capture({
+        kind: 'comparison-refresh',
+        selection: {
+          kind: 'revision-pair',
+          basis: { kind: 'object', objectKind: 'commit', objectIdentity: from },
+          compared: { kind: 'object', objectKind: 'commit', objectIdentity: to },
+        },
+      });
+      if ('reason' in captured) return undefined;
+      const { basis, comparedState } = captured.capture;
+      if (
+        basis.kind !== 'commit' ||
+        basis.objectIdentity !== from ||
+        comparedState.kind !== 'commit' ||
+        comparedState.objectIdentity !== to
+      ) {
+        return undefined;
+      }
+      const commit = (endpoint: typeof basis): ReviewBasisCommit => ({
+        kind: 'commit',
+        objectFormat: endpoint.objectFormat,
+        objectIdentity: endpoint.objectIdentity,
+        abbreviatedObjectIdentity: endpoint.abbreviatedObjectIdentity,
+        subject: endpoint.subject,
+      });
+      const count = await this.#evidence.readCommitsOnTop(from, to);
+      return {
+        headMove:
+          count === undefined
+            ? { kind: 'moved', from: commit(basis), to: commit(comparedState) }
+            : { kind: 'commits', from: commit(basis), to: commit(comparedState), count },
+        files: captured.files,
+      };
+    })();
+    this.#commitCrossings.set(key, pending);
+    while (this.#commitCrossings.size > MAX_COMMIT_CROSSINGS) {
+      const oldest = this.#commitCrossings.keys().next().value;
+      if (oldest === undefined) break;
+      this.#commitCrossings.delete(oldest);
+    }
+    try {
+      const crossing = await pending;
+      // Git may read it later (a fetch, say), so only a read crossing stays cached.
+      if (crossing === undefined) this.#commitCrossings.delete(key);
+      return crossing;
+    } catch (error) {
+      this.#commitCrossings.delete(key);
+      throw error;
+    }
   }
 
   /** The files that differ between two points, with contents for their rows. */
@@ -2309,10 +2410,12 @@ export class WorkspaceProjection {
         this.#pointState(entry, to, scope.now, index.stateVersion, true),
       ]);
       if (earlier === undefined || later === undefined) return { status: 'not-found', reason: 'point-not-found' };
-      if (earlier.basisKey !== undefined && later.basisKey !== undefined && earlier.basisKey !== later.basisKey) {
-        return { status: 'unavailable', reason: 'commit-moved' };
+      if (!commitMovedBetween(earlier, later)) {
+        return { status: 'available', files: stepChangedFiles(key, earlier.files, later.files) };
       }
-      return { status: 'available', files: stepChangedFiles(key, earlier.files, later.files) };
+      const crossing = await this.#commitCrossing(earlier, later);
+      if (crossing === undefined) return { status: 'unavailable', reason: 'commit-moved' };
+      return { status: 'available', files: stepChangedFiles(key, earlier.files, later.files, crossing.files) };
     })();
     this.#stepChangeSets.set(key, pending);
     while (this.#stepChangeSets.size > MAX_STEP_CHANGE_SETS) {
@@ -2330,7 +2433,8 @@ export class WorkspaceProjection {
 
   /**
    * Which files changed while one Message was answered, from fingerprints
-   * alone; undefined when its code at send was not kept or a commit moved.
+   * alone, counting what a commit made meanwhile; undefined when its code at
+   * send was not kept or what the commit changed can't be read.
    */
   async #changedPathsDuring(
     entry: ReviewIndexEntry,
@@ -2341,8 +2445,10 @@ export class WorkspaceProjection {
       this.#messagePointState(entry, { kind: 'sent', reviewMessageIdentity }, stateVersion, false),
       this.#messagePointState(entry, { kind: 'answered', reviewMessageIdentity }, stateVersion, false),
     ]);
-    if (sent === undefined || answered === undefined || sent.basisKey !== answered.basisKey) return undefined;
-    const paths = stepChangedPaths(sent.files, answered.files);
+    if (sent === undefined || answered === undefined) return undefined;
+    const crossing = commitMovedBetween(sent, answered) ? await this.#commitCrossing(sent, answered) : undefined;
+    if (commitMovedBetween(sent, answered) && crossing === undefined) return undefined;
+    const paths = stepChangedPaths(sent.files, answered.files, crossing?.files);
     return { paths: paths.slice(0, MAX_STEP_CHANGED_PATHS), total: paths.length };
   }
 

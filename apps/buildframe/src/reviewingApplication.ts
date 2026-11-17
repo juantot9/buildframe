@@ -748,7 +748,9 @@ class OpenReviewingApplication implements ReviewingApplication {
     const generation = ++this.#routeGeneration;
     this.#route = route;
     this.#clearSubscriptions();
-    this.#model.setLoading('Loading same-version Review views');
+    // Reloading the open Review keeps what the status line just said (an answer, a commit).
+    const sameReview = this.#model.state.review?.manifest.header.reviewIdentity === route.target.reviewIdentity;
+    this.#model.setLoading('Loading same-version Review views', undefined, sameReview);
     this.#render();
     try {
       const loaded = await this.#readReviewBundle(route.target);

@@ -35,6 +35,12 @@ import {
   diffMinimumWidth,
   historyStepKey,
   historyStepText,
+  commitName,
+  headMoveNote,
+  historyStepWords,
+  latestHeadMoveStep,
+  shortHash,
+  navigableHistorySteps,
   messageState,
   messagesOnLines,
   messagesPaneName,
@@ -274,7 +280,7 @@ const ASCII_STAND_INS: Readonly<Record<string, string>> = Object.freeze({
   '▾': 'v',
   '▶': '>',
   '◀': '<',
-  '◆': '#',
+  '◆': '@',
   '◇': '#',
   '●': '*',
   '○': 'o',
@@ -769,7 +775,11 @@ function activeBasisLabel(state: ReviewingApplicationState): string {
   const basis = state.review?.bases.bases.items.find(
     item => item.reviewBasisIdentity === state.activeReviewBasisIdentity,
   );
-  if (basis === undefined || basis.kind === 'live') return 'since last commit';
+  if (basis === undefined || basis.kind === 'live') {
+    // After HEAD moved during the Review, "last commit" is ambiguous; name it.
+    const move = latestHeadMoveStep(state)?.headMove;
+    return move === undefined ? 'since last commit' : `since ${shortHash(move.to)}`;
+  }
   if (basis.kind === 'git-commit') return `vs ${basis.source.commit.abbreviatedObjectIdentity}`;
   if (basis.kind === 'change-event') return responseMoment(state, basis.source.responseIdentity);
   return 'at a saved point';
@@ -792,9 +802,44 @@ function codeChangeNote(
 ): { readonly text: string; readonly glyph: string; readonly changed: boolean } | undefined {
   if (item.changeObservation === undefined) return undefined;
   const glyph = state.presentation.ascii ? '*' : '✎';
+  const step = state.review?.history?.steps.find(
+    candidate => candidate.to.kind === 'answered' && candidate.to.reviewMessageIdentity === item.reviewMessageIdentity,
+  );
+  const separator = state.presentation.ascii ? '-' : '·';
+  const moved = step?.headMove === undefined ? '' : ` ${separator} ${headMoveNote(step.headMove)}`;
+  // Moving HEAD alone forks the observation; when the code is the same, say that first.
+  if (step?.headMove !== undefined && step.changes.status === 'unchanged') {
+    return { text: `No code changes${moved}`, glyph, changed: false };
+  }
   return item.changeObservation.outcome === 'forked'
-    ? { text: `${glyph} Code changed while answering`, glyph, changed: true }
+    ? { text: `${glyph} Code changed while answering${moved}`, glyph, changed: true }
     : { text: 'No code changes', glyph, changed: false };
+}
+
+/**
+ * What an empty comparison says. After HEAD moved during the Review, Live
+ * changes compare against the new commit, so the sentence names it, and the
+ * way on gets its own line. A move that isn't a commit on top is a caution.
+ */
+function emptyChangesSentence(state: ReviewingApplicationState): { readonly text: string; readonly caution: boolean } {
+  if (state.review?.source.kind !== 'live')
+    return { text: 'No changed files here. [f] shows all files.', caution: false };
+  const step = latestHeadMoveStep(state);
+  const move = step?.headMove;
+  if (step === undefined || move === undefined) {
+    return { text: 'No changes since your last commit. [f] shows all files.', caution: false };
+  }
+  const { label } = historyStepWords(step, state.review.history?.messages ?? []);
+  const way =
+    step.changes.status === 'changed' ? '[ and ] history shows what changed · [f] all files.' : '[f] shows all files.';
+  if (move.kind === 'moved') {
+    return {
+      text: `No changes since ${commitName(move.to)}. HEAD moved there ${label}, so Live changes compare against it.\n${way}`,
+      caution: true,
+    };
+  }
+  const how = move.count === 1 ? 'committed' : `the newest of ${move.count} commits made`;
+  return { text: `No changes since ${commitName(move.to)}, ${how} ${label}.\n${way}`, caution: false };
 }
 
 /** The last path segment, keeping a directory's trailing slash; the tree indent shows the rest. */
@@ -1427,9 +1472,11 @@ function questionsPane(
   const history = state.review?.history;
   const shownKey = state.shownStep?.key;
   const glyphs = state.presentation.ascii
-    ? { start: '*', answer: 'o', outside: '.', now: '>', line: '|', thick: '#' }
+    ? { start: '@', answer: 'o', outside: '.', now: '>', line: '|', thick: '#' }
     : { start: '◆', answer: '●', outside: '○', now: '▶', line: '│', thick: '┃' };
   const stepKey = (step: ReviewHistoryStep): string => historyStepKey(step.from, step.to);
+  // Once HEAD has moved, "last commit" would name two commits; start names its own.
+  const firstHeadMove = history?.steps.find(step => step.headMove !== undefined)?.headMove;
   const answerStepOf = (reviewMessageIdentity: string): ReviewHistoryStep | undefined =>
     history?.steps.find(step => step.to.kind === 'answered' && step.to.reviewMessageIdentity === reviewMessageIdentity);
   /** Changed steps that end at a send or at now get a row of their own, before that Message or at the end. */
@@ -1545,7 +1592,7 @@ function questionsPane(
     if (full && !responseComplete) {
       lines.push({ text: `${responseIndent}Loading the full Response${ellipsis}`, fg: colors.muted });
     }
-    if (change !== undefined) {
+    if (change !== undefined && !(selected && diffShowsSelected)) {
       completeRows(change.text, responseWidth).forEach(row =>
         lines.push({ text: `${responseIndent}${row}`, fg: change.changed ? colors.warning : colors.muted }),
       );
@@ -1679,7 +1726,7 @@ function questionsPane(
       label(
         state,
         edge === 'start'
-          ? `start ${separator} last commit`
+          ? `start ${separator} ${firstHeadMove === undefined ? 'last commit' : shortHash(firstHeadMove.from)}`
           : `now${here ? ` ${state.presentation.ascii ? '<- here' : '◀ here'}` : `  ${separator} Esc to come back`}`,
         { fg: here ? hereColors.fg : colors.muted, height: 1, bold: here },
       ),
@@ -3052,25 +3099,30 @@ function diffPane(
       changes === undefined &&
       state.fileScope === 'changed' &&
       reviewingFiles(state.review, 'changed').length === 0;
-    const message = nothingChanged
-      ? `${state.review?.source.kind === 'live' ? 'No changes since your last commit.' : 'No changed files here.'} [f] shows all files.`
-      : view === undefined
-        ? state.loading?.region === 'diff'
-          ? state.loading.label
-          : (changes?.diffNote ?? 'No changed file selected.')
-        : view.status !== 'available'
-          ? `Diff unavailable: ${view.reason}`
-          : `Loading ${path}${state.presentation.ascii ? '...' : '…'}`;
+    const empty = nothingChanged ? emptyChangesSentence(state) : undefined;
+    const message =
+      empty !== undefined
+        ? empty.text
+        : view === undefined
+          ? state.loading?.region === 'diff'
+            ? state.loading.label
+            : (changes?.diffNote ?? 'No changed file selected.')
+          : view.status !== 'available'
+            ? `Diff unavailable: ${view.reason}`
+            : `Loading ${path}${state.presentation.ascii ? '...' : '…'}`;
     column = scrollingColumn(
       state,
       'diff',
       'reviewing-diff',
-      [
-        {
-          size: 1,
-          render: () => label(state, message, { fg: nothingChanged ? colors.muted : colors.warning, paddingLeft: 1 }),
-        },
-      ],
+      // The sentence wraps on whole words, so the way on at its end stays visible.
+      wrappedRows(message, paneContentWidth - 1).map(row => ({
+        size: 1,
+        render: () =>
+          label(state, row, {
+            fg: empty !== undefined && !empty.caution ? colors.muted : colors.warning,
+            paddingLeft: 1,
+          }),
+      })),
       -1,
       undefined,
       availableHeight,
@@ -3434,17 +3486,25 @@ function historyRail(
     /** The step that ends here, drawn as the segment before the marker. */
     readonly step?: ReviewHistoryStep;
   }
-  const nodes: RailNode[] = [{ name: ascii ? '*' : '◆', kind: 'start' }];
+  const commitMark = ascii ? '@' : '◆';
+  const nodes: RailNode[] = [{ name: commitMark, kind: 'start' }];
+  // A step in which a commit was made carries the commit mark start wears, so the rail shows where HEAD moved.
+  const named = (name: string, step: ReviewHistoryStep): string =>
+    step.headMove === undefined ? name : `${name}${commitMark}`;
   for (const step of history.steps) {
     const changed = step.changes.status === 'changed';
     if (step.to.kind === 'answered') {
-      nodes.push({ name: `#${history.messages.indexOf(step.to.reviewMessageIdentity) + 1}`, kind: 'answer', step });
+      nodes.push({
+        name: named(`#${history.messages.indexOf(step.to.reviewMessageIdentity) + 1}`, step),
+        kind: 'answer',
+        step,
+      });
     } else if (step.to.kind === 'now') {
       // Edits since the last answer get their own marker, so "now" only ever means now.
-      if (changed) nodes.push({ name: ascii ? 'o' : '○', kind: 'outside', step });
+      if (changed) nodes.push({ name: named(ascii ? 'o' : '○', step), kind: 'outside', step });
       nodes.push({ name: 'now', kind: 'now' });
     } else if (changed) {
-      nodes.push({ name: ascii ? 'o' : '○', kind: step.kind === 'outside' ? 'outside' : 'answer', step });
+      nodes.push({ name: named(ascii ? 'o' : '○', step), kind: step.kind === 'outside' ? 'outside' : 'answer', step });
     }
   }
   const shownIndex = atNow
@@ -4877,8 +4937,10 @@ function actionStrip(state: ReviewingApplicationState): string {
       state.fileScope === 'changed' &&
       reviewingFiles(state.review, 'changed').length === 0;
     // One rank per key wherever it appears, so the same width drops the same keys in every pane.
+    // History stays a way on when a commit took the changes out of Live changes.
+    const steppable = (navigableHistorySteps(state)?.length ?? 0) > 0;
     const paneKeys: readonly (readonly [string, number])[] = nothingListed
-      ? [['[f] all files', 2]]
+      ? [['[f] all files', 2], ...(steppable ? [['[ and ] history', 5] as const] : [])]
       : [
           ...(focus === 'diff' ? [] : [['[Enter] open', 4] as const]),
           ['[a] new Message', 3],

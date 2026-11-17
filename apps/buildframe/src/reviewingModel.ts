@@ -54,6 +54,7 @@ import type {
 } from '@buildframe/workspace/reviewing';
 import type { ReviewComparisonSelection } from '@buildframe/workspace/workspace-evidence';
 
+import { fitDisplayCellsEnd } from './displayCells.js';
 import { contentWindowContainsLine } from './reviewingContent.js';
 import { Key, matchesKey, printableInput, type ReviewingInput } from './reviewingInput.js';
 import { reasonSentence } from './reviewingReasons.js';
@@ -809,8 +810,51 @@ export function navigableHistorySteps(state: ReviewingApplicationState): readonl
   return state.review?.history?.steps.filter(step => step.changes.status === 'changed');
 }
 
-/** How a step reads in titles ("during #3") and in its one-sentence notice. */
+type HeadMove = NonNullable<ReviewHistoryStep['headMove']>;
+type HeadMoveCommit = HeadMove['to'];
+
+/** A commit's short hash, as git prints it by default. */
+export function shortHash(commit: HeadMoveCommit): string {
+  return commit.objectIdentity.slice(0, 7);
+}
+
+/** A commit in a sentence: its subject first, in plain words, then its short hash. */
+export function commitName(commit: HeadMoveCommit): string {
+  const subject = fitDisplayCellsEnd(commit.subject.trim(), 40, '…');
+  return subject === '' ? shortHash(commit) : `“${subject}” (${shortHash(commit)})`;
+}
+
+/** A HEAD move in a note: "committed f32adef", "3 commits, newest f32adef", "HEAD moved to f32adef". */
+export function headMoveNote(move: HeadMove): string {
+  if (move.kind === 'moved') return `HEAD moved to ${shortHash(move.to)}`;
+  return move.count === 1 ? `committed ${shortHash(move.to)}` : `${move.count} commits, newest ${shortHash(move.to)}`;
+}
+
+/** What happened to HEAD in a step, as one sentence: "“Tidy” (f32adef) was committed during #1." */
+export function headMoveSentence(move: HeadMove, label: string): string {
+  if (move.kind === 'moved') return `HEAD moved to ${commitName(move.to)} ${label}.`;
+  return move.count === 1
+    ? `${commitName(move.to)} was committed ${label}.`
+    : `${move.count} commits were made ${label}, the newest ${commitName(move.to)}.`;
+}
+
+/** The newest step in which HEAD moved; undefined when it never did. */
+export function latestHeadMoveStep(state: ReviewingApplicationState): ReviewHistoryStep | undefined {
+  return [...(state.review?.history?.steps ?? [])].reverse().find(step => step.headMove !== undefined);
+}
+
+/** How a step reads in titles ("during #3") and in its notice; a HEAD move in it leads the notice. */
 export function historyStepText(
+  step: ReviewHistoryStep,
+  messages: readonly ReviewMessageIdentity[],
+): { readonly label: string; readonly description: string } {
+  const text = historyStepWords(step, messages);
+  return step.headMove === undefined
+    ? text
+    : { ...text, description: `${headMoveSentence(step.headMove, text.label)} ${text.description}` };
+}
+
+export function historyStepWords(
   step: ReviewHistoryStep,
   messages: readonly ReviewMessageIdentity[],
 ): { readonly label: string; readonly description: string } {
@@ -1167,6 +1211,37 @@ export class ReviewingApplicationModel {
   readonly state: ReviewingApplicationState;
   /** Moves typed while a Message saved locally, replayed once it is saved. */
   readonly #heldNavigation: ReviewingInput[] = [];
+  /** The HEAD moves already said for the open Review, so a reload never says one twice or swallows it. */
+  #announcedHeadMoves: { readonly reviewIdentity: string; readonly targets: Set<string> } | undefined;
+
+  /**
+   * The sentence for a HEAD move this Review hasn't announced yet. Opening a
+   * Review counts its earlier moves as known, so only a move seen happening is said.
+   */
+  #announceHeadMove(bundle: ReviewViewBundle): { readonly text: string; readonly tone: NoticeTone } | undefined {
+    const steps = bundle.history?.steps ?? [];
+    const target = (step: ReviewHistoryStep): string | undefined =>
+      step.headMove === undefined ? undefined : historyStepKey(step.from, step.to) + step.headMove.to.objectIdentity;
+    const reviewIdentity = bundle.manifest.header.reviewIdentity;
+    const known = this.#announcedHeadMoves;
+    if (known?.reviewIdentity !== reviewIdentity) {
+      this.#announcedHeadMoves = {
+        reviewIdentity,
+        targets: new Set(steps.flatMap(step => target(step) ?? [])),
+      };
+      return undefined;
+    }
+    const fresh = steps.filter(step => {
+      const key = target(step);
+      return key !== undefined && !known.targets.has(key);
+    });
+    for (const step of fresh) known.targets.add(target(step)!);
+    const step = fresh.at(-1);
+    if (step?.headMove === undefined) return undefined;
+    const sentence = headMoveSentence(step.headMove, historyStepWords(step, bundle.history?.messages ?? []).label);
+    const way = step.changes.status === 'changed' ? ' [ and ] history shows what changed.' : '';
+    return { text: `${sentence}${way}`, tone: step.headMove.kind === 'moved' ? 'warning' : 'info' };
+  }
   /**
    * The file Enter asked for to reach a Message: asked for once, and only
    * called missing after a load for that path has landed.
@@ -1418,7 +1493,11 @@ export class ReviewingApplicationModel {
     if (target >= steps.length) {
       if (this.state.shownStep !== undefined) {
         this.closeShownStep();
-        this.say('Back to now: everything since the last commit.', 'info');
+        const move = latestHeadMoveStep(this.state)?.headMove;
+        this.say(
+          `Back to now: everything since ${move === undefined ? 'the last commit' : shortHash(move.to)}.`,
+          'info',
+        );
       } else {
         this.say('Already at now. Press [ to step back through the changes.', 'info');
       }
@@ -1871,9 +1950,9 @@ export class ReviewingApplicationModel {
     );
   }
 
-  setLoading(label: string, region?: ReviewingFocus): void {
+  setLoading(label: string, region?: ReviewingFocus, keepNotice = false): void {
     this.state.loading = { label, ...(region === undefined ? {} : { region }) };
-    this.state.notice = undefined;
+    if (!keepNotice) this.state.notice = undefined;
   }
 
   /** Restores Home only when an uncommitted optimistic open cannot materialize. */
@@ -2219,7 +2298,18 @@ export class ReviewingApplicationModel {
     if (settled) this.finishPending(oldPending);
     // A Message reaching its outcome replaces whatever the status line said,
     // so an earlier "Saved" never sits above a failure.
-    if (outcome !== undefined) this.say(outcome.text, outcome.tone);
+    // Moving HEAD takes changes out of Live changes; say once where they went.
+    const moveNotice = this.#announceHeadMove(bundle);
+    if (outcome !== undefined) {
+      this.say(moveNotice === undefined ? outcome.text : `${outcome.text} ${moveNotice.text}`, outcome.tone);
+    } else if (moveNotice !== undefined) {
+      // An answer said a moment ago keeps its words; the move follows them.
+      const answered = this.state.notice !== undefined && noticeToneOf(this.state) === 'success';
+      this.say(
+        answered ? `${this.state.notice} ${moveNotice.text}` : moveNotice.text,
+        answered ? 'success' : moveNotice.tone,
+      );
+    }
     if (fromSearch) this.state.notice = 'Search result opened.';
     if (this.state.focus === 'home') this.state.focus = 'diff';
     const selectedMessageBodyEffects = this.loadSelectedMessageBody();
@@ -2243,7 +2333,7 @@ export class ReviewingApplicationModel {
       selectedMessage !== undefined &&
       selectedMessage.originReviewBasisIdentity === this.state.activeReviewBasisIdentity
     ) {
-      const navigation = this.navigateToMessage(selectedMessage, desiredMessage, true);
+      const navigation = this.navigateToMessage(selectedMessage, desiredMessage, true, true);
       this.fixupCollapsedSelection();
       return navigation;
     }
@@ -3088,7 +3178,14 @@ export class ReviewingApplicationModel {
       );
       this.state.selectedMessageIdentity = target.reviewMessageIdentity;
       if (step === undefined || step.changes.status !== 'changed') {
-        this.say('No code changed while this Message was answered.', 'info');
+        this.say(
+          step?.changes.status === 'unavailable'
+            ? 'HEAD moved while this Message was answered, and BuildFrame couldn’t read what changed.'
+            : step?.headMove !== undefined
+              ? `${headMoveSentence(step.headMove, 'while it was answered')} No code changed.`
+              : 'No code changed while this Message was answered.',
+          'info',
+        );
         return [];
       }
       return this.showHistoryStep(step, true);
@@ -4458,6 +4555,8 @@ export class ReviewingApplicationModel {
     messageAbsolute: number,
     /** Load the Message's file when it isn't loaded: Enter does, moving through History doesn't. */
     reach = false,
+    /** A refresh following the Message keeps what the status line just said (its answer, a commit). */
+    keepNotice = false,
   ): readonly ReviewingModelEffect[] {
     const review = this.state.review;
     if (review === undefined) return [];
@@ -4509,7 +4608,7 @@ export class ReviewingApplicationModel {
       // The file is in a part of the list that isn't loaded: ask for it by path.
       this.#messageFileRequest = { path, landed: false };
       const { fileIdentity: _fileIdentity, fileAbsolute: _fileAbsolute, ...withoutFile } = current;
-      this.setLoading(`Opening ${item.location.file.display}`, 'diff');
+      this.setLoading(`Opening ${item.location.file.display}`, 'diff', keepNotice);
       return [
         ...loadBody,
         {

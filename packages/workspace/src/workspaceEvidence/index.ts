@@ -470,6 +470,32 @@ export class WorkspaceEvidence {
     }
   }
 
+  /**
+   * How many commits were added on top of `from` to reach `to`; undefined when
+   * `to` doesn't descend from `from` (a reset, checkout or rebase moved HEAD
+   * elsewhere) or Git can't tell.
+   */
+  async readCommitsOnTop(from: string, to: string): Promise<number | undefined> {
+    const objectIdentity = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
+    if (!objectIdentity.test(from) || !objectIdentity.test(to)) throw new TypeError('Invalid commit identity');
+    try {
+      return await withGitInspection(this.#canonicalCheckout, this.#gitDirectory, async context => {
+        const ancestry = await runGit(context, ['merge-base', '--is-ancestor', from, to], {
+          maxStdoutBytes: 1024,
+          allowedExitCodes: [0, 1],
+        });
+        if (ancestry.exitCode !== 0) return undefined;
+        const counted = await runGit(context, ['rev-list', '--count', `${from}..${to}`, '--'], {
+          maxStdoutBytes: 1024,
+        });
+        const count = Number(counted.stdout.toString('utf8').trim());
+        return Number.isSafeInteger(count) && count > 0 ? count : undefined;
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Package-private collaboration: the semantic owner supplies only admission policy. */
   async captureContextWithAdmission(
     request: ContextSourceCaptureRequest,
