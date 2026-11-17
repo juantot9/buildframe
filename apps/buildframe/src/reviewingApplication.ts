@@ -785,8 +785,12 @@ class OpenReviewingApplication implements ReviewingApplication {
       const scheduled = this.#filePreviewEffect;
       this.#filePreviewEffect = undefined;
       if (this.#stopped || scheduled === undefined) return;
+      // Moving on and back (J then K) can return to the file already shown,
+      // which needs no load; a preview for the file left behind is dropped.
+      const wanted = scheduled.type === 'preview-file' ? scheduled.selection?.fileIdentity : undefined;
+      if (wanted !== undefined && wanted !== this.#model.state.selectedFileIdentity) return;
       if (scheduled.type === 'preview-file') {
-        void this.#showReviewDiff(scheduled.target, scheduled.selection);
+        void this.#showReviewDiff(scheduled.target, scheduled.selection, true);
         return;
       }
       void this.#previewUnchangedFileContent(scheduled);
@@ -899,18 +903,23 @@ class OpenReviewingApplication implements ReviewingApplication {
     );
   }
 
-  #showReviewDiff(requested: ReviewLoadTarget, selection?: ReviewSelectionHint): Promise<void> {
+  #showReviewDiff(requested: ReviewLoadTarget, selection?: ReviewSelectionHint, preview = false): Promise<void> {
     const identity = JSON.stringify({ requested, selection });
     const existing = this.#reviewDiffLoads.get(identity);
     if (existing !== undefined) return existing;
-    const pending = this.#showReviewDiffOnce(requested, selection).finally(() => {
+    const pending = this.#showReviewDiffOnce(requested, selection, preview).finally(() => {
       if (this.#reviewDiffLoads.get(identity) === pending) this.#reviewDiffLoads.delete(identity);
     });
     this.#reviewDiffLoads.set(identity, pending);
     return pending;
   }
 
-  async #showReviewDiffOnce(requested: ReviewLoadTarget, selection?: ReviewSelectionHint): Promise<void> {
+  async #showReviewDiffOnce(
+    requested: ReviewLoadTarget,
+    selection?: ReviewSelectionHint,
+    /** A Files preview, which only counts while its file is still the selected one. */
+    preview = false,
+  ): Promise<void> {
     if (this.#stopped) return;
     const route = this.#route;
     const visible = this.#model.state.review;
@@ -962,7 +971,11 @@ class OpenReviewingApplication implements ReviewingApplication {
         generation !== this.#routeGeneration ||
         sequence !== this.#loadSequence ||
         this.#route?.kind !== 'review' ||
-        this.#route.target.reviewIdentity !== requested.reviewIdentity
+        this.#route.target.reviewIdentity !== requested.reviewIdentity ||
+        // The reader moved on while this preview read ran (J then K back to the file already shown).
+        (preview &&
+          selection?.fileIdentity !== undefined &&
+          selection.fileIdentity !== this.#model.state.selectedFileIdentity)
       ) {
         return;
       }

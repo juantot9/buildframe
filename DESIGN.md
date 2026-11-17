@@ -137,6 +137,7 @@ Syntax highlighting has its own small token palette per theme (keyword, string, 
 The layout is a horizontal row of bordered panes (Files, Diff, Questions) under a header, with a one-row status line at the bottom. Pane widths are measured in terminal cells.
 
 - **Width modes:** `wide` at 120 columns and up, `balanced` from 90 to 119, and `linear` below 90 (one pane at a time, `Tab` cycles).
+- **Code only:** `z` (or Configuration's **Panes** row) shows only the Diff at every width, using the `linear` layout's one pane and its `Files  Diff  History  [Tab] switch` strip. It is remembered with the other layout preferences. While it is on, the keys row always keeps `[z] all panes` (ranked with Tab), so hidden panes never look missing, and offers `[e] files` and `[m] Messages`. The Diff title adds `file 2 of 7` whenever Files isn't on screen. `J`/`K` move to the next or previous file from any pane, in every layout.
 - **Pane widths:** Files prefers 34 cells (minimum 16) and Messages 40 (minimum 20); users can resize both and hide Files. The Diff always keeps at least half the terminal (never under 32 cells). When the side panes want more than that leaves, they give way in proportion to their preferred widths.
 - **Arrangements:** `workspace` (default), `code-spotlight` and `review-notebook` rearrange the same panes.
 - **Header:** one row at every size, or none when the user hides it in Configuration. Below 100 columns the source word shortens (`LIVE CHANGES` to `LIVE`).
@@ -198,7 +199,8 @@ Under `--ascii`, every interface character has a stand-in (`·`→`-`, `…`→`
 - **Steady size:** a dialog whose text changes as you move through it keeps the height of its longest text. Configuration reserves the rows of the longest description any setting or value can show, so moving between settings or changing one never makes the box grow, shrink or move.
 - **Focus while writing:** the composer lives in the Diff, so the Diff shows `FOCUSED` while a Message is being written, wherever it was started from.
 - **Send confirmation:** only when an earlier Message never reported back, so sending may repeat work. Plain words ("An earlier Message here never reported back."), never internal names. A Message's content never triggers it: BuildFrame does not scan for secrets. A plain backdrop hides the panes behind it, so nothing competes with the question.
-- **Use:** the expanded Question or Message card, the Question composer, the action lookup, Configuration, and confirmation and preflight dialogs.
+- **Jump lists:** `e` (files) and `m` (Messages) open a short list over the code, one row each: the selected row takes the `›` and the accent wash, a Message's state badge keeps its own tone and is never cut, and the title counts what is listed (`Files · 3 files`, or `1 of 3 files` while `/` filters). Enter opens the choice in the Diff and closes the list; Esc lets go of a filter, then closes. The panes stay as they were. With nothing to list, the key says so on the status line instead of opening an empty box.
+- **Use:** the expanded Question or Message card, the Question composer, the action lookup, the jump lists, Configuration, and confirmation and preflight dialogs.
 
 ### Status line
 - **Form:** a single row with a tone glyph (`✓` success, `!` warning, `✗` error, none for info) and a sentence. A warning or error that doesn't fit takes a second row rather than losing its end, because its end usually says what to do.

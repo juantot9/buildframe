@@ -97,7 +97,14 @@ export type ReviewRegion = 'files' | 'diff' | 'questions';
 export type ReviewingFocus = 'home' | ReviewRegion;
 export type HomeMode = 'launcher' | 'comparison' | 'history';
 export type HomeLauncherSelection = 'primary' | 'new-current' | 'comparison' | 'history';
-export type ConfigurationSetting = 'theme' | 'background' | 'arrangement' | 'icons' | 'header-visibility' | 'motion';
+export type ConfigurationSetting =
+  | 'theme'
+  | 'background'
+  | 'arrangement'
+  | 'panes'
+  | 'icons'
+  | 'header-visibility'
+  | 'motion';
 export type ReviewComparisonMode = 'commit' | 'range-to-head';
 export type ReviewDiffMode = 'inline' | 'side-by-side';
 export type ReviewingClipboardSource =
@@ -484,6 +491,8 @@ export interface ReviewingApplicationState {
   continuationChoice: ReviewContinuationChoiceState | undefined;
   historicalDialog: HistoricalReviewDialogState | undefined;
   filePaneVisible: boolean;
+  /** Only the Diff at every width (the one-pane layout); Files and History are a key away. */
+  codeOnly: boolean;
   leftPaneWidth: number;
   rightPaneWidth: number;
   fileScope: 'changed' | 'all';
@@ -501,6 +510,8 @@ export interface ReviewingApplicationState {
   unchangedContent: { readonly pathBytesBase64: string; readonly view: ReviewLiveFileContentView } | undefined;
   activeReviewBasisIdentity: ReviewBasisIdentity | undefined;
   basisPicker: { selectedReviewBasisIdentity: ReviewBasisIdentity } | undefined;
+  /** e or m: a short list of files or Messages over the code; Enter jumps, the Diff keeps its width. */
+  jumpList: JumpListState | undefined;
   editor: CreateMessageEditor | undefined;
   messagePreview: Extract<DefaultReviewMessageInspectionView, { readonly status: 'available' }> | undefined;
   messageCommitGate: Extract<DefaultReviewMessageInspectionView, { readonly status: 'available' }> | undefined;
@@ -803,6 +814,88 @@ function historyPointKey(point: ReviewHistoryPoint): string {
 
 export function historyStepKey(from: ReviewHistoryPoint, to: ReviewHistoryPoint): string {
   return `${historyPointKey(from)}>${historyPointKey(to)}`;
+}
+
+export interface JumpListState {
+  readonly kind: 'files' | 'messages';
+  /** The selected row among the rows the filter leaves, by its key. */
+  selectedKey: string | undefined;
+  /** Typed after /; rows whose text contains it, ignoring case, stay. */
+  query: string;
+  filtering: boolean;
+}
+
+/** One row of a jump list: what Enter opens and the text it shows and filters on. */
+export interface JumpListRow {
+  readonly key: string;
+  readonly text: string;
+  /** A state word or count kept whole after the text, in its own tone. */
+  readonly tail?: string;
+  readonly current: boolean;
+}
+
+/** The rows the open jump list shows, after its filter. */
+export function jumpListRows(state: ReviewingApplicationState): readonly JumpListRow[] {
+  const list = state.jumpList;
+  if (list === undefined) return [];
+  const rows: JumpListRow[] =
+    list.kind === 'files'
+      ? state.shownStep !== undefined
+        ? (state.shownStep.files ?? []).map(file => ({
+            key: file.fileIdentity,
+            text: file.path.display,
+            tail: file.change,
+            current: file.fileIdentity === state.selectedFileIdentity,
+          }))
+        : jumpFiles(state).map(file => ({
+            key: file.fileIdentity,
+            text: file.displayPath,
+            tail: file.status === 'unchanged' ? '' : file.status,
+            current: file.fileIdentity === state.selectedFileIdentity,
+          }))
+      : (state.review?.messages.messages.items ?? []).map((item, index) => ({
+          key: item.reviewMessageIdentity,
+          text: `#${(state.review?.messages.messages.offset ?? 0) + index + 1} ${item.location.file.display}:${item.location.line}  ${decodeBytesBase64(item.body.bytesBase64).toString('utf8').split('\n')[0] ?? ''}`,
+          tail: messageState(state, item),
+          current: item.reviewMessageIdentity === state.selectedMessageIdentity,
+        }));
+  const query = list.query.trim().toLowerCase();
+  return query === '' ? rows : rows.filter(row => row.text.toLowerCase().includes(query));
+}
+
+/** The files J and K move through, in the order Files lists them, folders all open. */
+function jumpFiles(state: ReviewingApplicationState): readonly ReviewingFileItem[] {
+  return reviewFileTreeNodes(reviewingFiles(state.review, state.fileScope), []).flatMap(node =>
+    node.kind === 'file' ? [node.file] : [],
+  );
+}
+
+/**
+ * Where the shown file sits among the files J and K move through, as "2 of 7";
+ * undefined when there's only one, so the Diff title only says it when it helps.
+ */
+export function shownFilePosition(
+  state: ReviewingApplicationState,
+): { readonly position: number; readonly total: number } | undefined {
+  const step = state.shownStep;
+  if (step !== undefined) {
+    const files = step.files ?? [];
+    const index = files.findIndex(file => file.fileIdentity === state.selectedFileIdentity);
+    return index < 0 || files.length < 2 ? undefined : { position: index + 1, total: files.length };
+  }
+  const review = state.review;
+  if (review === undefined) return undefined;
+  const files = jumpFiles(state);
+  const index = files.findIndex(file => file.fileIdentity === state.selectedFileIdentity);
+  const offset =
+    state.fileScope === 'all' && review.liveFiles?.status === 'available'
+      ? review.liveFiles.files.offset
+      : review.manifest.manifest.offset;
+  const total =
+    state.fileScope === 'all' && review.liveFiles?.status === 'available'
+      ? review.liveFiles.files.total
+      : review.manifest.manifest.totalFiles;
+  return index < 0 || total < 2 ? undefined : { position: offset + index + 1, total };
 }
 
 /** The steps [ and ] visit: those that changed code, oldest first; undefined without history. */
@@ -1322,6 +1415,7 @@ export class ReviewingApplicationModel {
       continuationChoice: undefined,
       historicalDialog: undefined,
       filePaneVisible: true,
+      codeOnly: false,
       leftPaneWidth: 34,
       rightPaneWidth: 40,
       fileScope: 'changed',
@@ -1333,6 +1427,7 @@ export class ReviewingApplicationModel {
       unchangedContent: undefined,
       activeReviewBasisIdentity: undefined,
       basisPicker: undefined,
+      jumpList: undefined,
       editor: undefined,
       messagePreview: undefined,
       messageCommitGate: undefined,
@@ -1373,7 +1468,7 @@ export class ReviewingApplicationModel {
   setViewport(width: number, height: number): void {
     this.state.width = Math.max(30, width);
     this.state.height = Math.max(12, height);
-    this.state.layout = layoutForWidth(this.state.width);
+    this.state.layout = this.state.codeOnly ? 'linear' : layoutForWidth(this.state.width);
   }
 
   /**
@@ -1748,6 +1843,7 @@ export class ReviewingApplicationModel {
       this.state.configurationWindow !== undefined ||
       this.state.continuationChoice !== undefined ||
       this.state.basisPicker !== undefined ||
+      this.state.jumpList !== undefined ||
       this.state.actionLookupOpen
     ) {
       return [];
@@ -1817,6 +1913,8 @@ export class ReviewingApplicationModel {
     this.state.motion = preferences.motion;
     this.state.header = preferences.header;
     this.state.filePaneVisible = preferences.filesVisible;
+    this.state.codeOnly = preferences.codeOnly;
+    this.setViewport(this.state.width, this.state.height);
     this.state.leftPaneWidth = preferences.filesPaneWidth;
     this.state.rightPaneWidth = preferences.questionsPaneWidth;
     if (!this.state.filePaneVisible && this.state.focus === 'files') {
@@ -2835,6 +2933,7 @@ export class ReviewingApplicationModel {
       return this.handleContinuationChoiceInput(data, now);
     }
     if (this.state.basisPicker !== undefined) return this.handleBasisPickerInput(data, now);
+    if (this.state.jumpList !== undefined) return this.handleJumpListInput(data);
     if (matchesKey(data, Key.ctrl('c'))) return [{ type: 'stop' }];
     const plainSpace =
       data.name === 'space' && data.text === ' ' && !data.ctrl && !data.alt && !data.shift && !data.super;
@@ -3024,6 +3123,11 @@ export class ReviewingApplicationModel {
     }
     if (this.state.focus === 'files' && data.text === 'H') return this.collapseAllFolders();
     if (this.state.focus === 'files' && data.text === 'L') return this.expandAllFolders();
+    if (data.text === 'z') return this.toggleCodeOnly();
+    if (data.text === 'e') return this.openJumpList('files');
+    if (data.text === 'm') return this.openJumpList('messages');
+    if (data.text === 'J') return this.jumpFile(1);
+    if (data.text === 'K') return this.jumpFile(-1);
     if (data.text === 's') {
       this.state.filePaneVisible = !this.state.filePaneVisible;
       if (!this.state.filePaneVisible && this.state.focus === 'files') {
@@ -3126,7 +3230,7 @@ export class ReviewingApplicationModel {
   }
 
   handlePointerTarget(target: ReviewingPointerTarget): readonly ReviewingModelEffect[] {
-    if (this.state.actionLookupOpen) return [];
+    if (this.state.actionLookupOpen || this.state.jumpList !== undefined) return [];
     this.followSelection();
     if (
       target.kind === 'home-launcher-choice' ||
@@ -3335,6 +3439,7 @@ export class ReviewingApplicationModel {
         'theme',
         'background',
         'arrangement',
+        'panes',
         'icons',
         'header-visibility',
         'motion',
@@ -3352,6 +3457,8 @@ export class ReviewingApplicationModel {
       const arrangements: readonly ReviewArrangement[] = ['workspace', 'code-spotlight', 'review-notebook'];
       const current = Math.max(0, arrangements.indexOf(this.state.arrangement));
       this.state.arrangement = arrangements[(current + direction + arrangements.length) % arrangements.length]!;
+    } else if (window.selected === 'panes') {
+      this.setCodeOnly(!this.state.codeOnly);
     } else if (window.selected === 'background') {
       this.state.background = this.state.background === 'theme' ? 'terminal' : 'theme';
     } else if (window.selected === 'icons') {
@@ -3664,6 +3771,184 @@ export class ReviewingApplicationModel {
     return [];
   }
 
+  /** e or m: opens the list on the file or Message you're on; it says so instead when there's nothing to list. */
+  private openJumpList(kind: JumpListState['kind']): readonly ReviewingModelEffect[] {
+    if (this.state.review === undefined) return [];
+    this.state.jumpList = { kind, selectedKey: undefined, query: '', filtering: false };
+    const rows = jumpListRows(this.state);
+    if (rows.length === 0) {
+      this.state.jumpList = undefined;
+      this.say(kind === 'files' ? 'No files to list.' : 'No Messages yet. Press a on a line to write one.', 'info');
+      return [];
+    }
+    this.state.jumpList.selectedKey = (rows.find(row => row.current) ?? rows[0])!.key;
+    this.state.notice = undefined;
+    this.state.showDetails = false;
+    return [];
+  }
+
+  private handleJumpListInput(data: ReviewingInput): readonly ReviewingModelEffect[] {
+    const list = this.state.jumpList;
+    if (list === undefined) return [];
+    if (matchesKey(data, Key.ctrl('c'))) return [{ type: 'stop' }];
+    const rows = jumpListRows(this.state);
+    const keepSelection = (): void => {
+      const visible = jumpListRows(this.state);
+      if (!visible.some(row => row.key === list.selectedKey)) list.selectedKey = visible[0]?.key;
+    };
+    if (matchesKey(data, Key.escape)) {
+      // Esc lets go of a filter first, then closes.
+      if (list.filtering || list.query !== '') {
+        list.filtering = false;
+        list.query = '';
+        keepSelection();
+      } else {
+        this.state.jumpList = undefined;
+      }
+      return [];
+    }
+    if (matchesKey(data, Key.enter)) {
+      const key = list.selectedKey;
+      if (key === undefined || !rows.some(row => row.key === key)) return [];
+      this.state.jumpList = undefined;
+      return list.kind === 'files' ? this.jumpToFile(key) : this.jumpToMessage(key);
+    }
+    const move = (delta: number): readonly ReviewingModelEffect[] => {
+      if (rows.length === 0) return [];
+      const current = Math.max(
+        0,
+        rows.findIndex(row => row.key === list.selectedKey),
+      );
+      list.selectedKey = rows[cycledTarget(current, delta, rows.length)]!.key;
+      return [];
+    };
+    if (matchesKey(data, Key.up)) return move(-1);
+    if (matchesKey(data, Key.down)) return move(1);
+    if (list.filtering) {
+      if (matchesKey(data, Key.backspace)) {
+        list.query = [...list.query].slice(0, -1).join('');
+        keepSelection();
+        return [];
+      }
+      const typed = printableInput(data);
+      if (typed !== undefined) {
+        list.query += typed;
+        keepSelection();
+      }
+      return [];
+    }
+    if (data.text === 'k') return move(-1);
+    if (data.text === 'j') return move(1);
+    if (data.text === 'g') {
+      list.selectedKey = rows[0]?.key;
+      return [];
+    }
+    if (data.text === 'G') {
+      list.selectedKey = rows.at(-1)?.key;
+      return [];
+    }
+    if (data.text === '/') {
+      list.filtering = true;
+      return [];
+    }
+    // The key that opened the list closes it.
+    if ((list.kind === 'files' && data.text === 'e') || (list.kind === 'messages' && data.text === 'm')) {
+      this.state.jumpList = undefined;
+    }
+    return [];
+  }
+
+  private jumpToFile(fileIdentity: string): readonly ReviewingModelEffect[] {
+    this.state.focus = 'diff';
+    if (this.state.shownStep !== undefined) return this.selectChangedFile(fileIdentity);
+    this.state.selectedDirectory = undefined;
+    this.state.selectedFileIdentity = fileIdentity;
+    this.state.selectedRowIdentity = undefined;
+    return this.previewSelectedFile();
+  }
+
+  /** Enter on a Message: the Diff goes to its line at now, as Enter in History does. */
+  private jumpToMessage(reviewMessageIdentity: string): readonly ReviewingModelEffect[] {
+    const messages = this.state.review?.messages.messages;
+    const index = messages?.items.findIndex(item => item.reviewMessageIdentity === reviewMessageIdentity) ?? -1;
+    const item = messages?.items[index];
+    if (messages === undefined || item === undefined) return [];
+    if (this.state.shownStep !== undefined) this.closeShownStep();
+    this.state.focus = 'diff';
+    return this.navigateToMessage(item, messages.offset + index, true);
+  }
+
+  /**
+   * J/K: the next or previous file in the Diff, from any pane and without the
+   * Files pane on screen; a shown step moves through its own files.
+   */
+  private jumpFile(direction: 1 | -1): readonly ReviewingModelEffect[] {
+    const edge = direction > 0 ? 'This is the last file.' : 'This is the first file.';
+    if (this.state.shownStep !== undefined) {
+      const files = this.state.shownStep.files ?? [];
+      if (files.length < 2) {
+        this.say('Only one file changed in this step.', 'info');
+        return [];
+      }
+      const current = files.findIndex(file => file.fileIdentity === this.state.selectedFileIdentity);
+      const target = files[current + direction];
+      if (target === undefined) {
+        this.say(edge, 'info');
+        return [];
+      }
+      return this.selectChangedFile(target.fileIdentity);
+    }
+    const review = this.state.review;
+    const source = this.fileListSource();
+    if (review === undefined || source === undefined) return [];
+    if (source.total === 0) {
+      this.say('No files to move between.', 'info');
+      return [];
+    }
+    if (source.total === 1) {
+      this.say(this.state.fileScope === 'changed' ? 'Only one file changed.' : 'Only one file here.', 'info');
+      return [];
+    }
+    const files = jumpFiles(this.state);
+    const current = files.findIndex(file => file.fileIdentity === this.state.selectedFileIdentity);
+    const target = files[current + direction];
+    if (target !== undefined) {
+      this.state.selectedDirectory = undefined;
+      this.state.selectedFileIdentity = target.fileIdentity;
+      this.state.selectedRowIdentity = undefined;
+      return this.previewSelectedFile();
+    }
+    // Past the loaded window: Files pages to the next one, the same way j/k there does.
+    const loadedEnd = source.offset + files.length;
+    if ((direction > 0 && loadedEnd < source.total) || (direction < 0 && source.offset > 0)) {
+      return this.moveFile(direction);
+    }
+    this.say(edge, 'info');
+    return [];
+  }
+
+  /** z: the Diff alone at every width, or every pane again; remembered like the other layout choices. */
+  private toggleCodeOnly(): readonly ReviewingModelEffect[] {
+    this.setCodeOnly(!this.state.codeOnly);
+    const narrow = layoutForWidth(this.state.width) === 'linear';
+    this.say(
+      this.state.codeOnly
+        ? 'Code only. e lists files, m lists Messages, J/K move between files; z shows every pane.'
+        : narrow
+          ? 'Every pane is back for wider terminals; this width shows one pane at a time.'
+          : 'Every pane is back.',
+      'info',
+    );
+    return [this.reviewingPreferencesSaveEffect()];
+  }
+
+  private setCodeOnly(codeOnly: boolean): void {
+    this.state.codeOnly = codeOnly;
+    // The code is what this view is for, so a Review opens on the Diff.
+    if (codeOnly && this.state.screen === 'review') this.state.focus = 'diff';
+    this.setViewport(this.state.width, this.state.height);
+  }
+
   private reviewingPreferencesSaveEffect(): ReviewingModelEffect {
     return {
       type: 'save-reviewing-preferences',
@@ -3675,6 +3960,7 @@ export class ReviewingApplicationModel {
         motion: this.state.motion,
         header: this.state.header,
         filesVisible: this.state.filePaneVisible,
+        codeOnly: this.state.codeOnly,
         filesPaneWidth: this.state.leftPaneWidth,
         questionsPaneWidth: this.state.rightPaneWidth,
       },
@@ -4049,8 +4335,12 @@ export class ReviewingApplicationModel {
       shown !== undefined &&
       shown.file.fileIdentity === file.diffFileIdentity &&
       diffSourceKey(shown) === reviewingSourceKey(review)
-    )
+    ) {
+      // Back on the file already shown (J then K): a load started for the one
+      // left behind no longer counts.
+      if (this.state.loading?.region === 'diff') this.state.loading = undefined;
       return [];
+    }
     this.state.selectedRowIdentity = undefined;
     const cached = this.#diffCache.get(`${reviewingSourceKey(review)}:${file.diffFileIdentity}`);
     if (cached !== undefined && cached.status === 'available') {

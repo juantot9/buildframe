@@ -1664,7 +1664,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     terminal.send('\r');
     await waitForOutput(terminal, 'Current Review · ');
     await focusPane(terminal, 'Files');
-    for (let step = 0; step < 3; step += 1) terminal.send('j');
+    // review.txt, then src/, then the long-named file.
+    for (let step = 0; step < 2; step += 1) terminal.send('j');
     terminal.send('\r');
     await waitForOutput(terminal, 'export const one = 2;');
     terminal.send('j');
@@ -2710,6 +2711,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     // Nerd Font icons are an explicit opt-in in Configuration.
     terminal.send('c');
     await waitForOutput(terminal, 'Icons');
+    // Theme, Background, Arrangement, Panes, then Icons.
+    terminal.send('j');
     terminal.send('j');
     terminal.send('j');
     terminal.send('j');
@@ -5102,7 +5105,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       expect(strip).toContain('[Tab] pane');
     };
     const wideActionStrip =
-      '[Tab] pane  [j/k] move  [a] new Message  [ and ] history  [v] side-by-side  [t] review points  [?] keys  [Esc] Home  [q] quit';
+      '[Tab] pane  [j/k] move  [a] new Message  [ and ] history  [v] side-by-side  [z] code only  [?] keys  [Esc] Home  [q] quit';
     const commandChrome = (): string | undefined =>
       (terminal.renderer.root.findDescendantById('reviewing-action-strip') as TextRenderable | undefined)?.plainText;
     expect(commandChrome()).toBe(wideActionStrip);
@@ -5165,6 +5168,103 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     terminal.send('q');
     await application.closed;
     expect(closed).toBe(true);
+  });
+
+  it('shows only the code at any width with z, moves between files and Messages without the panes, and remembers it', async () => {
+    const created = await fixture();
+    await writeFile(path.join(created.checkout, 'alpha.txt'), 'alpha\n');
+    await writeFile(path.join(created.checkout, 'beta.txt'), 'beta\n');
+    const owner = await open(created.checkout);
+    const configurationPath = path.join(created.root, 'config', 'config.json');
+    const terminal = await ScriptedTerminal.create(120, 30);
+    const application = createReviewingApplicationForTest({
+      workspace: owner.workspace,
+      renderer: terminal.renderer,
+      userConfiguration: createFileUserConfiguration(configurationPath),
+    });
+    applications.add(application);
+    await application.start();
+    terminal.send('\r');
+    await waitForOutput(terminal, 'Current Review · ');
+    await waitForOutput(terminal, 'Files  Changed');
+    const diffWidth = (): number => terminal.renderer.root.findDescendantById('reviewing-diff-pane')?.width ?? 0;
+    const before = diffWidth();
+    // At 120 columns every pane shows; z offers the code alone.
+    await waitForOutput(terminal, '[z] code only');
+
+    let checkpoint = terminal.checkpoint();
+    terminal.send('z');
+    await waitForOutput(terminal, 'Code only. e lists files', checkpoint);
+    await waitFor(() => diffWidth() > before + 40, 'Diff takes the width');
+    await waitForOutput(terminal, '[z] all panes', checkpoint);
+    // With Files off screen, the Diff title says where you are among the files.
+    await waitForOutput(terminal, 'file 1 of 3', checkpoint);
+
+    // J and K move between files from the code; the panes stay hidden.
+    const onScreen = (text: string): Promise<void> =>
+      waitFor(() => terminal.setup.captureCharFrame().includes(text), text);
+    terminal.send('J');
+    await onScreen('file 2 of 3');
+    terminal.send('K');
+    await onScreen('file 1 of 3');
+    // At the first file K stays put rather than wrapping to the last.
+    terminal.send('K');
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await onScreen('file 1 of 3');
+
+    // e lists the files over the code; Enter opens one and the Diff keeps its width.
+    checkpoint = terminal.checkpoint();
+    terminal.send('e');
+    await waitFor(
+      () => terminal.renderer.root.findDescendantById('reviewing-jump-list') !== undefined,
+      'files list open',
+    );
+    await waitForOutput(terminal, 'Files · 3 files', checkpoint);
+    await waitForOutput(terminal, '[/] filter', checkpoint);
+    terminal.send('/');
+    terminal.send('beta');
+    await waitForOutput(terminal, '1 of 3 files', checkpoint);
+    terminal.send('\r');
+    await waitFor(
+      () => terminal.renderer.root.findDescendantById('reviewing-jump-list') === undefined,
+      'files list closed',
+    );
+    await waitForOutput(terminal, 'beta.txt · file', checkpoint);
+    expect(diffWidth()).toBeGreaterThan(before + 40);
+    expect(terminal.setup.captureCharFrame()).not.toContain('Files  Changed');
+
+    // m with no Messages says so instead of opening an empty list.
+    checkpoint = terminal.checkpoint();
+    terminal.send('m');
+    await waitForOutput(terminal, 'No Messages yet.', checkpoint);
+
+    // The choice is saved and comes back on the next start.
+    await waitFor(async () => {
+      try {
+        const saved = JSON.parse(await fsReadFile(configurationPath, 'utf8')) as {
+          reviewing?: { layout?: { codeOnly?: boolean } };
+        };
+        return saved.reviewing?.layout?.codeOnly === true;
+      } catch {
+        return false;
+      }
+    }, 'code only saved');
+    await application.stop();
+    applications.delete(application);
+    const secondTerminal = await ScriptedTerminal.create(120, 30);
+    const second = createReviewingApplicationForTest({
+      workspace: owner.workspace,
+      renderer: secondTerminal.renderer,
+      userConfiguration: createFileUserConfiguration(configurationPath),
+    });
+    applications.add(second);
+    await second.start();
+    await waitForOutput(secondTerminal, 'Current Review · ');
+    await waitForOutput(secondTerminal, '[z] all panes');
+    checkpoint = secondTerminal.checkpoint();
+    secondTerminal.send('z');
+    await waitForOutput(secondTerminal, 'Every pane is back.', checkpoint);
+    await waitForOutput(secondTerminal, 'Files  Changed', checkpoint);
   });
 
   it('restores Files visibility and preferred pane widths after a TUI restart', async () => {
@@ -5240,6 +5340,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     firstTerminal.send('l');
     await waitForOutput(firstTerminal, 'Review Notebook');
     firstTerminal.send('j');
+    await waitForOutput(firstTerminal, 'All panes');
+    firstTerminal.send('j');
     await waitForOutput(firstTerminal, 'Icons');
     firstTerminal.send('j');
     await waitForOutput(firstTerminal, 'Header');
@@ -5281,6 +5383,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     secondTerminal.send('c');
     await waitForOutput(secondTerminal, 'Review Notebook');
     await waitForOutput(secondTerminal, 'Ocean Glass');
+    // Theme, Background, Arrangement, Panes, Icons, then Header.
+    secondTerminal.send('j');
     secondTerminal.send('j');
     secondTerminal.send('j');
     secondTerminal.send('j');
@@ -5815,6 +5919,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(terminal.renderer.root.findDescendantById('reviewing-action-lookup')).toBeUndefined();
     terminal.send('c');
     await waitForOutput(terminal, 'Configuration');
+    // Theme, Background, Arrangement, Panes, Icons, then Header.
+    terminal.send('j');
     terminal.send('j');
     terminal.send('j');
     terminal.send('j');

@@ -41,6 +41,9 @@ import {
   latestHeadMoveStep,
   shortHash,
   navigableHistorySteps,
+  shownFilePosition,
+  jumpListRows,
+  type JumpListRow,
   messageState,
   messagesOnLines,
   messagesPaneName,
@@ -840,6 +843,19 @@ function emptyChangesSentence(state: ReviewingApplicationState): { readonly text
   }
   const how = move.count === 1 ? 'committed' : `the newest of ${move.count} commits made`;
   return { text: `No changes since ${commitName(move.to)}, ${how} ${label}.\n${way}`, caution: false };
+}
+
+/**
+ * " · file 2 of 7" after the Diff's file name while Files isn't on screen, so J/K
+ * and the e list have a place to start from; Files says it itself when shown.
+ */
+function filePositionDetail(state: ReviewingApplicationState): string {
+  const filesOnScreen =
+    !state.codeOnly &&
+    state.filePaneVisible &&
+    (state.layout === 'wide' || (state.layout === 'balanced' && state.balancedContext === 'files'));
+  const position = filesOnScreen ? undefined : shownFilePosition(state);
+  return position === undefined ? '' : ` · file ${position.position} of ${position.total}`;
 }
 
 /** The last path segment, keeping a directory's trailing slash; the tree indent shows the rest. */
@@ -3334,10 +3350,10 @@ function diffPane(
       composer !== undefined
         ? `${activeBasisLabel(state)} · ${shortDisplayPath(composer.fileLabel)}:${composer.line}`
         : changes !== undefined
-          ? `PAST · ${changes.label} · ${shortDisplayPath(path)}`
+          ? `PAST · ${changes.label} · ${shortDisplayPath(path)}${filePositionDetail(state)}`
           : selectedIsUnchanged
             ? `unchanged ${activeBasisLabel(state)} · ${shortDisplayPath(path)}`
-            : `${activeBasisLabel(state)} · ${shortDisplayPath(path)}${
+            : `${activeBasisLabel(state)} · ${shortDisplayPath(path)}${filePositionDetail(state)}${
                 state.loading?.region === 'diff' &&
                 view?.status === 'available' &&
                 view.file.fileIdentity === state.selectedFileIdentity
@@ -3890,10 +3906,11 @@ function reviewBody(
 ): VChild {
   const colors = theme(state);
   const geometry = effectivePaneGeometry(state);
-  if (state.arrangement === 'code-spotlight' && shownFocus(state) === 'questions') {
+  // Code only takes the one-pane layout whatever the arrangement; the arrangement returns with every pane.
+  if (!state.codeOnly && state.arrangement === 'code-spotlight' && shownFocus(state) === 'questions') {
     return questionsPane(state, '100%', interaction, viewportHeight);
   }
-  if (state.arrangement === 'code-spotlight') {
+  if (!state.codeOnly && state.arrangement === 'code-spotlight') {
     return Box(
       {
         width: '100%',
@@ -3918,7 +3935,7 @@ function reviewBody(
       ),
     );
   }
-  if (state.arrangement === 'review-notebook') {
+  if (!state.codeOnly && state.arrangement === 'review-notebook') {
     return Box(
       {
         width: '100%',
@@ -4727,6 +4744,15 @@ function contextualShortcutLines(state: ReviewingApplicationState): readonly [st
           ? [`[Enter] send${preview}  [Esc] close`, 'Enter sends; nothing is sent until then.']
           : [`[Enter] send${preview}  [Esc] discard`, 'Typed text needs Esc twice to discard; nothing is sent.'];
   }
+  if (state.jumpList !== undefined) {
+    const kind = state.jumpList.kind === 'files' ? 'file' : 'Message';
+    return state.jumpList.filtering
+      ? ['Type to filter  [Up/Down] move  [Enter] open  [Esc] clear filter', `Enter opens the ${kind} in the Diff.`]
+      : [
+          `[j/k] move  [Enter] open  [/] filter  [Esc/${state.jumpList.kind === 'files' ? 'e' : 'm'}] close`,
+          `Enter opens the ${kind} in the Diff; the panes stay as they are.`,
+        ];
+  }
   if (state.basisPicker !== undefined) {
     return [
       '[j/k] review point  [Enter] open  [Esc/t] close',
@@ -4827,7 +4853,10 @@ function actionLookupItems(state: ReviewingApplicationState): readonly ActionLoo
     add('MOVE', 'j/k', state.focus === 'questions' ? 'Older / newer step' : 'Move selection');
     add('MOVE', 'g/G', 'First / last');
     add('MOVE', 'PgUp/PgDn', 'Move one page');
+    add('MOVE', 'J/K', 'Next / previous changed file');
     if (state.focus === 'diff') add('VIEW', 'v/w', 'Diff mode / wrapping');
+    add('VIEW', 'e', 'List files');
+    add('VIEW', 'z', state.codeOnly ? 'Show every pane' : 'Code only');
     appKeys('Back to now');
     return items;
   }
@@ -4835,6 +4864,7 @@ function actionLookupItems(state: ReviewingApplicationState): readonly ActionLoo
   add('MOVE', 'j/k', 'Move selection');
   add('MOVE', 'g/G', 'First / last');
   add('MOVE', 'PgUp/PgDn', state.focus === 'questions' ? 'Scroll the Message' : 'Move one page');
+  add('MOVE', 'J/K', 'Next / previous changed file');
   if (state.focus === 'files') {
     add('MOVE', 'h/l', 'Collapse / expand folder');
     add('MOVE', 'H/L', 'Collapse / expand all folders');
@@ -4856,6 +4886,8 @@ function actionLookupItems(state: ReviewingApplicationState): readonly ActionLoo
   if (state.focus === 'diff') add('VIEW', 'v/w', 'Diff mode / wrapping');
   add('VIEW', '/', 'Search this Review');
   add('VIEW', 's', 'Show / hide Files');
+  add('VIEW', 'z', state.codeOnly ? 'Show every pane' : 'Code only');
+  add('VIEW', 'e / m', 'List files / Messages');
   add('VIEW', '< / >', 'Resize the pane');
   appKeys('Back to Home');
   return items;
@@ -4914,6 +4946,7 @@ function actionStrip(state: ReviewingApplicationState): string {
       ['[ and ] older / newer', 2],
       ['[Tab] pane', 3],
       ['[j/k] move', 4],
+      ...paneChoiceKeys(state),
       ...(shownFocus(state) === 'diff' ? [['[v] side-by-side', 6] as const] : []),
       ['[?] keys', 1],
       ['[q] quit', 9],
@@ -4953,6 +4986,7 @@ function actionStrip(state: ReviewingApplicationState): string {
       ...(nothingListed ? [] : [['[j/k] move', 4] as const]),
       ...messageKeys,
       ...paneKeys,
+      ...paneChoiceKeys(state),
       ['[t] review points', 8],
       ['[?] keys', 1],
       ['[Esc] Home', 6],
@@ -4960,6 +4994,20 @@ function actionStrip(state: ReviewingApplicationState): string {
     ];
   }
   return fitHints(hints, Math.max(1, state.width - 2));
+}
+
+/**
+ * What z offers, and in code only the lists that stand in for the hidden
+ * panes. While panes are hidden, `[z] all panes` ranks with Tab so the way
+ * back never drops off the row.
+ */
+function paneChoiceKeys(state: ReviewingApplicationState): readonly (readonly [string, number])[] {
+  if (state.codeOnly) {
+    const messages = (state.review?.messages.messages.total ?? 0) > 0;
+    return [['[z] all panes', 2], ['[e] files', 4], ...(messages ? [['[m] Messages', 5] as const] : [])];
+  }
+  // Below 90 columns one pane at a time is already the layout; z changes nothing to see.
+  return state.layout === 'linear' ? [] : [['[z] code only', 7]];
 }
 
 function fitHints(hints: readonly (readonly [string, number])[], width: number): string {
@@ -5161,6 +5209,124 @@ function basisPickerOverlay(
       ),
     ),
   ];
+}
+
+/**
+ * e and m: the files or Messages as a short list over the code, one row each,
+ * so the Diff keeps its width. Keys live in the footer, as for every dialog.
+ */
+function jumpListOverlay(state: ReviewingApplicationState, bodyHeight: number): VChild[] {
+  const list = state.jumpList;
+  if (list === undefined || state.review === undefined) return [];
+  const colors = controlPlaneTheme(state);
+  const ascii = state.presentation.ascii;
+  const rows = jumpListRows(state);
+  const width = Math.min(76, Math.max(36, state.width - 8));
+  const contentWidth = Math.max(1, width - 4);
+  const filterShown = list.filtering || list.query !== '';
+  // Border, the filter row when there is one, and at least three rows of list.
+  const chrome = 2 + (filterShown ? 1 : 0);
+  const height = dialogHeight(bodyHeight, chrome + Math.max(1, Math.min(rows.length, 12)), chrome + 3);
+  const visible = Math.max(1, height - chrome);
+  const selected = Math.max(
+    0,
+    rows.findIndex(row => row.key === list.selectedKey),
+  );
+  const start = centeredStart(selected, 0, rows.length, visible);
+  const items = state.review.messages.messages.items;
+  const separator = ascii ? '-' : '·';
+  const total = list.kind === 'files' ? 'files' : 'Messages';
+  const stopPointer = (event: MouseEvent): void => event.stopPropagation();
+  const count =
+    list.query.trim() === ''
+      ? `${rows.length} ${total}`
+      : `${rows.length} of ${list.kind === 'files' ? jumpListCount(state) : items.length} ${total}`;
+  const row = (entry: JumpListRow, index: number): VChild => {
+    const isSelected = entry.key === list.selectedKey;
+    const marker = isSelected ? (ascii ? '>' : '›') : ' ';
+    const item =
+      list.kind === 'messages' ? items.find(candidate => candidate.reviewMessageIdentity === entry.key) : undefined;
+    const badge = item === undefined ? undefined : stateBadge(state, item);
+    const tail = badge === undefined ? '' : `  ${badge.glyph} ${badge.word}`;
+    const lead = list.kind === 'files' ? `${marker} ${fileStatus(entry.tail ?? '', ascii)}  ` : `${marker} `;
+    // A state word is never cut: the text gives way before it, ending on its own ellipsis.
+    const text = fitDisplayCellsEnd(
+      entry.text.replaceAll('\n', ' '),
+      Math.max(1, contentWidth - displayCells(lead) - displayCells(tail)),
+      ascii ? '...' : '…',
+    );
+    return Box(
+      {
+        id: reviewRenderableId(state, `reviewing-jump-list-row-${start + index}`),
+        width: '100%',
+        height: 1,
+        flexShrink: 0,
+        flexDirection: 'row',
+        backgroundColor: isSelected ? colors.accentSoft : colors.raised,
+      },
+      label(state, `${lead}${text}`, {
+        fg: isSelected ? colors.accent : entry.current ? colors.text : colors.muted,
+        bold: isSelected || entry.current,
+        flexShrink: 1,
+      }),
+      ...(badge === undefined
+        ? []
+        : [label(state, tail, { fg: toneColor(colors, badge.tone), flexShrink: 0, bold: isSelected })]),
+    );
+  };
+  return [
+    Box(
+      {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        zIndex: 30,
+        backgroundColor: 'transparent',
+        onMouseDown: stopPointer,
+        onMouseUp: stopPointer,
+      },
+      borderedBox(
+        state,
+        {
+          id: 'reviewing-jump-list',
+          position: 'absolute',
+          left: Math.max(0, Math.floor((state.width - width) / 2)),
+          top: dialogTop(bodyHeight, height),
+          width,
+          height,
+          zIndex: 31,
+          flexDirection: 'column',
+          paddingLeft: 1,
+          paddingRight: 1,
+          borderColor: colors.accent,
+          backgroundColor: colors.raised,
+          title: ` ${list.kind === 'files' ? 'Files' : 'Messages'} ${separator} ${count} `,
+          titleColor: colors.accent,
+          titleAlignment: 'center',
+          overflow: 'hidden',
+        },
+        ...(filterShown
+          ? [
+              label(state, `/ ${list.query}${list.filtering ? (ascii ? '_' : '▏') : ''}`, {
+                fg: colors.text,
+                height: 1,
+              }),
+            ]
+          : []),
+        ...(rows.length === 0
+          ? [label(state, `No ${total} match “${list.query}”.`, { fg: colors.muted, height: 1 })]
+          : rows.slice(start, start + visible).map(row)),
+      ),
+    ),
+  ];
+}
+
+/** How many files the files list holds before its filter. */
+function jumpListCount(state: ReviewingApplicationState): number {
+  if (state.shownStep !== undefined) return state.shownStep.files?.length ?? 0;
+  return reviewingFiles(state.review, state.fileScope).length;
 }
 
 function messagePreviewAssessment(
@@ -5558,6 +5724,10 @@ const CONFIGURATION_DESCRIPTIONS = {
     terminal: 'Use the terminal’s own background; changed lines keep their tint.',
     theme: 'Use the selected theme background and pane surfaces.',
   },
+  panes: {
+    all: 'Show the panes this width allows; z switches to code only.',
+    codeOnly: 'Only the Diff, at every width. e lists files, m lists Messages; z shows every pane.',
+  },
   arrangement: {
     codeSpotlight: 'Give the Diff most of the terminal; context stays secondary.',
     reviewNotebook: 'Lead with History and keep the Diff beside it as evidence.',
@@ -5577,7 +5747,12 @@ const CONFIGURATION_DESCRIPTIONS = {
   },
 } as const;
 
-function configurationOverlay(state: ReviewingApplicationState, bodyHeight: number): VChild[] {
+function configurationOverlay(
+  state: ReviewingApplicationState,
+  bodyHeight: number,
+  /** Header rows above the body: the box is centred as if they were body, so hiding the header never moves it. */
+  headerRows = 0,
+): VChild[] {
   const configuration = state.configurationWindow;
   if (configuration === undefined) return [];
   // Terminal-default workspace surfaces remain unpainted, but a modal is a
@@ -5615,6 +5790,7 @@ function configurationOverlay(state: ReviewingApplicationState, bodyHeight: numb
             ? described.theme.matchedLight
             : described.theme.matchedDark,
     background: state.background === 'terminal' ? described.background.terminal : described.background.theme,
+    panes: state.codeOnly ? described.panes.codeOnly : described.panes.all,
     arrangement:
       state.arrangement === 'code-spotlight'
         ? described.arrangement.codeSpotlight
@@ -5664,6 +5840,7 @@ function configurationOverlay(state: ReviewingApplicationState, bodyHeight: numb
     row('theme', 'Theme', themeName),
     row('background', 'Background', state.background === 'terminal' ? 'Terminal' : 'Theme'),
     row('arrangement', 'Arrangement', arrangementName),
+    row('panes', 'Panes', state.codeOnly ? 'Code only' : 'All panes'),
     row('icons', 'Icons', state.icons === 'nerd' ? 'Nerd Font' : 'Text'),
     row('header-visibility', 'Header', state.header.visible ? 'Shown' : 'Hidden'),
     row('motion', 'Scrolling', state.motion === 'smooth' ? 'Smooth' : 'Instant'),
@@ -5679,7 +5856,7 @@ function configurationOverlay(state: ReviewingApplicationState, bodyHeight: numb
         id: 'reviewing-configuration-overlay',
         position: 'absolute',
         left: Math.max(0, Math.floor((state.width - width) / 2)),
-        top: dialogTop(bodyHeight, height),
+        top: Math.max(0, dialogTop(bodyHeight + headerRows, height) - headerRows),
         width,
         height,
         zIndex: 34,
@@ -6104,10 +6281,11 @@ function screen(
             : reviewBody(presented, questionTextarea, baseInteraction, onDiscussionPage, onContentPage, contentHeight),
       ...detailsOverlay(presented),
       ...actionLookupOverlay(presented, contentHeight),
-      ...configurationOverlay(presented, contentHeight),
+      ...configurationOverlay(presented, contentHeight, header.height),
       ...continuationChoiceOverlay(presented),
       ...(state.search !== undefined ? [searchBody(state, contentHeight)] : []),
       ...basisPickerOverlay(state, interaction, contentHeight),
+      ...jumpListOverlay(state, contentHeight),
       ...messageCommitGateOverlay(state, contentHeight),
       ...messagePreviewOverlay(state, contentHeight),
       ...historicalDialogOverlay(state, contentHeight, interaction, onDiscussionPage),

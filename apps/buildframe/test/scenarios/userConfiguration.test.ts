@@ -66,6 +66,7 @@ describe('portable User Configuration', () => {
       preferences: {
         arrangement: 'workspace',
         filesVisible: true,
+        codeOnly: false,
         filesPaneWidth: 34,
         questionsPaneWidth: 40,
         theme: { inherits: 'match-terminal', colors: {} },
@@ -80,6 +81,7 @@ describe('portable User Configuration', () => {
       first.saveReviewingPreferences({
         arrangement: 'code-spotlight',
         filesVisible: false,
+        codeOnly: true,
         filesPaneWidth: 46,
         questionsPaneWidth: 52,
         theme: {
@@ -118,6 +120,7 @@ describe('portable User Configuration', () => {
         },
         layout: {
           filesVisible: false,
+          codeOnly: true,
           filesPaneWidth: 46,
           questionsPaneWidth: 52,
         },
@@ -130,6 +133,7 @@ describe('portable User Configuration', () => {
       preferences: {
         arrangement: 'code-spotlight',
         filesVisible: false,
+        codeOnly: true,
         filesPaneWidth: 46,
         questionsPaneWidth: 52,
         theme: {
@@ -167,6 +171,7 @@ describe('portable User Configuration', () => {
       supported.saveReviewingPreferences({
         arrangement: 'workspace',
         filesVisible: true,
+        codeOnly: false,
         filesPaneWidth: 30,
         questionsPaneWidth: 44,
         theme: { inherits: 'quiet-graphite', colors: {} },
@@ -198,6 +203,7 @@ describe('portable User Configuration', () => {
       malformed.saveReviewingPreferences({
         arrangement: 'review-notebook',
         filesVisible: false,
+        codeOnly: false,
         filesPaneWidth: 32,
         questionsPaneWidth: 42,
         theme: { inherits: 'quiet-graphite', colors: {} },
@@ -218,6 +224,7 @@ describe('portable User Configuration', () => {
       newer.saveReviewingPreferences({
         arrangement: 'workspace',
         filesVisible: true,
+        codeOnly: false,
         filesPaneWidth: 34,
         questionsPaneWidth: 40,
         theme: { inherits: 'quiet-graphite', colors: {} },

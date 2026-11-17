@@ -76,6 +76,8 @@ export interface ReviewingHeaderPreferences {
 export interface ReviewingPreferences {
   readonly arrangement: ReviewArrangement;
   readonly filesVisible: boolean;
+  /** Only the Diff, at every width: Files and History stay a key away. */
+  readonly codeOnly: boolean;
   readonly filesPaneWidth: number;
   readonly questionsPaneWidth: number;
   readonly theme: ReviewingThemeDefinition;
@@ -115,6 +117,7 @@ export interface UserConfiguration {
 export const DEFAULT_REVIEWING_PREFERENCES: ReviewingPreferences = Object.freeze({
   arrangement: 'workspace',
   filesVisible: true,
+  codeOnly: false,
   filesPaneWidth: 34,
   questionsPaneWidth: 40,
   theme: Object.freeze({
@@ -282,6 +285,10 @@ function preferencesFromDocument(document: JsonRecord): {
   if (layout?.filesVisible !== undefined && typeof layout.filesVisible !== 'boolean') {
     invalid.push('reviewing.layout.filesVisible');
   }
+  const codeOnly = typeof layout?.codeOnly === 'boolean' ? layout.codeOnly : DEFAULT_REVIEWING_PREFERENCES.codeOnly;
+  if (layout?.codeOnly !== undefined && typeof layout.codeOnly !== 'boolean') {
+    invalid.push('reviewing.layout.codeOnly');
+  }
 
   const icons = reviewing?.icons === 'text' || reviewing?.icons === 'nerd' ? reviewing.icons : 'text';
   if (reviewing?.icons !== undefined && reviewing.icons !== 'text' && reviewing.icons !== 'nerd') {
@@ -337,6 +344,7 @@ function preferencesFromDocument(document: JsonRecord): {
     preferences: Object.freeze({
       arrangement,
       filesVisible,
+      codeOnly,
       filesPaneWidth,
       questionsPaneWidth,
       theme: Object.freeze({
@@ -474,6 +482,7 @@ class FileUserConfiguration implements UserConfiguration {
       invalidTokens.length > 0 ||
       !validArrangement(preferences.arrangement) ||
       typeof preferences.filesVisible !== 'boolean' ||
+      typeof preferences.codeOnly !== 'boolean' ||
       !validWidth(preferences.filesPaneWidth, LEFT_PANE_MINIMUM) ||
       !validWidth(preferences.questionsPaneWidth, RIGHT_PANE_MINIMUM) ||
       (preferences.theme.name !== undefined && !validThemeText(preferences.theme.name)) ||
@@ -547,6 +556,7 @@ class FileUserConfiguration implements UserConfiguration {
           layout: {
             ...layout,
             filesVisible: preferences.filesVisible,
+            codeOnly: preferences.codeOnly,
             filesPaneWidth: preferences.filesPaneWidth,
             questionsPaneWidth: preferences.questionsPaneWidth,
           },
