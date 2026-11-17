@@ -9,6 +9,8 @@
   "type": "module",
   "scripts": {
     "check:node": "node scripts/check-node-version.mjs",
+    "prepare": "git config core.hooksPath .githooks",
+    "check:file-size": "node scripts/check-staged-file-size.mjs",
     "test:fast": "pnpm check:node && NODE_OPTIONS=--experimental-ffi vitest run --config vitest.config.ts packages/workspace/test/fast packages/local-runtime/test/fast packages/pi-adapter/test/fast packages/claude-adapter/test/fast apps/buildframe/test/fast",
     "test": "pnpm check:node && NODE_OPTIONS=--experimental-ffi vitest run --config vitest.config.ts",
     "typecheck": "pnpm --filter @buildframe/workspace --filter @buildframe/local-runtime --filter @buildframe/pi-adapter-source --filter @buildframe/claude-adapter-source --filter @buildframe/app-source -r typecheck && tsc --noEmit -p tsconfig.tests.json",
