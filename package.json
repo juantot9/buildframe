@@ -31,7 +31,7 @@
     "release:manifest": "pnpm --filter @buildframe/workspace --filter @buildframe/local-runtime --filter @buildframe/app-source -r build && node scripts/assemble-release.mjs --manifest-only"
   },
   "devDependencies": {
-    "@opentui/core": "0.8.1",
+    "@opentui/core": "0.9.1",
     "@types/node": "^26.1.2",
     "esbuild": "0.28.1",
     "oxfmt": "0.66.0",

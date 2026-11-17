@@ -1,10 +1,7 @@
 import {
-  Box,
-  h,
   MacOSScrollAccel,
   MouseButton,
   StyledText,
-  Text,
   TextareaRenderable,
   TextAttributes,
   type BorderCharacters,
@@ -14,7 +11,6 @@ import {
   type PasteEvent,
   type Renderable,
   type Selection,
-  type VChild,
 } from '@opentui/core';
 import { decodeBytesBase64 } from '@buildframe/workspace/bytes-base64';
 import type { DefaultReviewMessageInspectionView } from '@buildframe/workspace/harness-interaction';
@@ -30,6 +26,7 @@ import type {
 } from '@buildframe/workspace/projection';
 
 import { reviewLiveContentLines } from './reviewingContent.js';
+import { Box, h, mount, Text, type RenderChild, type RenderNode } from './renderTree.js';
 import { reviewingInputFromKeyEvent, reviewingInputFromPasteEvent } from './reviewingInput.js';
 import {
   diffMinimumWidth,
@@ -421,13 +418,17 @@ function label(
     readonly flexShrink?: number;
     readonly wrap?: 'none' | 'char' | 'word';
     readonly truncate?: boolean;
+    // Accepted but not drawn: OpenTUI 0.8 painted text over its own padding,
+    // so pane text sits flush against the border and the width fitting
+    // assumes that. OpenTUI 0.9 honours padding; passing it on would inset
+    // every pane row by a cell and cut two cells from its end.
     readonly paddingLeft?: number;
     readonly paddingRight?: number;
     readonly id?: string;
     readonly onMouseDown?: (event: MouseEvent) => void;
     readonly onMouseUp?: (event: MouseEvent) => void;
   } = {},
-): VChild {
+): RenderChild {
   return Text({
     content: typeof content === 'string' ? safeText(content, state.presentation.ascii) : content,
     ...(state.presentation.noColor || options.fg === undefined ? {} : { fg: options.fg }),
@@ -441,8 +442,6 @@ function label(
     // Overflow keeps the start of the text: OpenTUI's truncation removes the
     // middle, which damages sentences and paths. Fit known widths explicitly.
     truncate: state.presentation.ascii ? false : (options.truncate ?? false),
-    ...(options.paddingLeft === undefined ? {} : { paddingLeft: options.paddingLeft }),
-    ...(options.paddingRight === undefined ? {} : { paddingRight: options.paddingRight }),
     ...(options.id === undefined ? {} : { id: options.id }),
     ...(options.onMouseDown === undefined ? {} : { onMouseDown: options.onMouseDown }),
     ...(options.onMouseUp === undefined ? {} : { onMouseUp: options.onMouseUp }),
@@ -458,7 +457,7 @@ function richLabel(
   interaction: ReviewPointerInteraction,
   options: Parameters<typeof label>[2] = {},
   codeWidth?: number,
-): VChild {
+): RenderChild {
   const exactDisplay = safeText(content, state.presentation.ascii);
   const highlighted = interaction.highlight.text(
     exactDisplay,
@@ -473,8 +472,8 @@ function richLabel(
 function borderedBox(
   state: ReviewingApplicationState,
   options: Parameters<typeof Box>[0],
-  ...children: VChild[]
-): VChild {
+  ...children: RenderChild[]
+): RenderChild {
   const colors = theme(state);
   const title = options?.title;
   const bottomTitle = options?.bottomTitle;
@@ -514,11 +513,11 @@ interface ReviewPointerInteraction {
 interface ReviewingVisualItem {
   readonly size: number;
   readonly ordinals?: readonly number[];
-  readonly render: () => VChild;
+  readonly render: () => RenderChild;
 }
 
 interface ReviewingScrollingColumn {
-  readonly body: VChild;
+  readonly body: RenderChild;
   readonly visible: readonly ReviewingVisibleItem[];
   readonly span: ReviewingScrollSpan;
   readonly scroll: ReviewingPaneScrollState;
@@ -936,7 +935,7 @@ function paneTitle(
   tone?: ThemeColor,
   /** The pane's outer width in cells, when known, so the detail can be fitted rather than cut mid-word. */
   paneWidth?: number,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const focused = shownFocus(state) === region;
   const marker = focused ? (state.presentation.ascii ? '|' : '▌') : ' ';
@@ -982,7 +981,7 @@ function filesPane(
   width: number | `${number}%`,
   interaction: ReviewPointerInteraction,
   viewportHeight: number,
-): VChild {
+): RenderChild {
   if (state.shownStep !== undefined) {
     return shownStepFilesPane(state, state.shownStep, width, interaction, viewportHeight);
   }
@@ -1134,7 +1133,7 @@ function shownStepFilesPane(
   width: number | `${number}%`,
   interaction: ReviewPointerInteraction,
   viewportHeight: number,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const files = changes.files ?? [];
   const bodyHeight = Math.max(1, viewportHeight - 4);
@@ -1327,7 +1326,7 @@ function questionCard(
   absolute: number,
   interaction: ReviewPointerInteraction,
   compact = false,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const selected = item.itemIdentity === state.selectedQuestionIdentity;
   const body = decodeBytesBase64(item.body.bytesBase64).toString('utf8');
@@ -1380,7 +1379,7 @@ function questionsPane(
   horizontal = false,
   /** Cell width behind a percentage `width`; defaults to the whole terminal. */
   availableWidth?: number,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const list = state.review?.messages.messages;
   const messages = list?.items ?? [];
@@ -1424,7 +1423,7 @@ function questionsPane(
   };
 
   /** The empty state is an instruction, so it wraps rather than losing its end. */
-  const emptyMessagesRows = (paddingLeft: number): VChild[] =>
+  const emptyMessagesRows = (paddingLeft: number): RenderChild[] =>
     wrapDisplayCellRows(
       'No Messages yet. Press a on a line or a file to write one.',
       Math.max(8, estimatedWidth - 2 - 2 * paddingLeft),
@@ -1502,7 +1501,7 @@ function questionsPane(
           ? step.to.kind === 'now'
           : step.to.kind === 'sent' && step.to.reviewMessageIdentity === reviewMessageIdentity),
     );
-  const railLabel = (text: string, fg: ThemeColor): VChild =>
+  const railLabel = (text: string, fg: ThemeColor): RenderChild =>
     label(state, text, { fg, height: 1, width: 2, flexShrink: 0, truncate: false });
 
   /** The Diff beside History already shows the selected Message in full, so History keeps it short. */
@@ -1614,7 +1613,7 @@ function questionsPane(
     return lines;
   };
 
-  const renderMessage = (item: ReviewMessageListItem, absolute: number, compact: boolean): VChild => {
+  const renderMessage = (item: ReviewMessageListItem, absolute: number, compact: boolean): RenderChild => {
     const lines = messageCardLines(item, absolute, compact);
     const showDetail =
       !compact &&
@@ -1678,7 +1677,7 @@ function questionsPane(
   /** "You are here" in History wears the accent only while History has focus. */
   // "here" says what the Diff shows, not where the cursor is: it never takes the selection colours.
   const hereColors = { fg: state.shownStep === undefined ? colors.text : colors.warning, bg: colors.surface };
-  const renderStepRow = (step: ReviewHistoryStep, ordinal: number): VChild => {
+  const renderStepRow = (step: ReviewHistoryStep, ordinal: number): RenderChild => {
     const shown = stepKey(step) === shownKey;
     const { label: stepLabel } = historyStepText(step, history?.messages ?? []);
     const paths = step.changes.status === 'changed' ? step.changes : undefined;
@@ -1719,7 +1718,7 @@ function questionsPane(
     );
   };
 
-  const renderEdgeRow = (edge: 'start' | 'now'): VChild => {
+  const renderEdgeRow = (edge: 'start' | 'now'): RenderChild => {
     const here = edge === 'now' && state.shownStep === undefined;
     return Box(
       {
@@ -1781,7 +1780,7 @@ function questionsPane(
     return lines;
   };
 
-  const renderProvisional = (compact: boolean): VChild => {
+  const renderProvisional = (compact: boolean): RenderChild => {
     const lines = provisionalLines(compact);
     return Box(
       {
@@ -1868,7 +1867,7 @@ function questionsPane(
 
   const paneBodyHeight = Math.max(1, viewportHeight - 3);
   let listColumn: ReviewingScrollingColumn | undefined;
-  let historicalHeading: VChild | undefined;
+  let historicalHeading: RenderChild | undefined;
 
   if (messages.length > 0 || provisional !== undefined) {
     const offset = list?.offset ?? 0;
@@ -1876,7 +1875,7 @@ function questionsPane(
     const cardItems: ReviewingVisualItem[] = [];
     /** What each item shows: a Message identity, a step key, or an edge; selection follows these. */
     const itemKeys: string[] = [];
-    const pushRow = (key: string, ordinal: number, render: () => VChild): void => {
+    const pushRow = (key: string, ordinal: number, render: () => RenderChild): void => {
       cardItems.push({ size: 1, ordinals: [ordinal], render });
       itemKeys.push(key);
     };
@@ -2039,7 +2038,7 @@ function discussionThreadCard(
   paneWidth: number,
   interaction: ReviewPointerInteraction,
   onPage: (page: DiscussionPage) => void,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const contentWidth = Math.max(12, paneWidth - 4);
   const location = questionLocation(state, thread.selected);
@@ -2314,7 +2313,7 @@ function lineMessagesCell(
   items: readonly ReviewMessageListItem[],
   id: string,
   selected: boolean,
-): VChild {
+): RenderChild {
   const mark = lineMessagesMark(state, items);
   return label(state, mark === undefined ? ' ' : `${mark.text} `, {
     ...(mark === undefined ? {} : { id: reviewRenderableId(state, id) }),
@@ -2462,7 +2461,7 @@ function messageThreadCard(
   paneWidth: number,
   interaction: ReviewPointerInteraction,
   onPage: (page: DiscussionPage) => void,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const separator = state.presentation.ascii ? '-' : '·';
   const { fixedRows, detailRows, title, titleColor } = messageThreadRows(state, thread, paneWidth);
@@ -2648,7 +2647,7 @@ function diffLine(
   codeWidth: number,
   interaction: ReviewPointerInteraction,
   lines: LineMessages,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const selected = row.rowIdentity === state.selectedRowIdentity;
   const marker = row.kind === 'addition' ? '+' : row.kind === 'deletion' ? '-' : ' ';
@@ -2766,10 +2765,10 @@ function sideBySideLine(
   codeWidth: number,
   interaction: ReviewPointerInteraction,
   lines: LineMessages,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const height = sidePairHeight(state, pair, codeWidth);
-  const side = (row: ReviewProjectedDiffRow | undefined, direction: 'old' | 'new'): VChild => {
+  const side = (row: ReviewProjectedDiffRow | undefined, direction: 'old' | 'new'): RenderChild => {
     if (row === undefined) {
       return Box({
         width: '50%',
@@ -2861,7 +2860,7 @@ function diffPane(
   onDiscussionPage: (page: DiscussionPage) => void,
   onContentPage: (pageSize: number) => void,
   viewportHeight: number,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const view = shownDiff(state);
   const changes = state.shownStep;
@@ -3366,7 +3365,7 @@ function diffPane(
   );
 }
 
-function statusCondition(state: ReviewingApplicationState): VChild[] {
+function statusCondition(state: ReviewingApplicationState): RenderChild[] {
   const colors = theme(state);
   const review = state.review;
   if (review?.source.kind === 'live') return [];
@@ -3374,7 +3373,7 @@ function statusCondition(state: ReviewingApplicationState): VChild[] {
     text: string,
     fg: ThemeColor,
     extra: { readonly bg?: ThemeColor; readonly bold?: boolean } = {},
-  ): VChild => label(state, text, { fg, paddingLeft: 2, ...extra });
+  ): RenderChild => label(state, text, { fg, paddingLeft: 2, ...extra });
   if (
     review?.source.kind === 'snapshot' &&
     review.manifest.header.retention === 'current' &&
@@ -3413,7 +3412,7 @@ function statusCondition(state: ReviewingApplicationState): VChild[] {
   return [];
 }
 
-function userPullCondition(state: ReviewingApplicationState): VChild[] {
+function userPullCondition(state: ReviewingApplicationState): RenderChild[] {
   const userPull = state.review?.harnessInteraction.userPull;
   const preparation = userPull?.preparations.at(-1);
   if (userPull === undefined || preparation === undefined) return [];
@@ -3579,7 +3578,10 @@ function historyRail(
 }
 
 /** One row under the header: which Review this is, what you are looking at, and how to move between versions. */
-function reviewRetentionContext(state: ReviewingApplicationState, interaction?: ReviewPointerInteraction): VChild[] {
+function reviewRetentionContext(
+  state: ReviewingApplicationState,
+  interaction?: ReviewPointerInteraction,
+): RenderChild[] {
   if (state.screen !== 'review') return [];
   const header = state.review?.manifest.header;
   const colors = theme(state);
@@ -3587,14 +3589,14 @@ function reviewRetentionContext(state: ReviewingApplicationState, interaction?: 
   // With the header hidden, whether the agent is connected still has a home.
   const agent = state.header.visible ? undefined : agentIndicator(state);
   const agentCells = agent === undefined ? 0 : displayCells(agent.text) + 2;
-  const agentTail: VChild[] =
+  const agentTail: RenderChild[] =
     agent === undefined
       ? []
       : [
           label(state, '', { flexGrow: 1, flexShrink: 1 }),
           label(state, `  ${agent.text}`, { id: 'reviewing-header-agent', fg: agent.fg, bold: true, flexShrink: 0 }),
         ];
-  const row = (text: string, fg: ThemeColor): VChild[] => [
+  const row = (text: string, fg: ThemeColor): RenderChild[] => [
     Box(
       {
         width: '100%',
@@ -3702,7 +3704,7 @@ function questionComposerCard(
   state: ReviewingApplicationState,
   maximumHeight: number,
   textarea: TextareaRenderable,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const opaqueColors = controlPlaneTheme(state);
   const editor = state.editor!;
@@ -3785,7 +3787,7 @@ function searchResultLabel(state: ReviewingApplicationState, item: ReviewSearchI
   return `${marker} ${item.change === 'addition' ? '+' : '-'} ${item.displayPath}:${line ?? '?'}  ${snippet}`;
 }
 
-function searchBody(state: ReviewingApplicationState, bodyHeight: number): VChild {
+function searchBody(state: ReviewingApplicationState, bodyHeight: number): RenderChild {
   const colors = theme(state);
   const search = state.search;
   if (search === undefined) return Box({});
@@ -3860,7 +3862,7 @@ function searchBody(state: ReviewingApplicationState, bodyHeight: number): VChil
 }
 
 /** One row of pane tabs for the one-pane layout, so the hidden panes stay discoverable. */
-function linearPaneStrip(state: ReviewingApplicationState, interaction: ReviewPointerInteraction): VChild {
+function linearPaneStrip(state: ReviewingApplicationState, interaction: ReviewPointerInteraction): RenderChild {
   const colors = theme(state);
   const regions: readonly ReviewRegion[] = state.filePaneVisible
     ? ['files', 'diff', 'questions']
@@ -3901,7 +3903,7 @@ function reviewBody(
   onDiscussionPage: (page: DiscussionPage) => void,
   onContentPage: (pageSize: number) => void,
   viewportHeight: number,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const geometry = effectivePaneGeometry(state);
   // Code only takes the one-pane layout whatever the arrangement; the arrangement returns with every pane.
@@ -4005,7 +4007,7 @@ function reviewBody(
   );
 }
 
-function pendingReviewBody(state: ReviewingApplicationState): VChild {
+function pendingReviewBody(state: ReviewingApplicationState): RenderChild {
   const colors = theme(state);
   const shell = state.pendingReviewShell;
   if (shell === undefined) return Box({});
@@ -4109,7 +4111,7 @@ function pendingReviewBody(state: ReviewingApplicationState): VChild {
  */
 /** A Home card and its height in rows, so the body can place it without measuring. */
 interface HomeCard {
-  readonly node: VChild;
+  readonly node: RenderChild;
   readonly height: number;
 }
 
@@ -4133,7 +4135,7 @@ function homePane(
   title: string,
   detail: string,
   rows: number,
-  ...children: VChild[]
+  ...children: RenderChild[]
 ): HomeCard {
   const colors = theme(state);
   const height = rows + 3;
@@ -4173,7 +4175,7 @@ function homeRow(
     readonly fg?: ThemeColor;
     readonly pointer?: ReturnType<typeof pointerMouseHandlers>;
   },
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const cursor = selected ? (state.presentation.ascii ? '>' : '›') : ' ';
   // A terminal paints a background only behind characters, so the row is
@@ -4194,7 +4196,7 @@ function homeRow(
 }
 
 /** A sentence in the pane: wrapped on whole words, every row indented alike. */
-function homeSentence(state: ReviewingApplicationState, text: string, fg: ThemeColor, id?: string): VChild[] {
+function homeSentence(state: ReviewingApplicationState, text: string, fg: ThemeColor, id?: string): RenderChild[] {
   // Border, padding and the two-cell indent.
   const width = Math.max(8, homeCardWidth(state) - 8);
   return wrappedRows(text, width).map((row, index) =>
@@ -4329,7 +4331,7 @@ function homeComparison(state: ReviewingApplicationState, interaction: ReviewPoi
   const shownRows = rows.slice(start, start + visibleRows);
   // A search keeps its room as matches thin out, so the card doesn't shrink while you type.
   const viewportHeight = visibleRows === 0 ? 0 : messageSearch === undefined ? shownRows.length : visibleRows;
-  const commitViewport: VChild[] =
+  const commitViewport: RenderChild[] =
     viewportHeight === 0
       ? []
       : [
@@ -4365,7 +4367,7 @@ function homeComparison(state: ReviewingApplicationState, interaction: ReviewPoi
                 })),
           ),
         ];
-  const comparisonInputRows: VChild[] =
+  const comparisonInputRows: RenderChild[] =
     input === undefined
       ? []
       : [
@@ -4423,7 +4425,7 @@ function homeComparison(state: ReviewingApplicationState, interaction: ReviewPoi
   const valueInput = input !== undefined && input.kind !== 'message-search' ? input : undefined;
   const labelWidth = commitMode ? 6 : 5;
   const previewLine = (name: string, value: string): string => `  ${name.padEnd(labelWidth)}  ${value}`;
-  const previewRows: VChild[] =
+  const previewRows: RenderChild[] =
     // While a hash or HEAD~N is being typed, the old preview would read as its
     // answer; the card shows what Enter will do instead.
     valueInput !== undefined
@@ -4602,7 +4604,7 @@ function homeHistory(state: ReviewingApplicationState, interaction: ReviewPointe
  * Home's context row sits where a Review's history row does: what is open, in
  * one line, so the pane below never has to say it.
  */
-function homeContextRow(state: ReviewingApplicationState): VChild[] {
+function homeContextRow(state: ReviewingApplicationState): RenderChild[] {
   if (state.screen !== 'home') return [];
   const colors = theme(state);
   const separator = state.presentation.ascii ? '-' : '·';
@@ -4634,7 +4636,7 @@ function homeContextRow(state: ReviewingApplicationState): VChild[] {
   ];
 }
 
-function homeBody(state: ReviewingApplicationState, interaction: ReviewPointerInteraction): VChild {
+function homeBody(state: ReviewingApplicationState, interaction: ReviewPointerInteraction): RenderChild {
   const colors = theme(state);
   const card =
     state.homeMode === 'launcher'
@@ -5011,7 +5013,7 @@ function footerKeysRow(state: ReviewingApplicationState, width: number): string 
   return `${left}${' '.repeat(Math.max(gap, width - displayCells(left) - displayCells(anchor)))}${anchor}`;
 }
 
-function actionLookupOverlay(state: ReviewingApplicationState, availableHeight: number): VChild[] {
+function actionLookupOverlay(state: ReviewingApplicationState, availableHeight: number): RenderChild[] {
   if (!state.actionLookupOpen) return [];
   const colors = controlPlaneTheme(state);
   const items = actionLookupItems(state);
@@ -5040,7 +5042,7 @@ function actionLookupOverlay(state: ReviewingApplicationState, availableHeight: 
         : `${characters.slice(0, Math.max(0, cellWidth - 1)).join('')}${state.presentation.ascii ? '~' : '…'}`;
     return fitted.padEnd(cellWidth);
   };
-  const rows: VChild[] = [];
+  const rows: RenderChild[] = [];
   for (const group of groups) {
     for (let index = 0; index < group.items.length; index += columns) {
       rows.push(
@@ -5129,7 +5131,7 @@ function basisPickerOverlay(
   state: ReviewingApplicationState,
   interaction: ReviewPointerInteraction,
   bodyHeight: number,
-): VChild[] {
+): RenderChild[] {
   const picker = state.basisPicker;
   if (picker === undefined || state.review === undefined) return [];
   const bases = pickableBases(state);
@@ -5200,7 +5202,7 @@ function basisPickerOverlay(
  * e and m: the files or Messages as a short list over the code, one row each,
  * so the Diff keeps its width. Keys live in the footer, as for every dialog.
  */
-function jumpListOverlay(state: ReviewingApplicationState, bodyHeight: number): VChild[] {
+function jumpListOverlay(state: ReviewingApplicationState, bodyHeight: number): RenderChild[] {
   const list = state.jumpList;
   if (list === undefined || state.review === undefined) return [];
   const colors = controlPlaneTheme(state);
@@ -5226,7 +5228,7 @@ function jumpListOverlay(state: ReviewingApplicationState, bodyHeight: number): 
     list.query.trim() === ''
       ? `${rows.length} ${total}`
       : `${rows.length} of ${list.kind === 'files' ? jumpListCount(state) : items.length} ${total}`;
-  const row = (entry: JumpListRow, index: number): VChild => {
+  const row = (entry: JumpListRow, index: number): RenderChild => {
     const isSelected = entry.key === list.selectedKey;
     const marker = isSelected ? (ascii ? '>' : '›') : ' ';
     const item =
@@ -5326,7 +5328,7 @@ function messagePreviewAssessment(
   return `Asks first: an earlier Message here never reported back. ${authorityNote}.`;
 }
 
-function messageCommitGateOverlay(state: ReviewingApplicationState, bodyHeight: number): VChild[] {
+function messageCommitGateOverlay(state: ReviewingApplicationState, bodyHeight: number): RenderChild[] {
   const gate = state.messageCommitGate;
   if (gate === undefined) return [];
   const colors = controlPlaneTheme(state);
@@ -5335,13 +5337,13 @@ function messageCommitGateOverlay(state: ReviewingApplicationState, bodyHeight: 
   const harness = gate.destination.harnessLabel;
   const unresolved = gate.commitment.requirements.length;
   const stopPointer = (event: MouseEvent): void => event.stopPropagation();
-  const paragraph = (text: string, fg: ThemeColor, indent = '', bold = false): VChild[] =>
+  const paragraph = (text: string, fg: ThemeColor, indent = '', bold = false): RenderChild[] =>
     wrapDisplayCellRows(text, Math.max(1, textWidth - indent.length)).map(row =>
       label(state, `${indent}${row}`, { fg, bold }),
     );
   // The one thing a Message ever stops for: an earlier turn to this session
   // never reported back, so sending now may repeat its work.
-  const rows: VChild[] = [
+  const rows: RenderChild[] = [
     ...paragraph(
       unresolved === 1
         ? '! An earlier Message here never reported back.'
@@ -5407,7 +5409,7 @@ function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
 }
 
-function messagePreviewOverlay(state: ReviewingApplicationState, bodyHeight: number): VChild[] {
+function messagePreviewOverlay(state: ReviewingApplicationState, bodyHeight: number): RenderChild[] {
   const preview = state.messagePreview;
   const editor = state.editor;
   // The inspection is slow; the overlay opens on the key press and fills in
@@ -5555,7 +5557,7 @@ function continuationChoiceCard(
   kind: 'saved-endpoint' | 'current-head',
   heading: string,
   consequence: string,
-): VChild {
+): RenderChild {
   const colors = state.presentation.noColor ? theme(state) : controlPlaneTheme(state);
   const focusColor = kind === 'saved-endpoint' ? colors.accent : colors.success;
   const focusBackground = kind === 'saved-endpoint' ? colors.accentSoft : colors.successSoft;
@@ -5582,7 +5584,7 @@ function continuationChoiceCard(
   );
 }
 
-function continuationChoiceOverlay(state: ReviewingApplicationState): VChild[] {
+function continuationChoiceOverlay(state: ReviewingApplicationState): RenderChild[] {
   const choice = state.continuationChoice;
   const continuation = state.review?.continuation;
   if (choice === undefined || continuation?.status !== 'available') return [];
@@ -5667,7 +5669,7 @@ function continuationChoiceOverlay(state: ReviewingApplicationState): VChild[] {
   ];
 }
 
-function detailsOverlay(state: ReviewingApplicationState): VChild[] {
+function detailsOverlay(state: ReviewingApplicationState): RenderChild[] {
   if (!state.showDetails) return [];
   const colors = theme(state);
   const actions = state.screen === 'home' ? (state.home?.actions ?? []) : (state.review?.manifest.actions ?? []);
@@ -5737,7 +5739,7 @@ function configurationOverlay(
   bodyHeight: number,
   /** Header rows above the body: the box is centred as if they were body, so hiding the header never moves it. */
   headerRows = 0,
-): VChild[] {
+): RenderChild[] {
   const configuration = state.configurationWindow;
   if (configuration === undefined) return [];
   // Terminal-default workspace surfaces remain unpainted, but a modal is a
@@ -5786,7 +5788,7 @@ function configurationOverlay(
     'header-visibility': state.header.visible ? described.header.shown : described.header.hidden,
     motion: state.motion === 'smooth' ? described.motion.smooth : described.motion.instant,
   };
-  const row = (setting: ConfigurationSetting, settingLabel: string, value: string): VChild => {
+  const row = (setting: ConfigurationSetting, settingLabel: string, value: string): RenderChild => {
     const selected = configuration.selected === setting;
     return label(
       state,
@@ -5820,7 +5822,7 @@ function configurationOverlay(
     },
     ...descriptionRows.map(row => label(state, `  ${row}`, { fg: colors.muted })),
   );
-  const rows: VChild[] = [
+  const rows: RenderChild[] = [
     label(state, 'Review display', { fg: colors.text, bold: true }),
     row('theme', 'Theme', themeName),
     row('background', 'Background', state.background === 'terminal' ? 'Terminal' : 'Theme'),
@@ -5893,7 +5895,7 @@ function historicalDialogOverlay(
   availableHeight: number,
   interaction: ReviewPointerInteraction,
   onDiscussionPage: (page: DiscussionPage) => void,
-): VChild[] {
+): RenderChild[] {
   const dialog = state.historicalDialog;
   const review = state.review;
   if (dialog === undefined || review === undefined) return [];
@@ -6079,7 +6081,7 @@ function headerLine(
   left: string,
   source: { readonly text: string; readonly fg: ThemeColor } | undefined,
   width: number,
-): VChild {
+): RenderChild {
   const colors = theme(state);
   const agent = agentIndicator(state);
   const separator = `  ${state.presentation.ascii ? '|' : '·'}  `;
@@ -6120,7 +6122,7 @@ function compactHeader(state: ReviewingApplicationState): boolean {
 function reviewingHeader(
   state: ReviewingApplicationState,
   trail: string | undefined,
-): { readonly height: number; readonly rows: readonly VChild[] } {
+): { readonly height: number; readonly rows: readonly RenderChild[] } {
   if (!state.header.visible) return { height: 0, rows: [] };
   const colors = theme(state);
   const facts = reviewingHeaderFacts(state, trail);
@@ -6168,7 +6170,7 @@ function screen(
   interaction: ReviewPointerInteraction,
   onDiscussionPage: (page: DiscussionPage) => void,
   onContentPage: (pageSize: number) => void,
-): VChild {
+): RenderNode {
   const presented = historicalBaseState(state);
   const colors = theme(presented);
   // Footer rows keep their start and mark a cut, so a narrow terminal never
@@ -6932,21 +6934,24 @@ export class ReviewingView {
     this.#discussionPage = undefined;
     this.#contentPageSize = undefined;
     const insertedIndex = this.renderer.root.add(
-      screen(
-        this.#model.state,
-        textarea,
-        {
-          highlight: this.highlight,
-          begin: this.#beginPointerTarget,
-          finish: this.#finishPointerTarget,
-          move: this.#movePointer,
-          synchronizePaneScroll: this.#synchronizePaneScroll,
-          wheelPane: this.#wheelPane,
-        },
-        this.#captureDiscussionPage,
-        size => {
-          this.#contentPageSize = size;
-        },
+      mount(
+        this.renderer,
+        screen(
+          this.#model.state,
+          textarea,
+          {
+            highlight: this.highlight,
+            begin: this.#beginPointerTarget,
+            finish: this.#finishPointerTarget,
+            move: this.#movePointer,
+            synchronizePaneScroll: this.#synchronizePaneScroll,
+            wheelPane: this.#wheelPane,
+          },
+          this.#captureDiscussionPage,
+          size => {
+            this.#contentPageSize = size;
+          },
+        ),
       ),
     );
     const nextRoot = this.renderer.root.getChildren()[insertedIndex];
