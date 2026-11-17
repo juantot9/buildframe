@@ -40,14 +40,12 @@ import {
   historyStepWords,
   latestHeadMoveStep,
   shortHash,
-  navigableHistorySteps,
   shownFilePosition,
   jumpListRows,
   type JumpListRow,
   messageState,
   messagesOnLines,
   messagesPaneName,
-  SEND_AGAIN_STATES,
   pickableBases,
   rowMessages,
   type LineMessages,
@@ -4709,89 +4707,6 @@ function statusLine(state: ReviewingApplicationState): { readonly text: string; 
   return { text: '', tone: 'muted' };
 }
 
-function contextualShortcutLines(state: ReviewingApplicationState): readonly [string, string] | undefined {
-  if (state.pending?.phase === 'result-unavailable') {
-    return [
-      'Keys are locked so nothing is sent twice. [Ctrl+C] quit',
-      'Reopen BuildFrame to see whether the last action went through.',
-    ];
-  }
-  if (state.editor?.inspectionRequest?.purpose === 'submit' && state.pending === undefined) {
-    return ['[Ctrl+C] quit', 'Keys you press now wait until it’s saved.'];
-  }
-  if (state.pending !== undefined && state.editor !== undefined) {
-    return ['[Ctrl+C] quit', 'Keys you press now wait until it’s saved.'];
-  }
-  if (state.messageCommitGate !== undefined) {
-    return state.messagePreview !== undefined
-      ? ['[Esc/F3] close preview', 'Nothing is sent until you confirm.']
-      : ['[Enter] send it  [F3] preview  [Esc] back to draft', 'Going back to the draft sends nothing.'];
-  }
-  if (state.messagePreview !== undefined) {
-    return ['[Esc/F3] close and keep editing', 'Nothing is sent from here.'];
-  }
-  if (state.editor?.inspectionRequest?.purpose === 'preview') {
-    return ['[Esc/F3] cancel', 'Preparing the preview; nothing is sent.'];
-  }
-  if (state.editor !== undefined) {
-    // Preview inspects against the connected agent, so it is offered only then.
-    const preview = agentConnected(state) ? '  [F3] preview' : '';
-    return state.editor.reselectionRequired
-      ? ['[F4] target the current line  [Esc] cancel', 'Your text is kept; Enter stays blocked until you press F4.']
-      : state.editor.discardArmed === true
-        ? [`[Esc] discard draft  [Enter] send${preview}`, 'Typing keeps the draft; nothing is sent.']
-        : state.editor.body.length === 0
-          ? [`[Enter] send${preview}  [Esc] close`, 'Enter sends; nothing is sent until then.']
-          : [`[Enter] send${preview}  [Esc] discard`, 'Typed text needs Esc twice to discard; nothing is sent.'];
-  }
-  if (state.jumpList !== undefined) {
-    const kind = state.jumpList.kind === 'files' ? 'file' : 'Message';
-    return state.jumpList.filtering
-      ? ['Type to filter  [Up/Down] move  [Enter] open  [Esc] clear filter', `Enter opens the ${kind} in the Diff.`]
-      : [
-          `[j/k] move  [Enter] open  [/] filter  [Esc/${state.jumpList.kind === 'files' ? 'e' : 'm'}] close`,
-          `Enter opens the ${kind} in the Diff; the panes stay as they are.`,
-        ];
-  }
-  if (state.basisPicker !== undefined) {
-    return [
-      '[j/k] review point  [Enter] open  [Esc/t] close',
-      'Your files are never checked out; the whole screen switches together.',
-    ];
-  }
-  if (state.configurationWindow !== undefined) {
-    return ['[Up/Down] setting  [Left/Right] change  [Enter/Esc] close', 'Changes show and save right away.'];
-  }
-  if (state.search !== undefined) {
-    return [
-      '[Enter] open  [Esc] close  [Up/Down] cycle  [Page Up/Down] page',
-      'Type to filter  [Ctrl+U] clear  [Ctrl+C] quit',
-    ];
-  }
-  if (state.continuationChoice !== undefined) {
-    return state.layout === 'linear'
-      ? ['[Tab/j/k] move focus  [Enter] choose  [Esc] cancel', 'The saved Review stays unchanged either way.']
-      : ['[Tab/h/l] move focus  [Enter] choose  [Esc] cancel', 'The saved Review stays unchanged either way.'];
-  }
-  if (state.screen === 'home' && state.homeMode === 'comparison' && state.comparisonInput !== undefined) {
-    if (state.comparisonInput.kind === 'message-search') {
-      return [
-        '[Up/Down] result  [Page Up/Down] page  [Enter] choose  [Esc] cancel',
-        'Type to filter shown commit messages  [Ctrl+U] clear  [Ctrl+C] quit',
-      ];
-    }
-    return state.comparisonInput.kind === 'count'
-      ? ['[Enter] compare  [Esc] cancel  [Ctrl+C] quit', 'Type how many commits back from HEAD, from 1 to 500.']
-      : [
-          '[Enter] compare  [Esc] cancel  [Ctrl+C] quit',
-          state.comparisonMode === 'commit'
-            ? 'Shows that one commit’s changes.'
-            : 'Shows everything from that commit up to HEAD.',
-        ];
-  }
-  return undefined;
-}
-
 interface ActionLookupItem {
   readonly group: 'MOVE' | 'OPEN' | 'VIEW' | 'WORKSPACE';
   readonly key: string;
@@ -4899,17 +4814,125 @@ function actionLookupItems(state: ReviewingApplicationState): readonly ActionLoo
  * ranks drop first, so `?` (every key) and the keys for the focused pane stay,
  * and universal keys like quit go first.
  */
-function actionStrip(state: ReviewingApplicationState): string {
-  let hints: readonly (readonly [string, number])[];
-  if (state.screen === 'home' && state.homeMode === 'launcher') {
-    hints = [
-      ['[j/k] move', 2],
-      ['[Enter] open', 2],
-      ['[?] keys', 1],
-      ['[q] quit', 6],
-    ];
-  } else if (state.screen === 'home' && state.homeMode === 'comparison') {
-    const startable = state.comparisonPreview?.status === 'available';
+/** One key in the footer: the key as typed and what it does, in the words used everywhere. */
+interface FooterKey {
+  readonly key: string;
+  readonly label: string;
+}
+
+/**
+ * What the footer says in one mode: a few keys that move this mode forward,
+ * the anchor on the right (`[?] keys  [q] quit`, or only `[Ctrl+C] quit`
+ * while letters are typed), and the sentence the status row shows when
+ * nothing else is being said. It depends on the mode, never on the focused
+ * pane, so moving around leaves it alone; every other key lives in `?`.
+ */
+interface FooterMode {
+  readonly keys: readonly FooterKey[];
+  readonly typing: boolean;
+  readonly sentence?: string;
+}
+
+function footerMode(state: ReviewingApplicationState): FooterMode {
+  const key = (typed: string, label: string): FooterKey => ({ key: typed, label });
+  const typing = (keys: readonly FooterKey[], sentence?: string): FooterMode => ({
+    keys,
+    typing: true,
+    ...(sentence === undefined ? {} : { sentence }),
+  });
+  if (state.pending?.phase === 'result-unavailable') {
+    return typing([], 'Keys are locked so nothing is sent twice. Reopen BuildFrame to see whether it went through.');
+  }
+  if (
+    (state.editor?.inspectionRequest?.purpose === 'submit' && state.pending === undefined) ||
+    (state.pending !== undefined && state.editor !== undefined)
+  ) {
+    return typing([], 'Keys you press now wait until it’s saved.');
+  }
+  if (state.messageCommitGate !== undefined) {
+    return state.messagePreview !== undefined
+      ? typing([key('Esc/F3', 'close preview')], 'Nothing is sent until you confirm.')
+      : typing(
+          [key('Enter', 'send it'), key('F3', 'preview'), key('Esc', 'back to draft')],
+          'Going back to the draft sends nothing.',
+        );
+  }
+  if (state.messagePreview !== undefined) {
+    return typing([key('Esc/F3', 'close and keep editing')], 'Nothing is sent from here.');
+  }
+  if (state.editor?.inspectionRequest?.purpose === 'preview') {
+    return typing([key('Esc/F3', 'cancel')], 'Preparing the preview; nothing is sent.');
+  }
+  if (state.editor !== undefined) {
+    // Preview inspects against the connected agent, so it is offered only then.
+    const preview = agentConnected(state) ? [key('F3', 'preview')] : [];
+    if (state.editor.reselectionRequired) {
+      return typing(
+        [key('F4', 'target the current line'), key('Esc', 'cancel')],
+        'Your text is kept; Enter stays blocked until you press F4.',
+      );
+    }
+    if (state.editor.discardArmed === true) {
+      return typing(
+        [key('Esc', 'discard draft'), key('Enter', 'send'), ...preview],
+        'Typing keeps the draft; nothing is sent.',
+      );
+    }
+    return state.editor.body.length === 0
+      ? typing([key('Enter', 'send'), ...preview, key('Esc', 'close')], 'Enter sends; nothing is sent until then.')
+      : typing(
+          [key('Enter', 'send'), ...preview, key('Esc', 'discard')],
+          'Typed text needs Esc twice to discard; nothing is sent.',
+        );
+  }
+  if (state.actionLookupOpen) {
+    return typing([key('?/Esc', 'close')], 'Every key for what is on screen now.');
+  }
+  if (state.jumpList !== undefined) {
+    const kind = state.jumpList.kind === 'files' ? 'file' : 'Message';
+    return state.jumpList.filtering
+      ? typing([key('Enter', 'open'), key('Esc', 'clear filter')], 'Type to filter; Up/Down move.')
+      : typing(
+          [key('Enter', 'open'), key('/', 'filter'), key('Esc', 'close')],
+          `Enter opens the ${kind} in the Diff; the panes stay as they are.`,
+        );
+  }
+  if (state.basisPicker !== undefined) {
+    return typing(
+      [key('Enter', 'open'), key('Esc', 'close')],
+      'Your files are never checked out; the whole screen switches together.',
+    );
+  }
+  if (state.configurationWindow !== undefined) {
+    return typing([key('←/→', 'change'), key('Enter/Esc', 'close')], 'Changes show and save right away.');
+  }
+  if (state.search !== undefined) {
+    return typing([key('Enter', 'open'), key('Esc', 'close')], 'Type to filter; Up/Down move, Ctrl+U clears.');
+  }
+  if (state.continuationChoice !== undefined) {
+    return typing(
+      [key('Enter', 'choose'), key('Esc', 'cancel')],
+      'Tab moves between the choices; the saved Review stays unchanged either way.',
+    );
+  }
+  if (state.screen === 'home' && state.homeMode === 'comparison' && state.comparisonInput !== undefined) {
+    const sentence =
+      state.comparisonInput.kind === 'message-search'
+        ? 'Type to filter shown commit messages; Ctrl+U clears.'
+        : state.comparisonInput.kind === 'count'
+          ? 'Type how many commits back from HEAD, from 1 to 500.'
+          : state.comparisonMode === 'commit'
+            ? 'Shows that one commit’s changes.'
+            : 'Shows everything from that commit up to HEAD.';
+    return typing(
+      [key('Enter', state.comparisonInput.kind === 'message-search' ? 'choose' : 'compare'), key('Esc', 'cancel')],
+      sentence,
+    );
+  }
+  const app = (keys: readonly FooterKey[]): FooterMode => ({ keys, typing: false });
+  if (state.historicalDialog !== undefined) return app([key('Esc', 'close')]);
+  if (state.screen === 'home' && state.homeMode === 'launcher') return app([key('j/k', 'move'), key('Enter', 'open')]);
+  if (state.screen === 'home' && state.homeMode === 'comparison') {
     // A merge commit needs a parent chosen before it can be compared.
     const selectedCommit =
       state.commitGraph?.status === 'available'
@@ -4921,109 +4944,71 @@ function actionStrip(state: ReviewingApplicationState): string {
       state.comparisonMode === 'commit' &&
       selectedCommit?.kind === 'commit' &&
       selectedCommit.parentIdentities.length > 1;
-    hints = [
-      ['[j/k] move', 2],
-      ...(startable ? [['[Enter] start Review', 2] as const] : []),
-      ...(merge ? [['[h/l] parent', 2] as const] : []),
-      // The mode is the picker's main switch, so it outlasts search.
-      ['[Tab] commit / range', 3],
-      ['[/] search', 4],
-      ['[?] keys', 1],
-      ['[Esc] Home', 6],
-      ['[q] quit', 6],
-    ];
-  } else if (state.screen === 'home') {
-    hints = [
-      ['[j/k] move', 2],
-      ['[Enter] open', 2],
-      ['[?] keys', 1],
-      ['[Esc] Home', 6],
-      ['[q] quit', 6],
-    ];
-  } else if (state.shownStep !== undefined) {
-    hints = [
-      ['[Esc] back to now', 1],
-      ['[ and ] older / newer', 2],
-      ['[Tab] pane', 3],
-      ['[j/k] move', 4],
-      ...paneChoiceKeys(state),
-      ...(shownFocus(state) === 'diff' ? [['[v] side-by-side', 6] as const] : []),
-      ['[?] keys', 1],
-      ['[q] quit', 9],
-    ];
-  } else {
-    const focus = shownFocus(state);
-    const selected = state.review?.messages.messages.items.find(
-      item => item.reviewMessageIdentity === state.selectedMessageIdentity,
-    );
-    const selectedState = selected === undefined ? undefined : messageState(state, selected);
-    const history = state.review?.history !== undefined;
-    // What the selected Message needs now; r and x work from every pane.
-    const messageKeys: readonly (readonly [string, number])[] = [
-      ...(selectedState !== undefined && SEND_AGAIN_STATES.has(selectedState) ? [['[r] send again', 2] as const] : []),
-      ...(selectedState === 'working' ? [['[x] interrupt', 2] as const] : []),
-    ];
-    // Nothing changed and only changed files listed: f is the one way on, so
-    // keys that need a file or a line aren't offered.
-    const nothingListed =
-      state.review !== undefined &&
-      state.fileScope === 'changed' &&
-      reviewingFiles(state.review, 'changed').length === 0;
-    // One rank per key wherever it appears, so the same width drops the same keys in every pane.
-    // History stays a way on when a commit took the changes out of Live changes.
-    const steppable = (navigableHistorySteps(state)?.length ?? 0) > 0;
-    const paneKeys: readonly (readonly [string, number])[] = nothingListed
-      ? [['[f] all files', 2], ...(steppable ? [['[ and ] history', 5] as const] : [])]
-      : [
-          ...(focus === 'diff' ? [] : [['[Enter] open', 4] as const]),
-          ['[a] new Message', 3],
-          ...(focus === 'files' ? [['[f] Changed / All', 5] as const] : []),
-          ...(history ? [['[ and ] history', 5] as const] : []),
-          ...(focus === 'diff' ? [['[v] side-by-side', 7] as const] : []),
-        ];
-    hints = [
-      ['[Tab] pane', 2],
-      ...(nothingListed ? [] : [['[j/k] move', 4] as const]),
-      ...messageKeys,
-      ...paneKeys,
-      ...paneChoiceKeys(state),
-      ['[t] review points', 8],
-      ['[?] keys', 1],
-      ['[Esc] Home', 6],
-      ['[q] quit', 6],
-    ];
+    return app([
+      key('Enter', 'start Review'),
+      ...(merge ? [key('h/l', 'parent')] : []),
+      key('Tab', 'commit / range'),
+      key('/', 'search'),
+    ]);
   }
-  return fitHints(hints, Math.max(1, state.width - 2));
+  if (state.screen === 'home') return app([key('j/k', 'move'), key('Enter', 'open')]);
+  if (state.screen !== 'review') return app([]);
+  const zoom = key('z', state.codeOnly ? 'all panes' : 'code only');
+  if (state.shownStep !== undefined) {
+    return app([key('Esc', 'back to now'), key('[ and ]', 'older / newer'), zoom]);
+  }
+  // Live changes have history; a fixed comparison has versions. Decided by the
+  // Review's kind, not by whether history has loaded yet, so the word never flips.
+  const steps = key(
+    '[ and ]',
+    state.review?.history !== undefined || state.review?.source.kind === 'live' ? 'history' : 'versions',
+  );
+  if (state.codeOnly) {
+    return app([key('a', 'new Message'), key('e', 'files'), key('m', 'Messages'), zoom]);
+  }
+  // Nothing changed and only changed files listed: f is the way on.
+  const nothingListed =
+    state.review !== undefined && state.fileScope === 'changed' && reviewingFiles(state.review, 'changed').length === 0;
+  return app([nothingListed ? key('f', 'all files') : key('a', 'new Message'), steps, zoom]);
+}
+
+function footerKeyText(footerKey: FooterKey, short: boolean): string {
+  const typed = footerKey.key.startsWith('[') ? footerKey.key : `[${footerKey.key}]`;
+  return short ? typed : `${typed} ${footerKey.label}`;
 }
 
 /**
- * What z offers, and in code only the lists that stand in for the hidden
- * panes. While panes are hidden, `[z] all panes` ranks with Tab so the way
- * back never drops off the row.
+ * The keys row: the mode's keys on the left, the anchor on the right. When it
+ * doesn't fit, every label shortens to its key at once, so each key keeps its
+ * place; only then do keys drop, last first. The anchor never shortens.
  */
-function paneChoiceKeys(state: ReviewingApplicationState): readonly (readonly [string, number])[] {
-  if (state.codeOnly) {
-    const messages = (state.review?.messages.messages.total ?? 0) > 0;
-    return [['[z] all panes', 2], ['[e] files', 4], ...(messages ? [['[m] Messages', 5] as const] : [])];
+function footerKeysRow(state: ReviewingApplicationState, width: number): string {
+  const mode = footerMode(state);
+  const anchor = (
+    mode.typing
+      ? [{ key: 'Ctrl+C', label: 'quit' }]
+      : [
+          { key: '?', label: 'keys' },
+          { key: 'q', label: 'quit' },
+        ]
+  )
+    .map(footerKey => footerKeyText(footerKey, false))
+    .join('  ');
+  const gap = 4;
+  const room = Math.max(0, width - displayCells(anchor) - gap);
+  const join = (keys: readonly FooterKey[], short: boolean): string =>
+    keys.map(footerKey => footerKeyText(footerKey, short)).join('  ');
+  let left = join(mode.keys, false);
+  if (displayCells(left) > room) {
+    const keys = [...mode.keys];
+    left = join(keys, true);
+    while (keys.length > 0 && displayCells(left) > room) {
+      keys.pop();
+      left = join(keys, true);
+    }
   }
-  // Below 90 columns one pane at a time is already the layout; z changes nothing to see.
-  return state.layout === 'linear' ? [] : [['[z] code only', 7]];
-}
-
-function fitHints(hints: readonly (readonly [string, number])[], width: number): string {
-  const separator = '  ';
-  const kept = new Set<string>();
-  let used = 0;
-  for (const [hint] of [...hints].sort((left, right) => left[1] - right[1])) {
-    const cost = (kept.size === 0 ? 0 : separator.length) + hint.length;
-    if (used + cost > width) continue;
-    kept.add(hint);
-    used += cost;
-  }
-  return hints
-    .map(([hint]) => hint)
-    .filter(hint => kept.has(hint))
-    .join(separator);
+  if (displayCells(anchor) > width) return fitDisplayCellsEnd(anchor, Math.max(1, width), '…');
+  return `${left}${' '.repeat(Math.max(gap, width - displayCells(left) - displayCells(anchor)))}${anchor}`;
 }
 
 function actionLookupOverlay(state: ReviewingApplicationState, availableHeight: number): VChild[] {
@@ -6208,23 +6193,18 @@ function screen(
   const header = reviewingHeader(presented, trail);
   const retention = [...reviewRetentionContext(presented, interaction), ...homeContextRow(presented)];
   const conditions = [...statusCondition(presented), ...userPullCondition(presented)];
-  const shortcuts = contextualShortcutLines(state);
-  const ordinaryActions =
-    (presented.screen === 'home' || presented.screen === 'review') &&
-    state.editor === undefined &&
-    state.comparisonInput === undefined &&
-    state.search === undefined &&
-    state.configurationWindow === undefined &&
-    state.continuationChoice === undefined &&
-    state.historicalDialog === undefined &&
-    state.pending === undefined;
-  const status = statusLine(statusState);
+  // The footer is always the same two rows: what is being said (or what this
+  // mode means), then the keys. Neither row moves or swaps with the mode.
+  const mode = footerMode(state);
+  const said = statusLine(statusState);
+  const status =
+    said.text === '' && mode.sentence !== undefined ? { text: mode.sentence, tone: 'muted' as const } : said;
   const statusRows =
     (status.tone === 'danger' || status.tone === 'warning') && displayCells(status.text) > footerWidth
       ? wrappedRows(status.text, footerWidth)
       : [status.text];
   const statusHeight = Math.min(2, statusRows.length);
-  const footerHeight = (shortcuts !== undefined ? 3 : ordinaryActions ? 2 : 1) + statusHeight - 1;
+  const footerHeight = statusHeight + 1;
   const contentHeight = Math.max(
     1,
     presented.height - header.height - retention.length - conditions.length - footerHeight,
@@ -6314,19 +6294,10 @@ function screen(
               fg: toneColor(colors, status.tone),
             }),
           ),
-      ...(shortcuts !== undefined
-        ? [
-            label(presented, fitDisplayCellsEnd(shortcuts[0], footerWidth, footerEllipsis), { fg: colors.text }),
-            label(presented, fitDisplayCellsEnd(shortcuts[1], footerWidth, footerEllipsis), { fg: colors.muted }),
-          ]
-        : ordinaryActions
-          ? [
-              label(presented, fitDisplayCellsEnd(actionStrip(presented), footerWidth, footerEllipsis), {
-                id: 'reviewing-action-strip',
-                fg: colors.text,
-              }),
-            ]
-          : []),
+      label(presented, footerKeysRow(state, footerWidth), {
+        id: 'reviewing-action-strip',
+        fg: colors.text,
+      }),
     ),
   );
 }

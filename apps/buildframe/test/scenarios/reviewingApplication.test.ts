@@ -314,6 +314,19 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, label: strin
   throw new Error(`Timed out waiting for ${label}`);
 }
 
+/**
+ * The commit picker's preview is ready: it names its endpoints rather than
+ * saying it is still reading them. The footer's keys stay put while it loads,
+ * so the preview is the signal.
+ */
+async function waitForComparisonReady(terminal: ScriptedTerminal): Promise<void> {
+  await terminal.flush();
+  await waitFor(() => {
+    const preview = renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-comparison-preview'));
+    return !preview.includes('Inspecting') && !preview.includes('Loading') && /Commit {2}|Head {2}/u.test(preview);
+  }, 'comparison preview ready');
+}
+
 async function waitForOutput(terminal: ScriptedTerminal, text: string, checkpoint = 0): Promise<void> {
   await waitFor(
     async () => {
@@ -1760,12 +1773,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await waitForOutput(terminal, 'No changes since your last commit. [f] shows all files.');
     expect(terminal.setup.captureCharFrame()).not.toContain('No changed file selected');
     // The keys row offers the way on, and nothing that needs a file or a line.
-    const keys =
-      terminal.setup
-        .captureCharFrame()
-        .split('\n')
-        .filter(line => line.includes('[Tab] pane'))
-        .at(-1) ?? '';
+    const keys = renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-action-strip'));
     expect(keys).toContain('[f] all files');
     expect(keys).not.toContain('[a] new Message');
     expect(keys).not.toContain('[v] side-by-side');
@@ -3148,7 +3156,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       terminal.send('\t');
       await terminal.flush();
     }
-    await waitFor(() => actionStrip().includes('[r] send again'), 'send-again hint');
+    // The failed card names r where you're looking; the footer keeps its few keys.
+    expect(actionStrip()).not.toContain('[r] send again');
     terminal.send('r');
     await waitForOutput(terminal, 'New Message · review.txt:1');
     await waitFor(
@@ -3277,9 +3286,6 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     const frame = (): string => terminal.setup.captureCharFrame();
     const statusLine = (): string =>
       renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-status-line'));
-    const keysRow = (): string =>
-      (terminal.renderer.root.findDescendantById('reviewing-action-strip') as TextRenderable | undefined)?.plainText ??
-      '';
     const focus = async (pane: RegExp): Promise<void> => {
       for (let tab = 0; tab < 4 && !pane.test(frame()); tab += 1) {
         terminal.send('\t');
@@ -3332,9 +3338,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     } as never);
     await waitFor(() => statusLine().includes('#1 failed'), 'failure notice');
 
-    // The failed card says "Press r": the keys row offers it from Files too, and w says where it works.
+    // The failed card says "Press r", and r works from Files too; w says where it works.
     await focus(/Files FOCUSED/u);
-    await waitFor(() => keysRow().includes('[r] send again'), 'r offered outside History');
     terminal.send('w');
     await waitFor(() => statusLine().includes('Press Tab to reach the Diff, then press w'), 'w hint');
 
@@ -4223,7 +4228,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     terminal.send('j');
     terminal.send('\r');
     await waitForOutput(terminal, 'Commits FOCUSED');
-    await waitForOutput(terminal, '[Enter] start Review');
+    await waitForComparisonReady(terminal);
     const picker = card();
     expect(picker.x).toBe(launcher.x);
     expect(picker.width).toBe(launcher.width);
@@ -4425,10 +4430,9 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       ).stateVersion,
     ).toBe(firstHome.stateVersion);
 
-    const keyboardComparisonCheckpoint = terminal.checkpoint();
     terminal.send('G');
     terminal.send('\r');
-    await waitForOutput(terminal, '[Enter] start Review', keyboardComparisonCheckpoint);
+    await waitForComparisonReady(terminal);
     const comparisonActionStripRow = (): number =>
       terminal.renderer.root.findDescendantById('reviewing-action-strip')?.screenY ?? -1;
     const actionStripRow = comparisonActionStripRow();
@@ -4440,9 +4444,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
         .trimStart()
         .startsWith('›'),
     ).toBe(true);
-    const wrapToLastCheckpoint = terminal.checkpoint();
     terminal.send('k');
-    await waitForOutput(terminal, '[Enter] start Review', wrapToLastCheckpoint);
+    await waitForComparisonReady(terminal);
     expect(
       (
         terminal.renderer.root.findDescendantById(`reviewing-comparison-commit-${comparisonCommit}`) as TextRenderable
@@ -4454,9 +4457,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       comparisonCommit.slice(0, 7),
     );
     expect(comparisonActionStripRow()).toBe(actionStripRow);
-    const wrapToFirstCheckpoint = terminal.checkpoint();
     terminal.send('j');
-    await waitForOutput(terminal, '[Enter] start Review', wrapToFirstCheckpoint);
+    await waitForComparisonReady(terminal);
     expect(
       (
         terminal.renderer.root.findDescendantById(`reviewing-comparison-commit-${comparisonHead}`) as TextRenderable
@@ -4477,11 +4479,10 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
         })
       ).stateVersion,
     ).toBe(firstHome.stateVersion);
-    const keyboardCommitCheckpoint = terminal.checkpoint();
     terminal.send('j');
     await terminal.flush();
     expect(comparisonActionStripRow()).toBe(actionStripRow);
-    await waitForOutput(terminal, '[Enter] start Review', keyboardCommitCheckpoint);
+    await waitForComparisonReady(terminal);
     expect(comparisonActionStripRow()).toBe(actionStripRow);
     const keyboardReturnCheckpoint = terminal.checkpoint();
     terminal.send('\u001b');
@@ -4513,13 +4514,12 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     const comparisonCheckpoint = terminal.checkpoint();
     terminal.send('\r');
     await waitForOutput(terminal, 'Commits FOCUSED', comparisonCheckpoint);
-    await waitForOutput(terminal, '[Enter] start Review', comparisonCheckpoint);
+    await waitForComparisonReady(terminal);
     expect(renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-header'))).toContain('COMPARE');
     await terminal.flush();
     const comparisonActionStripY = terminal.renderer.root.findDescendantById('reviewing-action-strip')?.screenY;
     expect(comparisonActionStripY).toBeGreaterThan(0);
     expect(terminal.renderer.root.findDescendantById('reviewing-comparison-preview')?.height).toBe(3);
-    const commitCheckpoint = terminal.checkpoint();
     await terminal.clickRenderable(`reviewing-comparison-commit-${comparisonCommit}`);
     const selectedCommit = terminal.renderer.root.findDescendantById(
       `reviewing-comparison-commit-${comparisonCommit}`,
@@ -4529,7 +4529,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       'Inspecting local commit comparison',
     );
     expect(terminal.renderer.root.findDescendantById('reviewing-action-strip')?.screenY).toBe(comparisonActionStripY);
-    await waitForOutput(terminal, '[Enter] start Review', commitCheckpoint);
+    await waitForComparisonReady(terminal);
     expect(terminal.renderer.root.findDescendantById('reviewing-action-strip')?.screenY).toBe(comparisonActionStripY);
     expect(
       (
@@ -4703,7 +4703,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await application.start();
     terminal.send('j');
     terminal.send('\r');
-    await waitForOutput(terminal, '[Enter] start Review');
+    await waitForComparisonReady(terminal);
 
     const decisionGeometry = (): {
       readonly viewportHeight: number;
@@ -4732,7 +4732,6 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(frame).toContain('newest 500 from HEAD');
     expect(frame).toContain('[/] search');
     expect(frame).toContain('[?] keys');
-    expect(frame).toContain('[j/k] move');
     expect(frame).not.toContain('KEYBOARD CONTROLS');
     expect(
       (
@@ -4804,7 +4803,12 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(terminal.renderer.root.findDescendantById('reviewing-comparison-preview')?.screenY).toBe(
       wideGeometry.previewY,
     );
-    expect(terminal.renderer.root.findDescendantById('reviewing-action-strip')).toBeUndefined();
+    // The keys row stays where it was; searching swaps in the search's own keys.
+    expect(
+      renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-action-strip')).startsWith(
+        '[Enter] choose  [Esc] cancel',
+      ),
+    ).toBe(true);
     expect(
       (
         terminal.renderer.root.findDescendantById(
@@ -4881,14 +4885,13 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     ).toBe(true);
     expect(timed.reads).toHaveLength(searchReadCount);
 
-    const lastCheckpoint = terminal.checkpoint();
     terminal.send('k');
     await terminal.flush();
     expect(decisionGeometry()).toEqual(wideGeometry);
     expect(renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-comparison-preview'))).toContain(
       'Inspecting local commit comparison',
     );
-    await waitForOutput(terminal, '[Enter] start Review', lastCheckpoint);
+    await waitForComparisonReady(terminal);
     expect(
       (
         terminal.renderer.root.findDescendantById(
@@ -4911,7 +4914,6 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(frame).toContain('newest 500 from HEAD');
     expect(frame).toContain('[/] search');
     expect(frame).toContain('[?] keys');
-    expect(frame).toContain('[j/k] move');
     expect(frame).not.toContain('KEYBOARD CONTROLS');
     expect(
       terminal.renderer.root.findDescendantById(`reviewing-comparison-commit-${last.objectIdentity}`),
@@ -4945,14 +4947,13 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       );
     }, 'commit comparison mode restored');
 
-    const firstCheckpoint = terminal.checkpoint();
     terminal.send('j');
     await terminal.flush();
     expect(decisionGeometry()).toEqual(linearGeometry);
     expect(renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-comparison-preview'))).toContain(
       'Inspecting local commit comparison',
     );
-    await waitForOutput(terminal, '[Enter] start Review', firstCheckpoint);
+    await waitForComparisonReady(terminal);
     expect(decisionGeometry()).toEqual(linearGeometry);
     expect(
       terminal.renderer.root.findDescendantById(`reviewing-comparison-commit-${first.objectIdentity}`),
@@ -5059,7 +5060,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await asciiApplication.start();
     asciiTerminal.send('j');
     asciiTerminal.send('\r');
-    await waitForOutput(asciiTerminal, '[Enter] start Review');
+    await waitForComparisonReady(asciiTerminal);
     asciiTerminal.send('/');
     await waitForOutput(asciiTerminal, 'Search commit messages');
     asciiTerminal.send('BOUNDED COMPARISON COMMIT 010');
@@ -5097,18 +5098,19 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await terminal.flush();
     // Whole hints drop by rank as the terminal narrows; none is ever cut mid-word,
     // and help and pane switching are the last to go.
+    // The mode's few keys on the left, the anchor on the right; a narrow row
+    // shortens labels to their keys rather than losing a key.
     const expectFittedStrip = (strip: string | undefined, width: number): void => {
       expect(strip).toBeDefined();
-      for (const hint of strip!.split('  ')) expect(hint).toMatch(/^\[[^\]]+\] \S/u);
       expect(strip!.length).toBeLessThanOrEqual(width - 2);
-      expect(strip).toContain('[?] keys');
-      expect(strip).toContain('[Tab] pane');
+      expect(strip!.trimEnd().endsWith('[?] keys  [q] quit')).toBe(true);
+      expect(strip).toMatch(/^\[a\]( new Message)? {2}\[ and \]( history)? {2}\[z\]( code only)? /u);
     };
-    const wideActionStrip =
-      '[Tab] pane  [j/k] move  [a] new Message  [ and ] history  [v] side-by-side  [z] code only  [?] keys  [Esc] Home  [q] quit';
     const commandChrome = (): string | undefined =>
       (terminal.renderer.root.findDescendantById('reviewing-action-strip') as TextRenderable | undefined)?.plainText;
-    expect(commandChrome()).toBe(wideActionStrip);
+    const wideActionStrip = commandChrome();
+    expect(wideActionStrip?.startsWith('[a] new Message  [ and ] history  [z] code only ')).toBe(true);
+    expectFittedStrip(wideActionStrip, terminal.renderer.width);
     const wideDiffWidth = terminal.renderer.root.findDescendantById('reviewing-diff-pane')?.width;
     expect(wideDiffWidth).toBeGreaterThan(0);
 
@@ -5116,9 +5118,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     terminal.send('\t');
     await waitForOutput(terminal, 'History FOCUSED', questionsCheckpoint);
     expect(terminal.renderer.root.findDescendantById('reviewing-diff-pane')?.width).toBe(wideDiffWidth);
-    // Nothing is running, so interrupting isn't offered.
-    expect(commandChrome()).not.toContain('[x] interrupt');
-    expectFittedStrip(commandChrome(), terminal.renderer.width);
+    // Moving focus leaves the keys row exactly as it was.
+    expect(commandChrome()).toBe(wideActionStrip);
 
     terminal.resize(100, 28);
     await waitForLayout(terminal, 'balanced');
@@ -5324,7 +5325,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(configurationOverlay.backgroundColor.a).toBe(1);
     // The keys are said once, in the footer, not again inside the box.
     const configurationFrame = firstTerminal.setup.captureCharFrame();
-    expect(configurationFrame).toContain('[Up/Down] setting  [Left/Right] change  [Enter/Esc] close');
+    expect(configurationFrame).toContain('[←/→] change  [Enter/Esc] close');
+    expect(configurationFrame).toContain('Changes show and save right away.');
     expect(configurationFrame).not.toContain('Enter or Esc closes');
     firstTerminal.send(' ');
     await firstTerminal.flush();
