@@ -93,13 +93,14 @@ import {
   safeText,
   theme,
   wrappedRows,
-  type SemanticTheme,
   type ThemeColor,
+  toneColor,
 } from './shellLook.js';
 import { REVIEWING_KEYS, reviewingFooterMode, reviewingHelpMode } from './reviewingKeys.js';
 import { footerSentence, keyList, keysRow, type KeyListItem } from './shellKeys.js';
 import { PaneGlider } from './shellGlide.js';
 import { ShellRoots } from './shellRoots.js';
+import { shellFrame } from './shellFrame.js';
 
 export { INDIGO_NIGHT, MATCH_TERMINAL_THEME, QUIET_GRAPHITE, QUIET_PAPER, WARM_CARBON } from './shellLook.js';
 
@@ -863,11 +864,6 @@ function invocationLifecycleLabel(status: string): string {
     default:
       return 'Not sent yet';
   }
-}
-
-function toneColor(colors: SemanticTheme, tone: StatusTone): ThemeColor {
-  // Work in progress is said by the spinner's motion; the accent means focus only.
-  return tone === 'accent' ? colors.text : colors[tone];
 }
 
 function stateBadge(state: ReviewingApplicationState, item: ReviewMessageListItem): StatusBadge {
@@ -5435,10 +5431,6 @@ function screen(
 ): RenderNode {
   const presented = historicalBaseState(state);
   const colors = theme(presented);
-  // Footer rows keep their start and mark a cut, so a narrow terminal never
-  // ends a hint mid-word.
-  const footerWidth = Math.max(1, presented.width - 2);
-  const footerEllipsis = presented.presentation.ascii ? '...' : '…';
   const statusState = state.historicalDialog !== undefined && state.notice !== undefined ? state : presented;
   const reviewHeader = presented.review?.manifest.header;
   const trail =
@@ -5457,21 +5449,6 @@ function screen(
   const header = reviewingHeader(presented, trail);
   const retention = [...reviewRetentionContext(presented, interaction), ...homeContextRow(presented)];
   const conditions = statusCondition(presented);
-  // The footer is always the same two rows: what is being said (or what this
-  // mode means), then the keys. Neither row moves or swaps with the mode.
-  const sentence = footerSentence(REVIEWING_KEYS, reviewingFooterMode(state), state);
-  const said = statusLine(statusState);
-  const status = said.text === '' && sentence !== undefined ? { text: sentence, tone: 'muted' as const } : said;
-  const statusRows =
-    (status.tone === 'danger' || status.tone === 'warning') && displayCells(status.text) > footerWidth
-      ? wrappedRows(status.text, footerWidth)
-      : [status.text];
-  const statusHeight = Math.min(2, statusRows.length);
-  const footerHeight = statusHeight + 1;
-  const contentHeight = Math.max(
-    1,
-    presented.height - header.height - retention.length - conditions.length - footerHeight,
-  );
   const baseInteraction: ReviewPointerInteraction =
     state.historicalDialog === undefined
       ? interaction
@@ -5482,29 +5459,17 @@ function screen(
           move: event => event.stopPropagation(),
           wheelPane: (_region, event) => event.stopPropagation(),
         };
-  return Box(
-    {
-      id: 'reviewing-screen',
-      width: '100%',
-      height: '100%',
-      flexDirection: 'column',
-      backgroundColor: presented.presentation.noColor ? 'transparent' : colors.background,
-      onMouseMove: baseInteraction.move,
-    },
-    // The width mode as a renderable, so tests can wait for a relayout without on-screen text.
-    Box({ id: `reviewing-layout-${presented.layout}`, position: 'absolute', width: 0, height: 0 }),
-    ...header.rows,
-    ...retention,
-    ...conditions,
-    Box(
-      {
-        width: '100%',
-        flexGrow: 1,
-        flexShrink: 1,
-        flexDirection: 'column',
-        overflow: 'hidden',
-        backgroundColor: presented.presentation.noColor ? 'transparent' : colors.background,
-      },
+  return shellFrame(presented, {
+    idPrefix: 'reviewing',
+    header,
+    context: [...retention, ...conditions],
+    said: statusLine(statusState),
+    // The footer is always the same two rows: what is being said (or what this
+    // mode means), then the keys. Neither row moves or swaps with the mode.
+    idleSentence: footerSentence(REVIEWING_KEYS, reviewingFooterMode(state), state),
+    keysRow: width => keysRow(REVIEWING_KEYS, reviewingFooterMode(state), state, width),
+    onMouseMove: baseInteraction.move,
+    body: contentHeight => [
       presented.screen === 'loading' || presented.screen === 'failed'
         ? label(
             presented,
@@ -5532,37 +5497,8 @@ function screen(
       ...messageCommitGateOverlay(state, contentHeight),
       ...messagePreviewOverlay(state, contentHeight),
       ...historicalDialogOverlay(state, contentHeight, interaction, onDiscussionPage),
-    ),
-    Box(
-      {
-        width: '100%',
-        height: footerHeight,
-        flexShrink: 0,
-        flexDirection: 'column',
-        paddingLeft: 1,
-        paddingRight: 1,
-        backgroundColor: presented.presentation.noColor ? 'transparent' : colors.raised,
-      },
-      statusHeight === 1
-        ? label(
-            presented,
-            // Status text is a sentence: keep its start and mark the cut at the end.
-            fitDisplayCellsEnd(status.text, footerWidth, footerEllipsis),
-            { id: 'reviewing-status-line', fg: toneColor(colors, status.tone) },
-          )
-        : Box(
-            { id: 'reviewing-status-line', width: '100%', height: 2, flexDirection: 'column', flexShrink: 0 },
-            label(presented, statusRows[0]!, { fg: toneColor(colors, status.tone) }),
-            label(presented, fitDisplayCellsEnd(statusRows.slice(1).join(' '), footerWidth, footerEllipsis), {
-              fg: toneColor(colors, status.tone),
-            }),
-          ),
-      label(presented, keysRow(REVIEWING_KEYS, reviewingFooterMode(state), state, footerWidth), {
-        id: 'reviewing-action-strip',
-        fg: colors.text,
-      }),
-    ),
-  );
+    ],
+  });
 }
 
 const QUESTION_EDITOR_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/gu;

@@ -1,6 +1,7 @@
 import { StyledText, TextAttributes, type BorderCharacters, type MouseEvent } from '@opentui/core';
 
 import { Box, Text, type RenderChild } from './renderTree.js';
+import type { StatusTone } from './reviewingStatus.js';
 import type { ReviewingPreferences, ReviewingThemeDefinition, ReviewingTokenPalette } from './userConfiguration.js';
 
 /**
@@ -394,4 +395,9 @@ export function borderedBox(state: Look, options: Parameters<typeof Box>[0], ...
     },
     ...children,
   );
+}
+
+export function toneColor(colors: SemanticTheme, tone: StatusTone): ThemeColor {
+  // Work in progress is said by the spinner's motion; the accent means focus only.
+  return tone === 'accent' ? colors.text : colors[tone];
 }
