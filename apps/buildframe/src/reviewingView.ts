@@ -23,7 +23,7 @@ import type {
 } from '@buildframe/workspace/projection';
 
 import { reviewLiveContentLines } from './reviewingContent.js';
-import { Box, h, mount, type RenderChild, type RenderNode } from './renderTree.js';
+import { Box, h, type RenderChild, type RenderNode } from './renderTree.js';
 import { reviewingInputFromKeyEvent, reviewingInputFromPasteEvent } from './reviewingInput.js';
 import {
   diffMinimumWidth,
@@ -99,6 +99,7 @@ import {
 import { REVIEWING_KEYS, reviewingFooterMode, reviewingHelpMode } from './reviewingKeys.js';
 import { footerSentence, keyList, keysRow, type KeyListItem } from './shellKeys.js';
 import { PaneGlider } from './shellGlide.js';
+import { ShellRoots } from './shellRoots.js';
 
 export { INDIGO_NIGHT, MATCH_TERMINAL_THEME, QUIET_GRAPHITE, QUIET_PAPER, WARM_CARBON } from './shellLook.js';
 
@@ -5576,10 +5577,8 @@ class QuestionTextareaRenderable extends TextareaRenderable {
 /** OpenTUI implementation private to the deep Reviewing Application Module. */
 export class ReviewingView {
   readonly #model: ReviewingApplicationModel;
+  readonly #roots: ShellRoots;
   readonly #onEffects: (effects: readonly ReviewingModelEffect[], inputStartedAt: number) => void;
-  #root: Renderable | undefined;
-  readonly #retiredRoots = new Set<Renderable>();
-  #retiredRootCleanupScheduled = false;
   #pointerGesture:
     | {
         readonly target: ReviewingPointerTarget;
@@ -5669,7 +5668,7 @@ export class ReviewingView {
 
   #messageIdentityAt(x: number, y: number): ReviewMessageListItem['reviewMessageIdentity'] | undefined {
     const state = this.#model.state;
-    const root = this.#root;
+    const root = this.#roots.current;
     if (
       root === undefined ||
       state.screen !== 'review' ||
@@ -5712,7 +5711,7 @@ export class ReviewingView {
 
   #diffPointerTargetAt(x: number, y: number): ReviewingPointerTarget | undefined {
     const view = shownDiff(this.#model.state);
-    const root = this.#root;
+    const root = this.#roots.current;
     if (view?.status !== 'available' || root === undefined) return undefined;
     const contains = (renderable: Renderable): boolean =>
       x >= renderable.screenX &&
@@ -5933,16 +5932,6 @@ export class ReviewingView {
     });
   };
 
-  readonly #onRetiredRootsFrame = (): void => {
-    this.#retiredRootCleanupScheduled = false;
-    if (this.renderer.getSelection()?.isDragging) {
-      this.#scheduleRetiredRootCleanup();
-      return;
-    }
-    for (const root of this.#retiredRoots) root.destroyRecursively();
-    this.#retiredRoots.clear();
-  };
-
   constructor(
     readonly renderer: CliRenderer,
     model: ReviewingApplicationModel,
@@ -5953,15 +5942,7 @@ export class ReviewingView {
   ) {
     this.#model = model;
     this.#onEffects = onEffects;
-  }
-
-  #scheduleRetiredRootCleanup(): void {
-    if (this.#retiredRootCleanupScheduled || this.#retiredRoots.size === 0 || !this.#started) {
-      return;
-    }
-    this.#retiredRootCleanupScheduled = true;
-    this.renderer.once('frame', this.#onRetiredRootsFrame);
-    this.renderer.requestRender();
+    this.#roots = new ShellRoots(renderer, 'reviewing-screen');
   }
 
   #synchronizeQuestionTextarea(): void {
@@ -6053,6 +6034,7 @@ export class ReviewingView {
   start(): void {
     if (this.#started) return;
     this.#started = true;
+    this.#roots.start();
     this.renderer.keyInput.on('keypress', this.#onKeyPress);
     this.renderer.keyInput.on('paste', this.#onPaste);
     this.renderer.on('selection', this.#onSelection);
@@ -6082,53 +6064,37 @@ export class ReviewingView {
     const colors = theme(this.#model.state);
     this.renderer.setBackgroundColor(this.#model.state.presentation.noColor ? 'transparent' : colors.background);
     const editorRemainsOpen = this.#model.state.editor !== undefined;
-    const attachedRoot = this.renderer.root.getRenderable('reviewing-screen');
-    const previousRoots = new Set([this.#root, attachedRoot].filter(root => root !== undefined));
-    if (previousRoots.size > 0) {
+    const replaced = this.#roots.retire(() => {
+      // The composer survives the swap: it leaves the old tree before that tree retires.
       if (editorRemainsOpen && this.#questionTextarea !== undefined && !this.#questionTextarea.isDestroyed) {
         this.#questionTextarea.blur();
         this.#questionTextarea.parent?.remove(this.#questionTextarea);
       }
-      for (const previousRoot of previousRoots) {
-        if (previousRoot.parent === this.renderer.root) this.renderer.root.remove(previousRoot);
-        // The native hit grid still points at the just-presented Renderables
-        // until OpenTUI commits the replacement frame. Keep detached trees
-        // alive for one frame so rapid mouse input cannot target destroyed IDs.
-        this.#retiredRoots.add(previousRoot);
-      }
-      this.#root = undefined;
-      if (!editorRemainsOpen) this.#questionTextarea = undefined;
-    }
+    });
+    if (replaced && !editorRemainsOpen) this.#questionTextarea = undefined;
     const textarea = this.#ensureQuestionTextarea();
     this.#discussionPage = undefined;
     this.#contentPageSize = undefined;
-    const insertedIndex = this.renderer.root.add(
-      mount(
-        this.renderer,
-        screen(
-          this.#model.state,
-          textarea,
-          {
-            highlight: this.highlight,
-            begin: this.#beginPointerTarget,
-            finish: this.#finishPointerTarget,
-            move: this.#movePointer,
-            synchronizePaneScroll: this.#synchronizePaneScroll,
-            wheelPane: this.#wheelPane,
-          },
-          this.#captureDiscussionPage,
-          size => {
-            this.#contentPageSize = size;
-          },
-        ),
+    this.#roots.mount(
+      screen(
+        this.#model.state,
+        textarea,
+        {
+          highlight: this.highlight,
+          begin: this.#beginPointerTarget,
+          finish: this.#finishPointerTarget,
+          move: this.#movePointer,
+          synchronizePaneScroll: this.#synchronizePaneScroll,
+          wheelPane: this.#wheelPane,
+        },
+        this.#captureDiscussionPage,
+        size => {
+          this.#contentPageSize = size;
+        },
       ),
     );
-    const nextRoot = this.renderer.root.getChildren()[insertedIndex];
-    if (nextRoot?.id !== 'reviewing-screen') throw new Error('Reviewing root did not mount');
-    this.#root = nextRoot;
     textarea?.focus();
-    this.renderer.requestRender();
-    this.#scheduleRetiredRootCleanup();
+    this.#roots.present();
     this.onRendered();
   }
 
@@ -6140,23 +6106,13 @@ export class ReviewingView {
     this.renderer.off('selection', this.#onSelection);
     this.renderer.off('resize', this.#onResize);
     this.renderer.off('frame', this.#onHighlightFrame);
-    this.renderer.off('frame', this.#onRetiredRootsFrame);
     this.renderer.off('frame', this.#onWheelRenderFrame);
     if (this.#wheelRenderQueued !== undefined) clearImmediate(this.#wheelRenderQueued);
     this.#glider.stop();
     this.#wheelRenderQueued = undefined;
     this.#wheelFramePending = false;
     this.#wheelRenderDirty = false;
-    this.#retiredRootCleanupScheduled = false;
-    const attachedRoot = this.renderer.root.getRenderable('reviewing-screen');
-    const activeRoots = new Set([this.#root, attachedRoot].filter(root => root !== undefined));
-    this.#root = undefined;
-    for (const root of activeRoots) {
-      if (root.parent === this.renderer.root) this.renderer.root.remove(root);
-      root.destroyRecursively();
-    }
-    for (const root of this.#retiredRoots) root.destroyRecursively();
-    this.#retiredRoots.clear();
+    this.#roots.stop();
     this.#questionTextarea = undefined;
     this.#discussionPage = undefined;
     this.#pointerGesture = undefined;
