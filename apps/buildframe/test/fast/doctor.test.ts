@@ -10,7 +10,7 @@ import type { Workspace } from '@buildframe/workspace';
 
 import { parseDeveloperArguments } from '../../src/developerArguments.js';
 import { formatDoctorReport, hostCheck, runDoctor, type DoctorEnvironment } from '../../src/doctor.js';
-import { CLAUDE_CODE_SUPPORT, PI_SUPPORT } from '../../src/supportFacts.js';
+import { CLAUDE_CODE_SUPPORT, OPENCODE_SUPPORT, PI_SUPPORT } from '../../src/supportFacts.js';
 
 const execFileAsync = promisify(execFile);
 const roots: string[] = [];
@@ -32,7 +32,8 @@ function environment(startPath: string, overrides: Partial<DoctorEnvironment> = 
     nodeVersion: '26.5.1',
     startPath,
     runtimeEntrypoint: new URL('../../dist/runtimeProcess.js', import.meta.url),
-    hostVersion: async command => (command === 'pi' ? '1.3.0' : '2.1.322 (Claude Code)'),
+    hostVersion: async command =>
+      ({ pi: '1.3.0', claude: '2.1.322 (Claude Code)', opencode: 'opencode v2.3.2' })[command],
     inspectRuntime: async () => ({ status: 'not-running' }),
     ...overrides,
   };
@@ -72,6 +73,12 @@ describe('buildframe doctor', () => {
     });
     expect(hostCheck('claude-code', 'Claude Code', '3.0.0', CLAUDE_CODE_SUPPORT)).toMatchObject({ status: 'error' });
     expect(hostCheck('claude-code', 'Claude Code', '2.1.309', CLAUDE_CODE_SUPPORT)).toMatchObject({ status: 'error' });
+    // OpenCode prints its name and a `v` before the version.
+    expect(hostCheck('opencode', 'OpenCode', 'opencode v2.3.2', OPENCODE_SUPPORT)).toMatchObject({
+      status: 'ok',
+      summary: 'OpenCode 2.3.2 (verified)',
+    });
+    expect(hostCheck('opencode', 'OpenCode', 'opencode v1.19.6', OPENCODE_SUPPORT)).toMatchObject({ status: 'error' });
     expect(hostCheck('pi', 'Pi', '0.80.5', PI_SUPPORT)).toMatchObject({ status: 'error' });
     expect(hostCheck('pi', 'Pi', '1.4.0-beta.1', PI_SUPPORT)).toMatchObject({ status: 'error' });
     expect(hostCheck('pi', 'Pi', undefined, PI_SUPPORT)).toMatchObject({ status: 'note' });
@@ -84,7 +91,14 @@ describe('buildframe doctor', () => {
     const report = await runDoctor(environment(outside));
     expect(report.ok).toBe(false);
     expect(report.checks.find(check => check.id === 'repository')).toMatchObject({ status: 'error' });
-    expect(report.checks.map(check => check.id)).toEqual(['node', 'buildframe', 'repository', 'pi', 'claude-code']);
+    expect(report.checks.map(check => check.id)).toEqual([
+      'node',
+      'buildframe',
+      'repository',
+      'pi',
+      'claude-code',
+      'opencode',
+    ]);
   });
 
   it('checks no saved data while BuildFrame is not running, and is not an error', async () => {
@@ -178,5 +192,15 @@ describe('agent support facts', () => {
     expect(PI_SUPPORT.verified).toEqual(pi.buildframe.verifiedPiVersions);
     expect([CLAUDE_CODE_SUPPORT.range]).toEqual(claude.buildframe.supportedClaudeDirectHostVersions);
     expect(CLAUDE_CODE_SUPPORT.verified).toEqual(claude.buildframe.reviewedClaudeDirectHostVersions);
+    const opencode = JSON.parse(
+      await readFile(new URL('../../../../packages/opencode-adapter/package.json', import.meta.url), 'utf8'),
+    ) as {
+      readonly buildframe: {
+        readonly supportedOpenCodeVersions: readonly string[];
+        readonly verifiedOpenCodeVersions: readonly string[];
+      };
+    };
+    expect([OPENCODE_SUPPORT.range]).toEqual(opencode.buildframe.supportedOpenCodeVersions);
+    expect(OPENCODE_SUPPORT.verified).toEqual(opencode.buildframe.verifiedOpenCodeVersions);
   });
 });

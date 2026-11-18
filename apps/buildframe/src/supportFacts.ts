@@ -26,3 +26,10 @@ export const CLAUDE_CODE_SUPPORT: HostSupport = Object.freeze<HostSupport>({
   range: '>=2.1.310 <3.0.0',
   verified: Object.freeze(['2.1.310', '2.1.311', '2.1.317', '2.1.322']),
 });
+
+export const OPENCODE_SUPPORT: HostSupport = Object.freeze<HostSupport>({
+  minimum: [2, 3, 2],
+  exclusiveMaximum: [3, 0, 0],
+  range: '>=2.3.2 <3.0.0',
+  verified: Object.freeze(['2.3.2']),
+});

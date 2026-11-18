@@ -1,12 +1,13 @@
-// Assembles the two npm packages one release publishes, from one clean build,
-// into release/cli and release/pi, then checks them. It publishes nothing.
+// Assembles the npm packages one release publishes, from one clean build, into
+// release/cli, release/pi and release/opencode, then checks them. It publishes nothing.
 //
 //   pnpm release:assemble            build, bundle, check
 //   pnpm release:manifest            only rewrite support/manifest.json
 //
 // The private workspace packages are bundled in; native and WASM dependencies
 // (OpenTUI, tree-sitter grammars) stay ordinary npm dependencies, and Pi's own
-// packages stay host-provided peers.
+// packages stay host-provided peers. The OpenCode plugin imports nothing from
+// OpenCode, which refuses plugins that ship its modules.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { chmod, cp, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
@@ -154,7 +155,37 @@ await writeFile(
   )}\n`,
 );
 
-for (const directory of [cli, pi]) {
+// --- @buildframe/opencode --------------------------------------------------------
+const opencode = path.join(release, 'opencode');
+await build({
+  ...common,
+  entryPoints: {
+    index: at('packages/opencode-adapter/dist/index.js'),
+    tui: at('packages/opencode-adapter/dist/tui.js'),
+  },
+  outdir: path.join(opencode, 'dist'),
+});
+await writeFile(
+  path.join(opencode, 'package.json'),
+  `${JSON.stringify(
+    {
+      name: RELEASE_COORDINATES.opencode,
+      version,
+      description: 'Connect an OpenCode session to BuildFrame with /buildframe, so each Message you send becomes a turn.',
+      license: 'MIT',
+      type: 'module',
+      // OpenCode loads the server part from `.` and the TUI part from `./tui`.
+      exports: { '.': './dist/index.js', './tui': './dist/tui.js' },
+      files: ['dist'],
+      keywords: ['opencode', 'opencode-plugin', 'buildframe', 'code-review'],
+      ...publicMetadata,
+    },
+    null,
+    2,
+  )}\n`,
+);
+
+for (const directory of [cli, pi, opencode]) {
   await cp(at('LICENSE'), path.join(directory, 'LICENSE'));
 }
 const requirements =
@@ -166,6 +197,7 @@ await writeFile(
   `# BuildFrame\n\nReview what your coding agent changed, and send it Messages from the terminal.\n\n` +
     `\`\`\`\nnpm i -g ${RELEASE_COORDINATES.application}\nbuildframe\n\`\`\`\n\n` +
     `Connect an agent from its session with \`/buildframe\`: install ${RELEASE_COORDINATES.pi} for Pi, ` +
+    `${RELEASE_COORDINATES.opencode} for OpenCode, ` +
     `or the \`buildframe\` plugin from the \`buildframe\` marketplace for Claude Code. ` +
     `Run \`buildframe doctor\` if something doesn't connect.\n\n` +
     requirements,
@@ -175,6 +207,14 @@ await writeFile(
   `# BuildFrame for Pi\n\n\`\`\`\npi install npm:${RELEASE_COORDINATES.pi}\n\`\`\`\n\n` +
     `Then run \`/buildframe\` in a Pi session inside the repository BuildFrame is reviewing. ` +
     `Needs the BuildFrame app: \`npm i -g ${RELEASE_COORDINATES.application}\`.\n\n` +
+    requirements,
+);
+
+await writeFile(
+  path.join(opencode, 'README.md'),
+  `# BuildFrame for OpenCode\n\n\`\`\`\nopencode plugin add ${RELEASE_COORDINATES.opencode}@${version}\n\`\`\`\n\n` +
+    `Then run \`/buildframe\` in an OpenCode session inside the repository BuildFrame is reviewing. ` +
+    `Needs OpenCode 2 and the BuildFrame app: \`npm i -g ${RELEASE_COORDINATES.application}\`.\n\n` +
     requirements,
 );
 
@@ -199,6 +239,7 @@ for (const [directory, allowed] of [
     /^(dist\/(buildframe|runtimeProcess|buildframe-claude-helper|authoritativeStateWorker|chunk-[A-Z0-9]+)\.js|package\.json|LICENSE|README\.md|support-manifest\.json)$/u,
   ],
   [pi, /^(dist\/index\.js|package\.json|LICENSE|README\.md)$/u],
+  [opencode, /^(dist\/(index|tui)\.js|package\.json|LICENSE|README\.md)$/u],
 ]) {
   const files = await packedFiles(directory);
   const unexpected = files.filter(file => !allowed.test(file));
@@ -217,7 +258,7 @@ for (const [directory, allowed] of [
   }
 }
 
-for (const directory of [cli, pi]) {
+for (const directory of [cli, pi, opencode]) {
   const { publishConfig } = await readJson(path.join(directory, 'package.json'));
   assert.deepEqual(publishConfig, { access: 'public', registry: 'https://registry.npmjs.org/' });
 }
@@ -225,6 +266,7 @@ for (const directory of [cli, pi]) {
 const versions = [
   (await readJson(path.join(cli, 'package.json'))).version,
   (await readJson(path.join(pi, 'package.json'))).version,
+  (await readJson(path.join(opencode, 'package.json'))).version,
   (await readJson(at('packages/claude-adapter/plugin/.claude-plugin/plugin.json'))).version,
   (await readJson(at('.claude-plugin/marketplace.json'))).plugins[0].version,
 ];
@@ -259,8 +301,19 @@ try {
   await symlink(at('packages/pi-adapter/node_modules'), path.join(installedPi, 'node_modules'), 'dir');
   const extension = await import(path.join(installedPi, 'dist/index.js'));
   assert.equal(typeof extension.default, 'function', '@buildframe/pi exports its extension');
+
+  // OpenCode resolves nothing for the plugin: both parts must load from the package alone.
+  const installedOpenCode = path.join(scratch, 'opencode');
+  await cp(opencode, installedOpenCode, { recursive: true });
+  const server = (await import(path.join(installedOpenCode, 'dist/index.js'))).default;
+  assert.equal(server.id, 'buildframe', '@buildframe/opencode exports its server part');
+  assert.equal(typeof server.setup, 'function', '@buildframe/opencode exports its server part');
+  const tui = (await import(path.join(installedOpenCode, 'dist/tui.js'))).default;
+  assert.equal(typeof tui.setup, 'function', '@buildframe/opencode exports its TUI part');
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }
 
-console.log(`Release ${version} assembled in release/: ${RELEASE_COORDINATES.application}, ${RELEASE_COORDINATES.pi}`);
+console.log(
+  `Release ${version} assembled in release/: ${RELEASE_COORDINATES.application}, ${RELEASE_COORDINATES.pi}, ${RELEASE_COORDINATES.opencode}`,
+);

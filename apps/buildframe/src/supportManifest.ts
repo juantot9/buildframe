@@ -3,11 +3,12 @@ import { LOCAL_RUNTIME_PROTOCOL_VERSION } from '@buildframe/local-runtime';
 import { HARNESS_ADAPTER_PROTOCOL_VERSION } from '@buildframe/local-runtime/harness-adapter';
 
 import { DECLARED_NODE_RANGE, PINNED_TESTED_NODE_VERSION } from './nodeSupport.js';
-import { CLAUDE_CODE_SUPPORT, PI_SUPPORT } from './supportFacts.js';
+import { CLAUDE_CODE_SUPPORT, OPENCODE_SUPPORT, PI_SUPPORT } from './supportFacts.js';
 
 export interface ReleaseCoordinates {
   readonly application: string;
   readonly pi: string;
+  readonly opencode: string;
   readonly claudeCode: { readonly marketplace: string; readonly plugin: string; readonly repository: string };
 }
 
@@ -15,6 +16,7 @@ export interface ReleaseCoordinates {
 export const RELEASE_COORDINATES: ReleaseCoordinates = Object.freeze({
   application: '@buildframe/cli',
   pi: '@buildframe/pi',
+  opencode: '@buildframe/opencode',
   claudeCode: Object.freeze({
     marketplace: 'buildframe',
     plugin: 'buildframe',
@@ -38,6 +40,7 @@ export function supportManifest(productVersion: string): unknown {
     hosts: {
       pi: { range: PI_SUPPORT.range, verified: PI_SUPPORT.verified },
       claudeCode: { range: CLAUDE_CODE_SUPPORT.range, verified: CLAUDE_CODE_SUPPORT.verified },
+      opencode: { range: OPENCODE_SUPPORT.range, verified: OPENCODE_SUPPORT.verified },
     },
     protocols: {
       workspaceInterface: WORKSPACE_INTERFACE_VERSION,

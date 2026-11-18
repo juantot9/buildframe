@@ -4,6 +4,7 @@
   "releaseCoordinates": {
     "application": "@buildframe/cli",
     "pi": "@buildframe/pi",
+    "opencode": "@buildframe/opencode",
     "claudeCode": {
       "marketplace": "buildframe",
       "plugin": "buildframe",
@@ -24,6 +25,10 @@
     "claudeCode": {
       "range": ">=2.1.310 <3.0.0",
       "verified": ["2.1.310", "2.1.311", "2.1.317", "2.1.322"]
+    },
+    "opencode": {
+      "range": ">=2.3.2 <3.0.0",
+      "verified": ["2.3.2"]
     }
   },
   "protocols": {
