@@ -43,3 +43,16 @@ Owner decisions (2026-11-18):
 - Contract tests through the kit's in-memory host.
 - One live connect-and-send round trip on each verified OpenCode version.
 - `pnpm verify` passes; `doctor` reports the connector.
+
+## Experiments (2026-11-18)
+
+Run on OpenCode 2.3.2 with a fake local model and an isolated server
+([results](../docs/research/opencode-connector-wf295-experiments.md)). Exact
+bytes, the Bun socket path, mid-turn commands, reload and restart all hold.
+Two changes to the plan:
+
+- A prompt held with `queue` is delivered only after BuildFrame's final step,
+  so it **ends** BuildFrame's turn (reported succeeded) instead of making it
+  unknown. Only steered input and background reports make it unknown.
+- A reused message ID returns the original admission even with different text:
+  the glue checks the admitted text on every submit.
