@@ -1,15 +1,6 @@
 import process from 'node:process';
 
-import {
-  createCliRenderer,
-  createClipboard,
-  createHostClipboard,
-  createRendererClipboardAdapter,
-  type ClipboardService,
-  type ClipboardWriteResult,
-  type CliRenderer,
-  type HostClipboardService,
-} from '@opentui/core';
+import { createCliRenderer, type CliRenderer } from '@opentui/core';
 import { decodeBytesBase64 } from '@buildframe/workspace/bytes-base64';
 import type { Workspace, WorkspaceCommand, WorkspaceCommandResult } from '@buildframe/workspace';
 import type { ReviewHarnessInteractionViewScope } from '@buildframe/workspace/harness-interaction';
@@ -24,6 +15,13 @@ import type {
 import type { ReviewIdentity, ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
 
 import { createNoColorOutput } from './noColorOutput.js';
+import {
+  ShellClipboard,
+  productionClipboard,
+  terminalFallbackClipboard,
+  type ShellClipboardFactory,
+} from './shellClipboard.js';
+import { DebouncedSave } from './shellPreferences.js';
 import {
   DIFF_WINDOW_SIZE,
   HARNESS_INTERACTION_WINDOW_SIZE,
@@ -40,7 +38,6 @@ import {
   type HomeMode,
   type ReviewLoadTarget,
   type ReviewSelectionHint,
-  type ReviewingClipboardOutcome,
   type ReviewingModelEffect,
   type ReviewingPresentation,
   type ReviewViewBundle,
@@ -63,50 +60,7 @@ const REVIEW_MESSAGE_WINDOW_SIZE = 32;
 /** How long the first frame waits for the terminal to report light or dark. */
 const TERMINAL_THEME_MODE_WAIT_MS = 100;
 const LIVE_FILE_WINDOW_SIZE = 64;
-const CLIPBOARD_WRITE_LIMIT_BYTES = 64 * 1024;
 const MAX_PROJECTION_ATTEMPTS = 5;
-
-type ReviewingClipboardFactory = (renderer: CliRenderer) => ClipboardService;
-
-function unsupportedHostClipboard(): HostClipboardService {
-  return {
-    maxWriteBytes: CLIPBOARD_WRITE_LIMIT_BYTES,
-    read: async () => ({ status: 'unsupported' }),
-    writeText: async () => ({ status: 'unsupported' }),
-    clear: async () => ({ status: 'unsupported' }),
-    dispose: async () => undefined,
-  };
-}
-
-function composedClipboard(renderer: CliRenderer, host: HostClipboardService): ClipboardService {
-  return createClipboard({
-    host,
-    terminal: createRendererClipboardAdapter(renderer),
-  });
-}
-
-function productionClipboard(renderer: CliRenderer): ClipboardService {
-  let host: HostClipboardService;
-  try {
-    host = createHostClipboard({
-      timeoutMs: 1_000,
-      maxWriteBytes: CLIPBOARD_WRITE_LIMIT_BYTES,
-    });
-  } catch {
-    host = unsupportedHostClipboard();
-  }
-  return composedClipboard(renderer, host);
-}
-
-function terminalFallbackClipboard(renderer: CliRenderer): ClipboardService {
-  return composedClipboard(renderer, unsupportedHostClipboard());
-}
-
-function clipboardOutcome(result: ClipboardWriteResult): ReviewingClipboardOutcome {
-  if (result.host.status === 'written') return 'written';
-  if (result.terminal.status === 'attempted') return 'attempted';
-  return 'unavailable';
-}
 
 export interface ReviewingApplicationOptions {
   /** A connected runtime's closed Workspace Interface. */
@@ -181,9 +135,8 @@ class OpenReviewingApplication implements ReviewingApplication {
   #renderer: CliRenderer | undefined;
   #view: ReviewingView | undefined;
   readonly #highlight: ReviewingHighlight;
-  readonly #createClipboard: ReviewingClipboardFactory;
-  #clipboard: ClipboardService | undefined;
-  #clipboardCopySequence = 0;
+  readonly #createClipboard: ShellClipboardFactory;
+  #clipboard: ShellClipboard | undefined;
   #noColorOutput: NodeJS.WriteStream | undefined;
   readonly #onNoColorResize = (): void => {
     if (this.#renderer === undefined) return;
@@ -220,9 +173,20 @@ class OpenReviewingApplication implements ReviewingApplication {
   #filePreviewTimer: NodeJS.Timeout | undefined;
   readonly #reviewLoads = new Map<string, Promise<void>>();
   readonly #reviewDiffLoads = new Map<string, Promise<void>>();
-  #configurationSaveTimer: NodeJS.Timeout | undefined;
-  #pendingReviewingPreferences: ReviewingPreferences | undefined;
-  #configurationSaveChain: Promise<void> = Promise.resolve();
+  readonly #preferencesSave = new DebouncedSave<ReviewingPreferences>(async preferences => {
+    try {
+      const result = await this.#userConfiguration.saveReviewingPreferences(preferences);
+      if (result.status === 'rejected' && !this.#stopped) {
+        this.#model.reportConfigurationWarning(`Layout was not saved: ${result.reason}.`);
+        this.#render();
+      }
+    } catch (error) {
+      if (!this.#stopped) {
+        this.#model.reportConfigurationWarning(`Couldn’t save the layout. ${semanticError(error)}`);
+        this.#render();
+      }
+    }
+  });
   #started = false;
   #stopped = false;
   #diffPrefetchInFlight = false;
@@ -233,7 +197,7 @@ class OpenReviewingApplication implements ReviewingApplication {
     options: ReviewingApplicationOptions,
     renderer?: CliRenderer,
     createHighlightClient?: ConstructorParameters<typeof ReviewingHighlight>[1],
-    createClipboardService: ReviewingClipboardFactory = productionClipboard,
+    createClipboardService: ShellClipboardFactory = productionClipboard,
   ) {
     this.closed = new Promise(resolve => {
       this.#resolveClosed = resolve;
@@ -295,13 +259,7 @@ class OpenReviewingApplication implements ReviewingApplication {
     // Keep production and tests on the same click-navigation posture.
     this.#renderer.useMouse = true;
     this.#highlight.attachRenderer(this.#renderer.nativeScene);
-    try {
-      this.#clipboard = this.#createClipboard(this.#renderer);
-    } catch {
-      // Copy remains an optional presentation action. A later request reports
-      // the one truthful unavailable status instead of failing application startup.
-      this.#clipboard = undefined;
-    }
+    this.#clipboard = new ShellClipboard(this.#createClipboard, this.#renderer);
     if (this.#noColorOutput !== undefined) {
       process.on('SIGWINCH', this.#onNoColorResize);
     }
@@ -365,7 +323,7 @@ class OpenReviewingApplication implements ReviewingApplication {
     this.#stopped = true;
     this.#routeGeneration += 1;
     this.#loadSequence += 1;
-    this.#clipboardCopySequence += 1;
+    this.#clipboard?.cancel();
     this.#clearSubscriptions();
     this.#unsubscribeFromConnection?.();
     this.#unsubscribeFromConnection = undefined;
@@ -399,12 +357,7 @@ class OpenReviewingApplication implements ReviewingApplication {
       clearTimeout(this.#neighborWarmupTimer);
       this.#neighborWarmupTimer = undefined;
     }
-    if (this.#configurationSaveTimer !== undefined) {
-      clearTimeout(this.#configurationSaveTimer);
-      this.#configurationSaveTimer = undefined;
-    }
-    this.#flushUserConfiguration();
-    await this.#configurationSaveChain;
+    await this.#preferencesSave.settle();
     this.#view?.stop();
     this.#view = undefined;
     if (this.#noColorOutput !== undefined) {
@@ -585,7 +538,7 @@ class OpenReviewingApplication implements ReviewingApplication {
       } else if (effect.type === 'locate-question') {
         void this.#locateQuestion(effect.reviewIdentity, effect.itemIdentity, effect.questionAbsolute);
       } else if (effect.type === 'save-reviewing-preferences') {
-        this.#scheduleUserConfigurationSave(effect.preferences);
+        this.#preferencesSave.schedule(effect.preferences);
       } else if (effect.type === 'copy-text') {
         void this.#copyText(effect);
       } else if (effect.type === 'load-step-changes' || effect.type === 'load-step-change-diff') {
@@ -634,52 +587,11 @@ class OpenReviewingApplication implements ReviewingApplication {
   }
 
   async #copyText(effect: Extract<ReviewingModelEffect, { readonly type: 'copy-text' }>): Promise<void> {
-    const sequence = ++this.#clipboardCopySequence;
-    let outcome: ReviewingClipboardOutcome = 'unavailable';
-    try {
-      const result = await this.#clipboard?.writeText(effect.text, {
-        destination: 'best-available',
-        selection: 'clipboard',
-      });
-      if (result !== undefined) outcome = clipboardOutcome(result);
-    } catch {
-      outcome = 'unavailable';
-    }
-    if (this.#stopped || sequence !== this.#clipboardCopySequence) return;
+    const outcome = this.#clipboard === undefined ? 'unavailable' : await this.#clipboard.copy(effect.text);
+    if (this.#stopped || outcome === undefined) return;
     if (effect.announce === 'failure-only' && outcome !== 'unavailable') return;
     this.#model.reportClipboardCopy(effect.source, outcome, Buffer.byteLength(effect.text));
     this.#render();
-  }
-
-  #scheduleUserConfigurationSave(preferences: ReviewingPreferences): void {
-    this.#pendingReviewingPreferences = preferences;
-    if (this.#configurationSaveTimer !== undefined) {
-      clearTimeout(this.#configurationSaveTimer);
-    }
-    this.#configurationSaveTimer = setTimeout(() => {
-      this.#configurationSaveTimer = undefined;
-      this.#flushUserConfiguration();
-    }, 100);
-  }
-
-  #flushUserConfiguration(): void {
-    const preferences = this.#pendingReviewingPreferences;
-    if (preferences === undefined) return;
-    this.#pendingReviewingPreferences = undefined;
-    this.#configurationSaveChain = this.#configurationSaveChain
-      .then(async () => {
-        const result = await this.#userConfiguration.saveReviewingPreferences(preferences);
-        if (result.status === 'rejected' && !this.#stopped) {
-          this.#model.reportConfigurationWarning(`Layout was not saved: ${result.reason}.`);
-          this.#render();
-        }
-      })
-      .catch((error: unknown) => {
-        if (!this.#stopped) {
-          this.#model.reportConfigurationWarning(`Couldn’t save the layout. ${semanticError(error)}`);
-          this.#render();
-        }
-      });
   }
 
   #showHomeFromEffect(route: ActiveHomeRoute): void {
@@ -1957,7 +1869,7 @@ export function createReviewingApplicationForTest(
   options: ReviewingApplicationOptions & {
     readonly renderer: CliRenderer;
     readonly createHighlightClient?: ConstructorParameters<typeof ReviewingHighlight>[1];
-    readonly createClipboardService?: ReviewingClipboardFactory;
+    readonly createClipboardService?: ShellClipboardFactory;
   },
 ): ReviewingApplication {
   const { renderer, createHighlightClient, createClipboardService, ...applicationOptions } = options;
