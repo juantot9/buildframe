@@ -45,6 +45,7 @@ every Message you send in BuildFrame goes straight to that session.
 |---|---|---|
 | Pi `>=0.80.6 <2.0.0` | `pi install npm:@buildframe/pi` | `/buildframe` |
 | Claude Code `>=2.1.310 <3.0.0` | `/plugin marketplace add juantot9/buildframe`, then `/plugin install buildframe@buildframe` | `/buildframe` |
+| OpenCode `>=2.3.2 <3.0.0` | `opencode plugin add @buildframe/opencode` | `/buildframe` |
 
 - One session is connected per repository. Running `/buildframe` in another
   session moves the connection there, and the first session is told.
@@ -55,6 +56,8 @@ every Message you send in BuildFrame goes straight to that session.
   only, and `/buildframe write` switches back.
 - `x` on a running Message asks the agent to stop that turn; you can also stop
   it in the agent itself.
+- In OpenCode, what you type while a Message's turn runs waits until that turn
+  ends, so BuildFrame can still tell how it ended.
 
 ## Use it
 
@@ -120,8 +123,10 @@ its output when you report a problem.
 ```bash
 npm i -g @buildframe/cli@latest        # update
 pi update npm:@buildframe/pi           # update the Pi connector
+opencode plugin update                 # update the OpenCode connector
 npm rm -g @buildframe/cli              # remove; saved data stays
 pi remove npm:@buildframe/pi
+opencode plugin remove @buildframe/opencode
 ```
 
 In Claude Code, manage the plugin with `/plugin`.
@@ -166,10 +171,13 @@ pi -e /path/to/buildframe/packages/pi-adapter/dist/index.js
 claude --plugin-dir /path/to/buildframe/packages/claude-adapter/plugin
 ```
 
+For OpenCode, run `pnpm release:assemble` and add
+`/path/to/buildframe/release/opencode` to `plugins` in `opencode.json`.
+
 ### Assemble a release
 
 ```bash
-pnpm release:assemble    # builds @buildframe/cli and @buildframe/pi into release/ and checks them
+pnpm release:assemble    # builds @buildframe/cli, @buildframe/pi and @buildframe/opencode into release/ and checks them
 pnpm release:manifest    # regenerates support/manifest.json after a support fact changes
 ```
 
@@ -181,6 +189,7 @@ packages/workspace       Reviews, Messages, saved State, Git evidence
 packages/local-runtime   the background process and its local IPC
 packages/pi-adapter      the Pi connector
 packages/claude-adapter  the Claude Code connector and its plugin
+packages/opencode-adapter the OpenCode connector and its plugin
 .claude-plugin/          the Claude Code marketplace
 scripts/                 verification, risk probes, release assembly
 support/manifest.json    what a release supports, generated

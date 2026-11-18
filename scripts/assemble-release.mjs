@@ -171,7 +171,8 @@ await writeFile(
     {
       name: RELEASE_COORDINATES.opencode,
       version,
-      description: 'Connect an OpenCode session to BuildFrame with /buildframe, so each Message you send becomes a turn.',
+      description:
+        'Connect an OpenCode session to BuildFrame with /buildframe, so each Message you send becomes a turn.',
       license: 'MIT',
       type: 'module',
       // OpenCode loads the server part from `.` and the TUI part from `./tui`.

@@ -1,7 +1,7 @@
 ---
 id: WF-295
 title: "Connect OpenCode"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-289
@@ -64,3 +64,26 @@ Owner decisions (2026-11-18, after the experiments):
   `@buildframe/pi`).
 - **Feedback:** include a small TUI part, so a successful `/buildframe` shows a
   toast too, as with Pi and Claude.
+
+## Resolution (2026-11-18)
+
+- `packages/opencode-adapter`: `openCodeAdapter.ts` turns OpenCode's session
+  events into connector-kit facts (BuildFrame's prompt carries a `msg_<sha256>`
+  dispatch ID; a held prompt delivered after BuildFrame's final `stop` step
+  ends its turn; steered input or a background report makes it unknown; the
+  admitted text is checked on every submit). `plugin.ts` is the server part
+  (`/buildframe`, `status`, `disconnect`, the prompt hook that holds typed
+  prompts during BuildFrame's turn), `tui.ts` shows its statuses as toasts
+  over the plugin's RPC event. Nothing is imported from OpenCode: both parts
+  are plain objects typed by shape (`openCodeHost.ts`). Workspace write only,
+  like Claude Code.
+- Released as `@buildframe/opencode` (server `.` and `./tui`), bundled and
+  checked by `pnpm release:assemble`; `support/manifest.json`, doctor
+  (`opencode --version`) and the README list it.
+- Verified: 12 contract tests; a live round trip on OpenCode 2.3.2 with the
+  assembled package, a real BuildFrame and a fake local model (connect, exact
+  delivery, answered), and a second Message during which a typed `steer` prompt
+  was held as `queue` and BuildFrame's Message still settled as answered;
+  `pnpm verify` passes (602 tests).
+- Not done: a read-only mode (Pi only today), and publishing (WF-213's release
+  process).

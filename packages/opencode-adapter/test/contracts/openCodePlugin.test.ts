@@ -44,9 +44,12 @@ class FakeOpenCode {
       event: {
         // No session events in these tests; the stream stays open until unload.
         subscribe: ({ signal }) => ({
-          async *[Symbol.asyncIterator](): AsyncGenerator<OpenCodeServerEvent> {
-            await new Promise(resolve => signal.addEventListener('abort', resolve));
-          },
+          [Symbol.asyncIterator]: () => ({
+            next: async (): Promise<IteratorResult<OpenCodeServerEvent>> => {
+              await new Promise(resolve => signal.addEventListener('abort', resolve));
+              return { done: true, value: undefined };
+            },
+          }),
         }),
       },
       rpc: {
