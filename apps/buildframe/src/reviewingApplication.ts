@@ -23,6 +23,7 @@ import {
 } from './shellClipboard.js';
 import { DebouncedSave } from './shellPreferences.js';
 import { executeCommand, semanticError } from './shellCommands.js';
+import { liveViewIdentity, ShellWatch } from './shellWatch.js';
 import {
   DIFF_WINDOW_SIZE,
   HARNESS_INTERACTION_WINDOW_SIZE,
@@ -98,17 +99,6 @@ type ActiveRoute = ActiveHomeRoute | ActiveReviewRoute;
 
 type ReviewingSubscriptionScope = WorkspaceProjectionViewScope | ReviewHarnessInteractionViewScope;
 
-/** The Workspace's own rule for "same live view": its Live Changes identity, or status and reason. */
-function liveViewIdentity(view: object): string | undefined {
-  const value = view as { readonly status?: string; readonly reason?: string; readonly liveChangesIdentity?: string };
-  if (value.status === 'available') return value.liveChangesIdentity;
-  return value.status === undefined ? undefined : `${value.status}:${value.reason}`;
-}
-
-function scopeIdentity(scope: ReviewingSubscriptionScope): string {
-  return JSON.stringify(scope);
-}
-
 class ProjectionVersionsDidNotConverge extends Error {}
 class LiveChangesTemporarilyUnverified extends Error {}
 
@@ -136,17 +126,9 @@ class OpenReviewingApplication implements ReviewingApplication {
     if (this.#model.setTerminalThemeMode(mode) && this.#view !== undefined) this.#render();
   };
   #unsubscribeFromConnection: (() => void) | undefined;
-  readonly #unsubscribers = new Map<string, () => void>();
-  readonly #announcedVersions = new Map<string, number>();
-  /** Live Changes identity last shown per live scope; the same identity at the same version is no news. */
-  readonly #announcedLive = new Map<string, string | undefined>();
-  #reviewDiffSubscriptionIdentity: string | undefined;
   #route?: ActiveRoute;
   #routeGeneration = 0;
   #loadSequence = 0;
-  #refreshScheduled = false;
-  #refreshInFlight = false;
-  #refreshRequested = false;
   #comparisonPreviewSequence = 0;
   #comparisonPreviewTimer: NodeJS.Timeout | undefined;
   #reviewSearchSequence = 0;
@@ -159,6 +141,7 @@ class OpenReviewingApplication implements ReviewingApplication {
   #filePreviewTimer: NodeJS.Timeout | undefined;
   readonly #reviewLoads = new Map<string, Promise<void>>();
   readonly #reviewDiffLoads = new Map<string, Promise<void>>();
+  readonly #watch: ShellWatch;
   readonly #preferencesSave = new DebouncedSave<ReviewingPreferences>(async preferences => {
     try {
       const result = await this.#userConfiguration.saveReviewingPreferences(preferences);
@@ -194,6 +177,20 @@ class OpenReviewingApplication implements ReviewingApplication {
     this.#model = new ReviewingApplicationModel(options.presentation);
     this.#highlight = new ReviewingHighlight(() => this.#view?.invalidateHighlight(), createHighlightClient);
     this.#createClipboard = createClipboardService;
+    this.#watch = new ShellWatch({
+      workspace: this.#workspace,
+      current: generation => !this.#stopped && generation === this.#routeGeneration,
+      stopped: () => this.#stopped,
+      isLive: scope =>
+        scope.kind === 'review.live-manifest' ||
+        scope.kind === 'review.live-files' ||
+        scope.kind === 'review.continuation',
+      failed: () => {
+        this.#model.fail('Review projection records are invalid.');
+        this.#render();
+      },
+      refresh: async () => await this.#refreshCurrent(),
+    });
   }
 
   async start(): Promise<void> {
@@ -1427,74 +1424,19 @@ class OpenReviewingApplication implements ReviewingApplication {
     knownStateVersion = -1,
     knownLiveIdentity?: string,
   ): void {
-    const identity = scopeIdentity(scope);
-    this.#unsubscribers.get(identity)?.();
-    this.#announcedVersions.set(identity, knownStateVersion);
-    this.#announcedLive.set(identity, knownLiveIdentity);
-    const unsubscribe = this.#workspace.subscribe(scope, update => {
-      if (this.#stopped || generation !== this.#routeGeneration) return;
-      if (update.kind === 'workspace.projection-failed') {
-        this.#model.fail('Review projection records are invalid.');
-        this.#render();
-        return;
-      }
-      const previous = this.#announcedVersions.get(identity) ?? -1;
-      const live =
-        scope.kind === 'review.live-manifest' ||
-        scope.kind === 'review.live-files' ||
-        scope.kind === 'review.continuation';
-      const liveIdentity = live ? liveViewIdentity(update) : undefined;
-      if (update.stateVersion <= previous) {
-        // Live Changes move without a new committed version; only a different identity is news.
-        if (!live || liveIdentity === this.#announcedLive.get(identity)) return;
-      }
-      this.#announcedVersions.set(identity, update.stateVersion);
-      this.#announcedLive.set(identity, liveIdentity);
-      this.#scheduleRefresh();
-    });
-    this.#unsubscribers.set(identity, unsubscribe);
-    if (scope.kind === 'review.diff') {
-      this.#reviewDiffSubscriptionIdentity = identity;
-    }
+    // Whichever Diff is shown holds the one Diff slot.
+    const slot = scope.kind === 'review.diff' ? 'diff' : undefined;
+    this.#watch.watch(scope, generation, knownStateVersion, knownLiveIdentity, slot);
   }
 
   #scheduleRefresh(): void {
-    if (this.#stopped) return;
-    this.#refreshRequested = true;
-    if (this.#refreshScheduled || this.#refreshInFlight) return;
-    this.#refreshScheduled = true;
-    queueMicrotask(() => {
-      this.#refreshScheduled = false;
-      void this.#drainRefreshes();
-    });
-  }
-
-  async #drainRefreshes(): Promise<void> {
-    if (this.#stopped || this.#refreshInFlight) return;
-    this.#refreshInFlight = true;
-    try {
-      while (this.#refreshRequested && !this.#stopped) {
-        this.#refreshRequested = false;
-        await this.#refreshCurrent();
-      }
-    } finally {
-      this.#refreshInFlight = false;
-      if (this.#refreshRequested && !this.#stopped) this.#scheduleRefresh();
-    }
+    this.#watch.requestRefresh();
   }
 
   #replaceReviewDiffSubscription(target: ReviewLoadTarget, generation: number, knownStateVersion: number): void {
-    const previous = this.#reviewDiffSubscriptionIdentity;
-    if (previous !== undefined) {
-      this.#unsubscribers.get(previous)?.();
-      this.#unsubscribers.delete(previous);
-      this.#announcedVersions.delete(previous);
-      this.#reviewDiffSubscriptionIdentity = undefined;
-    }
-    if (target.fileIdentity === undefined || target.reviewSnapshotIdentity === undefined) {
-      return;
-    }
-    this.#subscribe(
+    this.#watch.release('diff');
+    if (target.fileIdentity === undefined || target.reviewSnapshotIdentity === undefined) return;
+    this.#watch.watch(
       {
         kind: 'review.diff',
         reviewIdentity: target.reviewIdentity,
@@ -1505,15 +1447,13 @@ class OpenReviewingApplication implements ReviewingApplication {
       },
       generation,
       knownStateVersion,
+      undefined,
+      'diff',
     );
   }
 
   #clearSubscriptions(): void {
-    for (const unsubscribe of this.#unsubscribers.values()) unsubscribe();
-    this.#unsubscribers.clear();
-    this.#announcedVersions.clear();
-    this.#announcedLive.clear();
-    this.#reviewDiffSubscriptionIdentity = undefined;
+    this.#watch.clear();
   }
 
   async #execute(command: WorkspaceCommand): Promise<void> {
