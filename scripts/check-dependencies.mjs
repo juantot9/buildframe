@@ -40,6 +40,13 @@ const REVIEWING_PARSER_PACKAGES = [
   'tree-sitter-css',
 ];
 
+// A connector's production code reaches the runtime only through the connector
+// kit and the Workspace only through its harness contracts.
+const CONNECTOR_PRODUCTION_SUBPATHS = {
+  '@buildframe/local-runtime': ['harness-adapter'],
+  '@buildframe/workspace': ['.', 'harness-interaction', 'sha256'],
+};
+
 function externalDependencyPolicy({ production = [], test = [], manifest = {} }) {
   return {
     production: new Set(production),
@@ -66,6 +73,7 @@ const v1Packages = [
   {
     directory: path.join(repoRoot, 'packages/pi-adapter'),
     allowedV1Dependencies: new Set(['@buildframe/local-runtime', '@buildframe/workspace']),
+    allowedProductionSubpaths: CONNECTOR_PRODUCTION_SUBPATHS,
     allowedExternalDependencies: externalDependencyPolicy({
       production: [PI_HOST_PACKAGE],
       test: [TEST_RUNNER_PACKAGE],
@@ -80,6 +88,7 @@ const v1Packages = [
     // The Direct Mod's tests run under `claude plugin test`, which requires them inside the plugin.
     testDirectories: ['test', 'plugin/tests'],
     allowedV1Dependencies: new Set(['@buildframe/local-runtime', '@buildframe/workspace']),
+    allowedProductionSubpaths: CONNECTOR_PRODUCTION_SUBPATHS,
     allowedExternalDependencies: externalDependencyPolicy({
       test: [TEST_RUNNER_PACKAGE, CLAUDE_MOD_TEST_KIT],
     }),
@@ -175,6 +184,21 @@ for (const packageName of retiredExternalPackages) {
   }
 }
 
+// Every package must be listed above; an unlisted one would go unchecked.
+const listedDirectories = new Set(v1Packages.map(owner => owner.directory));
+for (const parent of ['apps', 'packages']) {
+  for (const entry of await fs.readdir(path.join(repoRoot, parent), { withFileTypes: true })) {
+    const directory = path.join(repoRoot, parent, entry.name);
+    if (!entry.isDirectory() || listedDirectories.has(directory) || legacyDirectories.includes(directory)) continue;
+    try {
+      await fs.access(path.join(directory, 'package.json'));
+    } catch {
+      continue;
+    }
+    recordViolation(directory, 'unlisted package: add it to v1Packages in scripts/check-dependencies.mjs');
+  }
+}
+
 const v1PackageByName = new Map();
 for (const owner of v1Packages) {
   const manifestPath = path.join(owner.directory, 'package.json');
@@ -202,6 +226,12 @@ function checkSpecifier(specifier, fromFile, owner, allowedExternalDependencies,
     if (!packageMatches(specifier, packageName)) continue;
     if (targetOwner !== owner && !owner.allowedV1Dependencies.has(packageName)) {
       recordViolation(fromFile, `outward v1 dependency "${specifier}"`);
+      return;
+    }
+    const subpaths = owner.allowedProductionSubpaths?.[packageName];
+    const subpath = specifier === packageName ? '.' : specifier.slice(packageName.length + 1);
+    if (dependencyContext === 'production source' && subpaths !== undefined && !subpaths.includes(subpath)) {
+      recordViolation(fromFile, `unapproved v1 subpath "${specifier}" in production source`);
     }
     return;
   }
