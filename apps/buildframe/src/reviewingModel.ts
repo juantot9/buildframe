@@ -57,6 +57,7 @@ import type { ReviewComparisonSelection } from '@buildframe/workspace/workspace-
 import { fitDisplayCellsEnd } from './displayCells.js';
 import { contentWindowContainsLine } from './reviewingContent.js';
 import { Key, matchesKey, printableInput, type ReviewingInput } from './reviewingInput.js';
+import { routeShellKey, type ShellKeyHost } from './shellInput.js';
 import { reasonSentence } from './reviewingReasons.js';
 import { outgoingStateSpins, type MessageState, type NoticeTone } from './reviewingStatus.js';
 import {
@@ -656,6 +657,9 @@ export type ReviewingModelEffect =
 /** At most this many moves are kept while a Message saves. */
 const HELD_NAVIGATION_LIMIT = 16;
 /** Review keys that act on what is on screen, so they wait for a load to finish. */
+/** Keys a read-only Snapshot dialog refuses until it is closed. */
+const HISTORICAL_REFUSED_KEYS: ReadonlySet<string> = new Set(['c', 's', '/', 'C', '?', '!', '<', '>']);
+
 const ACTS_ON_LOADED_REVIEW: ReadonlySet<string> = new Set(['a', 'y', 'f', 'r', 'x', 't', 'v', 'w', 'R', 'C']);
 
 /** Keys that only move selection or focus, safe to replay once a Message is saved. */
@@ -2924,96 +2928,87 @@ export class ReviewingApplicationModel {
 
   handleInput(data: ReviewingInput, now: number = performance.now()): readonly ReviewingModelEffect[] {
     this.followSelection();
-    if (this.state.editor !== undefined) return this.handleEditorInput(data, now);
-    if (this.state.comparisonInput !== undefined) {
-      return this.handleComparisonInput(data);
-    }
-    if (this.state.search !== undefined) return this.handleSearchInput(data);
-    if (this.state.continuationChoice !== undefined) {
-      return this.handleContinuationChoiceInput(data, now);
-    }
-    if (this.state.basisPicker !== undefined) return this.handleBasisPickerInput(data, now);
-    if (this.state.jumpList !== undefined) return this.handleJumpListInput(data);
-    if (matchesKey(data, Key.ctrl('c'))) return [{ type: 'stop' }];
-    const plainSpace =
-      data.name === 'space' && data.text === ' ' && !data.ctrl && !data.alt && !data.shift && !data.super;
-    if (this.state.actionLookupOpen) {
-      if (plainSpace || data.text === '?' || matchesKey(data, Key.enter) || matchesKey(data, Key.escape)) {
-        this.state.actionLookupOpen = false;
-      }
+    return routeShellKey<ReviewingModelEffect>(data, this.shellKeyHost(now));
+  }
+
+  /** Reviewing as the shell routes keys to it: its typing layers, its guard, its Esc and its own keys. */
+  private shellKeyHost(now: number): ShellKeyHost<ReviewingModelEffect> {
+    const state = this.state;
+    return {
+      stop: { type: 'stop' },
+      capture: data => {
+        if (state.editor !== undefined) return this.handleEditorInput(data, now);
+        if (state.comparisonInput !== undefined) return this.handleComparisonInput(data);
+        if (state.search !== undefined) return this.handleSearchInput(data);
+        if (state.continuationChoice !== undefined) return this.handleContinuationChoiceInput(data, now);
+        if (state.basisPicker !== undefined) return this.handleBasisPickerInput(data, now);
+        if (state.jumpList !== undefined) return this.handleJumpListInput(data);
+        return undefined;
+      },
+      guard: data => {
+        if (state.historicalDialog === undefined) return undefined;
+        if (matchesKey(data, Key.escape) || data.text === 'R') return this.closeHistoricalDialog();
+        if (
+          (data.text !== undefined && HISTORICAL_REFUSED_KEYS.has(data.text)) ||
+          matchesKey(data, Key.ctrl('h')) ||
+          matchesKey(data, Key.ctrl('l'))
+        ) {
+          this.say('This saved Snapshot is read-only. Press Esc to close it first.', 'info');
+          return [];
+        }
+        return undefined;
+      },
+      guarded: state.historicalDialog !== undefined,
+      ready: state.screen === 'home' || state.screen === 'review',
+      loading: state.loading !== undefined,
+      saving: state.pending !== undefined,
+      sayStillLoading: key => this.sayStillLoading(key),
+      keyList: {
+        open: state.actionLookupOpen,
+        show: open => {
+          state.actionLookupOpen = open;
+        },
+      },
+      configuration: {
+        open: state.configurationWindow !== undefined,
+        show: () => {
+          state.configurationWindow = { selected: 'theme' };
+          state.showDetails = false;
+          state.notice = undefined;
+        },
+        input: data => this.handleConfigurationInput(data),
+      },
+      details: {
+        open: state.showDetails,
+        show: open => {
+          state.showDetails = open;
+        },
+      },
+      escape: () => this.escapeScreen(),
+      screenKey: data => this.handleScreenKey(data, now),
+    };
+  }
+
+  /** Esc once nothing the shell owns is open: a shown step closes, a Review returns Home. */
+  private escapeScreen(): readonly ReviewingModelEffect[] {
+    if (this.state.shownStep !== undefined) {
+      this.closeShownStep();
       return [];
     }
-    if (this.state.historicalDialog !== undefined && (matchesKey(data, Key.escape) || data.text === 'R')) {
-      return this.closeHistoricalDialog();
+    if (this.state.screen === 'review') {
+      return [{ type: 'show-home', offset: 0, mode: this.state.reviewReturn }];
     }
-    if (
-      this.state.historicalDialog !== undefined &&
-      (data.text === 'c' ||
-        data.text === 's' ||
-        data.text === '/' ||
-        data.text === 'C' ||
-        data.text === '?' ||
-        data.text === '!' ||
-        data.text === '<' ||
-        data.text === '>' ||
-        matchesKey(data, Key.ctrl('h')) ||
-        matchesKey(data, Key.ctrl('l')))
-    ) {
-      this.say('This saved Snapshot is read-only. Press Esc to close it first.', 'info');
-      return [];
+    if (this.state.screen === 'home' && (this.state.homeMode === 'history' || this.state.homeMode === 'comparison')) {
+      const returningFrom = this.state.homeMode;
+      this.state.homeMode = 'launcher';
+      this.state.homeLauncherSelection = returningFrom === 'comparison' ? 'comparison' : 'history';
+      this.state.comparisonInput = undefined;
+      this.state.loading = undefined;
     }
-    if (this.state.configurationWindow !== undefined) {
-      return this.handleConfigurationInput(data);
-    }
-    if (data.text === 'q' && (this.state.screen === 'home' || this.state.screen === 'review')) {
-      // A q typed ahead while something loads or saves is more likely a word
-      // than a decision to leave; quit only once nothing is in flight.
-      if (this.state.loading === undefined && this.state.pending === undefined) return [{ type: 'stop' }];
-      this.sayStillLoading('q');
-      return [];
-    }
-    if (this.state.pending !== undefined) return [];
-    if (
-      (plainSpace || data.text === '?') &&
-      this.state.historicalDialog === undefined &&
-      (this.state.screen === 'home' || this.state.screen === 'review')
-    ) {
-      this.state.actionLookupOpen = true;
-      this.state.showDetails = false;
-      return [];
-    }
-    if (data.text === 'c' && (this.state.screen === 'home' || this.state.screen === 'review')) {
-      this.state.configurationWindow = { selected: 'theme' };
-      this.state.showDetails = false;
-      this.state.notice = undefined;
-      return [];
-    }
-    if (matchesKey(data, Key.escape)) {
-      // Esc closes what is open first; it only leaves the screen when nothing is.
-      if (this.state.showDetails) {
-        this.state.showDetails = false;
-        return [];
-      }
-      if (this.state.shownStep !== undefined) {
-        this.closeShownStep();
-        return [];
-      }
-      if (this.state.screen === 'review') {
-        return [{ type: 'show-home', offset: 0, mode: this.state.reviewReturn }];
-      }
-      if (this.state.screen === 'home' && (this.state.homeMode === 'history' || this.state.homeMode === 'comparison')) {
-        const returningFrom = this.state.homeMode;
-        this.state.homeMode = 'launcher';
-        this.state.homeLauncherSelection = returningFrom === 'comparison' ? 'comparison' : 'history';
-        this.state.comparisonInput = undefined;
-        this.state.loading = undefined;
-      }
-      return [];
-    }
-    if (data.text === '!') {
-      this.state.showDetails = !this.state.showDetails;
-      return [];
-    }
+    return [];
+  }
+
+  private handleScreenKey(data: ReviewingInput, now: number): readonly ReviewingModelEffect[] {
     if (
       this.state.screen === 'home' &&
       this.state.homeMode === 'comparison' &&
