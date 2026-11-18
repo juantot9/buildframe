@@ -1,10 +1,18 @@
+import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
+import type { RuntimeCodeIdentity, RuntimeGeneration } from '@buildframe/local-runtime';
+import { startLocalRuntimeServer, type LocalRuntimeServer } from '@buildframe/local-runtime/launcher';
+import { openWorkspaceRuntimeOwner, type WorkspaceRuntimeOwner } from '@buildframe/workspace/runtime';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createPiAdapterExtension } from '../../src/extension.js';
+
+const execFileAsync = promisify(execFile);
 
 interface FakeContext {
   readonly ui: {
@@ -54,7 +62,7 @@ function fakePi(): FakePi {
   return { api, events, commands };
 }
 
-function fakeContext(): {
+function fakeContext(cwd: string = process.cwd()): {
   readonly ctx: FakeContext;
   readonly notifications: { message: string; type?: 'info' | 'warning' | 'error' | undefined }[];
   readonly statuses: (string | undefined)[];
@@ -72,7 +80,7 @@ function fakeContext(): {
     },
     mode: 'tui',
     hasUI: true,
-    cwd: process.cwd(),
+    cwd,
     sessionManager: { getSessionId: () => 'extension-session-fixture', getBranch: () => [] },
     isIdle: () => true,
     abort: () => {},
@@ -150,5 +158,76 @@ describe('BuildFrame Pi extension', () => {
     const ctx = fakeContext();
     await command.handler('', ctx.ctx);
     expect(ctx.notifications).toEqual([{ message: 'BuildFrame: Pi host version unavailable', type: 'error' }]);
+  });
+});
+
+describe('BuildFrame Pi extension against a live runtime', () => {
+  const originalStateHome = process.env.XDG_STATE_HOME;
+  const originalRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
+  let owner: WorkspaceRuntimeOwner | undefined;
+  let server: LocalRuntimeServer | undefined;
+
+  afterEach(async () => {
+    await server?.dispose();
+    server = undefined;
+    await owner?.dispose();
+    owner = undefined;
+    if (originalStateHome === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = originalStateHome;
+    if (originalRuntimeDirectory === undefined) delete process.env.XDG_RUNTIME_DIR;
+    else process.env.XDG_RUNTIME_DIR = originalRuntimeDirectory;
+  });
+
+  it('loses the connection when the attached Pi session ends', async () => {
+    // Keep this root short: macOS os.tmpdir() can push the runtime socket past its 100-byte bound.
+    const root = await fs.realpath(await fs.mkdtemp('/tmp/buildframe-pi-shutdown-'));
+    temporaryDirectories.push(root);
+    const checkout = path.join(root, 'checkout');
+    await fs.mkdir(checkout);
+    await fs.mkdir(path.join(root, 'state'));
+    await fs.mkdir(path.join(root, 'runtime'), { mode: 0o700 });
+    process.env.XDG_STATE_HOME = path.join(root, 'state');
+    process.env.XDG_RUNTIME_DIR = path.join(root, 'runtime');
+    await execFileAsync('git', ['-C', checkout, 'init', '-q']);
+
+    const opened = await openWorkspaceRuntimeOwner({ startPath: checkout });
+    if (opened.status !== 'ready') throw new Error(`Workspace runtime was rejected: ${opened.diagnostic.code}`);
+    owner = opened.owner;
+    server = await startLocalRuntimeServer({
+      workspace: owner.workspace,
+      harnessAdapters: owner.harnessAdapters,
+      runtimeGeneration: `rtg_${randomUUID()}` as RuntimeGeneration,
+      runtimeCodeIdentity: `rtc_${'1'.repeat(64)}` as RuntimeCodeIdentity,
+    });
+    const workspace = owner.workspace;
+    const connectedSessions = async (): Promise<boolean[]> =>
+      (await workspace.read({ kind: 'harness.connection' })).harnesses.map(harness => harness.connected);
+
+    const { api, events, commands } = fakePi();
+    createPiAdapterExtension(api, await compatibleHostEntrypoint());
+    const command = commands.get('buildframe');
+    if (command === undefined) throw new Error('buildframe command missing');
+    const attached = fakeContext(checkout);
+    await command.handler('', attached.ctx);
+    expect(attached.notifications).toEqual([
+      { message: 'BuildFrame Review attached (workspace write).', type: 'info' },
+    ]);
+    expect(await connectedSessions()).toEqual([true]);
+
+    const shutdown = fakeContext(checkout);
+    for (const handler of events.get('session_shutdown') ?? []) {
+      await handler({ type: 'session_shutdown' }, shutdown.ctx);
+    }
+
+    let sessions = await connectedSessions();
+    for (let attempt = 0; attempt < 100 && sessions[0] !== false; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      sessions = await connectedSessions();
+    }
+    expect(sessions).toEqual([false]);
+    expect((await workspace.read({ kind: 'harness.connection' })).harnesses[0]?.availability).toEqual({
+      status: 'blocked',
+      reason: 'disconnected',
+    });
   });
 });

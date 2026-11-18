@@ -34,7 +34,7 @@ await git('add', 'review.txt');
 await git('commit', '-qm', 'basis');
 await writeFile(path.join(checkout, 'review.txt'), 'after\n');
 
-function launch(hostVersion) {
+function launch(hostVersion, sessionId = 'smoke-session') {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [launchEntry], { stdio: ['pipe', 'pipe', 'inherit'] });
     let stdout = '';
@@ -44,7 +44,7 @@ function launch(hostVersion) {
     });
     child.on('error', reject);
     child.on('close', () => resolve(JSON.parse(stdout.trim())));
-    child.stdin.end(JSON.stringify({ protocolVersion: 1, sessionId: 'smoke-session', cwd: checkout, hostVersion }));
+    child.stdin.end(JSON.stringify({ protocolVersion: 1, sessionId, cwd: checkout, hostVersion }));
   });
 }
 
@@ -71,12 +71,23 @@ try {
   const attached = await launch('2.1.319');
   assert.equal(attached.status, 'connected', attached.label);
   assert.match(attached.token, /^[0-9a-f]{64}$/);
-  const post = async (route, body = {}, token = attached.token) =>
-    await fetch(`http://127.0.0.1:${attached.port}${route}`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+  const postTo =
+    helper =>
+    async (route, body = {}, token = helper.token) =>
+      await fetch(`http://127.0.0.1:${helper.port}${route}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+  const post = postTo(attached);
+  const connectedSessions = async () =>
+    (await owner.workspace.read({ kind: 'harness.connection' })).harnesses.map(harness => harness.connected);
+  const waitForNoConnectedSession = async () => {
+    for (let attempt = 0; attempt < 100 && (await connectedSessions()).includes(true); attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  };
+  assert.deepEqual(await connectedSessions(), [true]);
   assert.equal((await post('/next', {}, '0'.repeat(64))).status, 404, 'a wrong token must be refused');
 
   const home = await owner.workspace.read({ kind: 'workspace.home', offset: 0, limit: 64 });
@@ -153,7 +164,18 @@ try {
   assert.equal((await post('/detach')).status, 200);
   await new Promise(resolve => setTimeout(resolve, 300));
   await assert.rejects(post('/next'), 'the helper must exit after detach');
-  console.log('Claude Direct smoke: attach, exact delivery, correlated end, and detach passed');
+  await waitForNoConnectedSession();
+  assert.deepEqual(await connectedSessions(), [false], 'a detached session must lose its connection');
+
+  // Claude Code reports its session ending on exit; the helper must drop the connection and quit.
+  const ending = await launch('2.1.319', 'smoke-session-ending');
+  assert.equal(ending.status, 'connected', ending.label);
+  // The newer session retires the detached one from the Workspace's list.
+  assert.deepEqual(await connectedSessions(), [true]);
+  assert.equal((await postTo(ending)('/facts', { facts: [{ type: 'session-ending' }] })).status, 200);
+  await waitForNoConnectedSession();
+  assert.deepEqual(await connectedSessions(), [false], 'an ended session must lose its connection');
+  console.log('Claude Direct smoke: attach, exact delivery, correlated end, detach, and session end passed');
 } finally {
   await server.dispose();
   await owner.dispose();
