@@ -2,11 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { bootstrapWorkspace } from '@buildframe/workspace';
-import {
-  connectHarnessAdapterRuntime,
-  type HarnessAdapterRuntimeConnected,
-  type HarnessAdapterRuntimeDiagnostic,
-} from '@buildframe/local-runtime/harness-adapter';
+import type { ConnectorStatus } from '@buildframe/local-runtime/harness-adapter';
 
 import { CORRELATION_ENTRY_TYPE, PiReviewedAdapter, type PiNativeHost } from './piAdapter.js';
 import type { PiDirectReviewAuthority } from './capability.js';
@@ -14,46 +10,9 @@ import { guardPiEvents } from './piEvents.js';
 import { assessPiHostVersion, discoverPiHostVersion, piHostCompatibilityLabel } from './piHostCompatibility.js';
 import { bindPiReviewedAdapterEvents } from './piNativeEvents.js';
 
-const RECONNECT_MINIMUM_MS = 250;
-const RECONNECT_MAXIMUM_MS = 5_000;
-
 interface ActiveSessionAttachment {
-  readonly controller: AbortController;
   readonly adapter: PiReviewedAdapter;
   readonly authority: PiDirectReviewAuthority;
-  connection?: HarnessAdapterRuntimeConnected;
-  loop?: Promise<void>;
-}
-
-type AttachOutcome =
-  | { readonly status: 'connected' }
-  | { readonly status: 'replaced' }
-  | { readonly status: 'retrying'; readonly diagnostic: HarnessAdapterRuntimeDiagnostic }
-  | { readonly status: 'refused'; readonly diagnostic: HarnessAdapterRuntimeDiagnostic }
-  | { readonly status: 'cancelled' };
-
-function wait(delayMilliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise(resolve => {
-    const timer = setTimeout(finish, delayMilliseconds);
-    timer.unref();
-    const onAbort = (): void => finish();
-    function finish(): void {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-function retryable(diagnostic: HarnessAdapterRuntimeDiagnostic): boolean {
-  return (
-    diagnostic.code === 'runtime-unavailable' &&
-    (diagnostic.reason === 'not-running' ||
-      diagnostic.reason === 'connection-failed' ||
-      diagnostic.reason === 'timeout')
-  );
 }
 
 function hasRequiredNativeContract(pi: ExtensionAPI, ctx: ExtensionContext): boolean {
@@ -89,90 +48,28 @@ function nativeHost(pi: ExtensionAPI, ctx: ExtensionContext): PiNativeHost {
   };
 }
 
-function diagnosticLabel(diagnostic: HarnessAdapterRuntimeDiagnostic): string {
-  if (diagnostic.code === 'runtime-unavailable') return 'runtime unavailable';
-  if (diagnostic.code === 'harness-adapter-establishment-refused') {
-    return `attachment refused: ${diagnostic.reason}`;
-  }
-  if (diagnostic.code === 'runtime-protocol-incompatible') {
-    return 'runtime protocol incompatible';
-  }
-  if (diagnostic.code === 'workspace-interface-incompatible') {
-    return 'Workspace Interface incompatible';
-  }
-  if (diagnostic.code === 'runtime-workspace-mismatch') {
-    return 'workspace mismatch';
-  }
-  if (diagnostic.code === 'runtime-role-rejected') return 'Adapter role rejected';
-  return 'attachment invalid';
-}
-
-/**
- * Keeps one commanded session attached, retrying while the BuildFrame runtime is
- * unavailable. The first attempt resolves the command's outcome; later
- * attempts only update the footer status.
- */
-async function attachLoop(
-  ctx: ExtensionContext,
-  active: ActiveSessionAttachment,
-  onFirstOutcome: (outcome: AttachOutcome) => void,
-): Promise<void> {
-  let delayMilliseconds = RECONNECT_MINIMUM_MS;
-  let reported = false;
-  const report = (outcome: AttachOutcome): void => {
-    if (reported) return;
-    reported = true;
-    onFirstOutcome(outcome);
-  };
-  while (!active.controller.signal.aborted) {
-    const connected = await connectHarnessAdapterRuntime({
-      workspaceIdentity: active.adapter.attachment.workspaceIdentity,
-      adapter: active.adapter,
-      signal: active.controller.signal,
-    });
-    if (active.controller.signal.aborted) {
-      // A connection that lands after cancellation must never stay live.
-      if (connected.status === 'connected') await connected.dispose();
-      report({ status: 'cancelled' });
+/** Later statuses only update the footer; the first one answers the command. */
+function showStatus(ctx: ExtensionContext, status: ConnectorStatus): void {
+  switch (status.kind) {
+    case 'connected':
+      ctx.ui.setStatus('buildframe', status.text);
       return;
-    }
-    if (connected.status === 'rejected') {
-      ctx.ui.setStatus('buildframe', `BuildFrame: ${diagnosticLabel(connected.diagnostic)}`);
-      if (!retryable(connected.diagnostic)) {
-        report({ status: 'refused', diagnostic: connected.diagnostic });
-        return;
-      }
-      report({ status: 'retrying', diagnostic: connected.diagnostic });
-      await wait(delayMilliseconds, active.controller.signal);
-      delayMilliseconds = Math.min(RECONNECT_MAXIMUM_MS, delayMilliseconds * 2);
-      continue;
-    }
-
-    active.connection = connected;
-    delayMilliseconds = RECONNECT_MINIMUM_MS;
-    ctx.ui.setStatus('buildframe', 'BuildFrame Review attached');
-    report({ status: 'connected' });
-    await active.adapter.runtimeConnected(connected.runtimeGeneration);
-    const reason = await connected.closed;
-    if (active.connection === connected) delete active.connection;
-    if (active.controller.signal.aborted || reason === 'disposed') return;
-    if (reason === 'replaced') {
-      // Another session took the connection; reconnecting would take it back.
-      await active.adapter.runtimeDisconnected(connected.runtimeGeneration);
-      ctx.ui.setStatus('buildframe', 'BuildFrame: disconnected (another session connected)');
+    case 'retrying':
+      ctx.ui.setStatus('buildframe', status.label === undefined ? status.text : `BuildFrame: ${status.label}`);
+      return;
+    case 'refused':
+      ctx.ui.setStatus('buildframe', status.text);
+      return;
+    case 'replaced':
+      ctx.ui.setStatus('buildframe', status.text);
       ctx.ui.notify(
         'BuildFrame: another session connected to this repository, so this one was disconnected. Run /buildframe here to take it back.',
         'warning',
       );
-      report({ status: 'replaced' });
-      active.controller.abort();
       return;
-    }
-    ctx.ui.setStatus('buildframe', 'BuildFrame: runtime disconnected; retrying');
-    await active.adapter.runtimeDisconnected(connected.runtimeGeneration);
-    await wait(delayMilliseconds, active.controller.signal);
+    case 'cancelled':
+      return;
   }
-  report({ status: 'cancelled' });
 }
 
 const BUILDFRAME_USAGE =
@@ -191,10 +88,7 @@ export function createPiAdapterExtension(pi: ExtensionAPI, hostEntrypoint: strin
   const closeActive = async (): Promise<void> => {
     const closing = active;
     active = undefined;
-    if (closing === undefined) return;
-    closing.controller.abort();
-    await closing.connection?.dispose();
-    await closing.loop;
+    await closing?.adapter.session.close();
   };
 
   if (compatibility.status === 'unsupported') {
@@ -247,28 +141,26 @@ export function createPiAdapterExtension(pi: ExtensionAPI, hostEntrypoint: strin
       ctx.ui.notify('BuildFrame: Pi native contract unavailable', 'error');
       return;
     }
-    const next: ActiveSessionAttachment = { controller: new AbortController(), adapter, authority };
+    const next: ActiveSessionAttachment = { adapter, authority };
     active = next;
-    const outcome = await new Promise<AttachOutcome>(resolve => {
-      next.loop = attachLoop(ctx, next, resolve)
-        .catch(() => undefined)
-        .finally(() => {
-          if (active === next) active = undefined;
-        });
+    const outcome = await adapter.session.attach(status => {
+      showStatus(ctx, status);
+      // A refused or replaced session stops for good; a new /buildframe starts over.
+      if ((status.kind === 'refused' || status.kind === 'replaced') && active === next) active = undefined;
     });
-    if (outcome.status === 'connected') {
+    if (outcome.kind === 'connected') {
       ctx.ui.notify(`BuildFrame Review attached (${authorityLabel(authority)}).`, 'info');
       return;
     }
-    if (outcome.status === 'retrying') {
+    if (outcome.kind === 'retrying') {
       ctx.ui.notify(
         `BuildFrame isn’t open for ${identity.canonicalCheckout} yet. This session connects as soon as it opens.`,
         'warning',
       );
       return;
     }
-    if (outcome.status === 'refused') {
-      ctx.ui.notify(`BuildFrame: ${diagnosticLabel(outcome.diagnostic)}`, 'error');
+    if (outcome.kind === 'refused') {
+      ctx.ui.notify(outcome.text, 'error');
     }
   };
 

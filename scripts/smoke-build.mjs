@@ -61,7 +61,12 @@ assert.deepEqual(
 );
 assert.deepEqual(
   Object.keys(localRuntimeHarnessAdapter).sort(),
-  ['HARNESS_ADAPTER_PROTOCOL_VERSION', 'connectHarnessAdapterRuntime'],
+  [
+    'HARNESS_ADAPTER_PROTOCOL_VERSION',
+    'connectHarnessAdapterRuntime',
+    'exactReviewMessageText',
+    'openConnectorSession',
+  ],
   'P14 Adapter-role transport must remain on its reviewed integration subpath',
 );
 assert.deepEqual(Object.keys(piAdapter), ['default'], 'P14 Pi package root must expose only its host-loaded extension');

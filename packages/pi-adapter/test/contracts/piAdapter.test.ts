@@ -209,8 +209,6 @@ function messageDirective(
   attachmentIdentity: HarnessAttachmentIdentity,
 ): DispatchDirectReviewMessageInvocationDirective {
   const capability = PI_REVIEWED_CAPABILITY_MANIFEST.capabilities[0];
-  // A Pi dispatch fixture is a direct-route Capability; the route check also
-  // narrows it out of the reviewed Capability union.
   if (capability === undefined || capability.route !== 'direct') {
     throw new Error('Direct Capability fixture missing');
   }
@@ -432,7 +430,11 @@ describe('reviewed Pi Adapter', () => {
     await adapter.beforeAgentStart(prompt, false);
     host.idle = false;
     await adapter.agentStarted();
-    expect(sink.evidence.map(item => item.kind)).toEqual(['harness.invocation.start-observed']);
+    // Pi reports itself busy once its own turn starts.
+    expect(sink.evidence.map(item => item.kind)).toEqual([
+      'harness.invocation.start-observed',
+      'harness.availability.observed',
+    ]);
   });
 
   it('defaults to workspace write and dispatches with the session tools untouched', async () => {
@@ -595,7 +597,7 @@ describe('reviewed Pi Adapter', () => {
           [field]: `${exactMarker[field]}-mismatch`,
         }),
       );
-      expect(mismatchConnection.sink.evidence.at(-1), field).toMatchObject({
+      expect(mismatchConnection.sink.evidence.at(-2), field).toMatchObject({
         kind: 'harness.invocation.correlation-lost',
         invocationIdentity: mismatchDirective.invocationIdentity,
         reason: 'terminal-evidence-lost',
@@ -618,7 +620,7 @@ describe('reviewed Pi Adapter', () => {
     // Pi 1.2+ reports another extension's triggered run without a prompt.
     await adapter.beforeAgentStart(undefined, false);
 
-    expect(attached.sink.evidence.at(-1)).toMatchObject({
+    expect(attached.sink.evidence.at(-2)).toMatchObject({
       kind: 'harness.invocation.correlation-lost',
       invocationIdentity: request.invocationIdentity,
       reason: 'correlation-lost',

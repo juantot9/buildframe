@@ -27,6 +27,8 @@ import {
   type BootstrapRejectedFrame,
   type HarnessAdapterServerFrame,
 } from './protocol.js';
+import type { ConnectorSession, OpenConnectorSessionOptions } from './connector/contracts.js';
+import { createConnectorSession } from './connector/session.js';
 import {
   RuntimeLocationProblem,
   runtimeLocationForWorkspace,
@@ -518,3 +520,26 @@ export async function connectHarnessAdapterRuntime(
 }
 
 export { HARNESS_ADAPTER_PROTOCOL_VERSION };
+
+/**
+ * The connector kit: one connected harness session, kept connected, whose
+ * host reports native facts while the kit decides correlation and evidence.
+ */
+export function openConnectorSession(options: OpenConnectorSessionOptions): ConnectorSession {
+  return createConnectorSession(options, connectHarnessAdapterRuntime);
+}
+
+export { exactReviewMessageText } from './connector/turnEvidence.js';
+export type {
+  ConnectorDispatchDirective,
+  ConnectorHost,
+  ConnectorHostFact,
+  ConnectorNaming,
+  ConnectorScheduler,
+  ConnectorSession,
+  ConnectorStatus,
+  ConnectorSubmitReceipt,
+  ConnectorTurn,
+  ConnectorTurnRelease,
+  OpenConnectorSessionOptions,
+} from './connector/contracts.js';

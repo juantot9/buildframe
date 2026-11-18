@@ -1,19 +1,20 @@
 import type { WorkspaceIdentity } from '@buildframe/workspace';
-import { sha256, sha256Parts } from '@buildframe/workspace/sha256';
+import { sha256 } from '@buildframe/workspace/sha256';
 import type {
-  CommittedHarnessDirective,
   DispatchDirectReviewInvocationDirective,
-  DispatchDirectReviewMessageInvocationDirective,
   HarnessAttachmentIdentity,
-  HarnessDirectiveObservation,
-  HarnessEvidenceAcknowledgement,
   HarnessEvidenceSink,
   HarnessInvocationIdentity,
-  NormalizedHarnessEvidence,
   ReviewedHarnessAdapter,
-  ReviewedHarnessAttachment,
   ReviewedHarnessConnection,
 } from '@buildframe/workspace/harness-interaction';
+import {
+  openConnectorSession,
+  type ConnectorScheduler,
+  type ConnectorSession,
+  type ConnectorTurn,
+  type ConnectorTurnRelease,
+} from '@buildframe/local-runtime/harness-adapter';
 
 import { createPiReviewedCapabilityManifest, type PiDirectReviewAuthority } from './capability.js';
 
@@ -49,10 +50,7 @@ export interface PiNativeHost {
   abort(): void;
 }
 
-export interface PiAdapterScheduler {
-  set(delayMilliseconds: number, callback: () => void): unknown;
-  clear(handle: unknown): void;
-}
+export type PiAdapterScheduler = ConnectorScheduler;
 
 export interface PiCorrelationMarker {
   readonly schema: 'neoflow.pi-correlation/1';
@@ -74,21 +72,6 @@ export interface CreatePiReviewedAdapterRequest {
   readonly authority?: PiDirectReviewAuthority;
 }
 
-interface ActiveInvocation {
-  readonly directive: DispatchDirectReviewInvocationDirective | DispatchDirectReviewMessageInvocationDirective;
-  readonly correlationIdentity: string;
-  readonly prompt: string;
-  readonly toolsBefore: readonly string[];
-  phase: 'awaiting-preflight' | 'prepared' | 'started';
-  inputObserved: boolean;
-  startEvidenceApplied: boolean;
-  timeoutHandle: unknown;
-}
-
-function exactIdentity(prefix: string, ...parts: readonly string[]): string {
-  return `${prefix}_${sha256Parts(parts)}`;
-}
-
 function sortedUnique(values: readonly string[]): string[] {
   return [...new Set(values)].sort();
 }
@@ -100,17 +83,6 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
     normalizedLeft.length === normalizedRight.length &&
     normalizedLeft.every((value, index) => value === normalizedRight[index])
   );
-}
-
-function defaultScheduler(): PiAdapterScheduler {
-  return {
-    set: (delayMilliseconds, callback) => {
-      const timer = setTimeout(callback, delayMilliseconds);
-      timer.unref();
-      return timer;
-    },
-    clear: handle => clearTimeout(handle as NodeJS.Timeout),
-  };
 }
 
 function userText(content: unknown): string | undefined {
@@ -178,26 +150,12 @@ function markerMatches(value: unknown, expected: PiCorrelationMarker): boolean {
   );
 }
 
+/** The Question-only Review envelope; Review Messages go to Pi exactly as written. */
 export function serializePiDirectReviewPrompt(
-  directive: DispatchDirectReviewInvocationDirective | DispatchDirectReviewMessageInvocationDirective,
+  directive: DispatchDirectReviewInvocationDirective,
   correlationIdentity: string,
   authority: PiDirectReviewAuthority = 'workspace-write',
 ): string {
-  if (directive.kind === 'harness.direct-review-message.dispatch') {
-    const material = directive.disclosure.outgoingMaterial;
-    const bytes = Buffer.from(material.bytesBase64, 'base64');
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    if (
-      bytes.toString('base64') !== material.bytesBase64 ||
-      bytes.byteLength !== material.byteLength ||
-      [...text].length !== material.characterLength ||
-      sha256(bytes) !== material.sha256 ||
-      material.sha256 !== directive.disclosure.sha256
-    ) {
-      throw new TypeError('Invalid exact Review Message material');
-    }
-    return text;
-  }
   const envelope = {
     schema: 'neoflow.pi-direct-question-review/1' as const,
     correlation: {
@@ -230,128 +188,128 @@ export function serializePiDirectReviewPrompt(
   ].join('\n');
 }
 
-function bridgeEvidenceIdentity(
-  runtimeGeneration: string,
-  attachmentIdentity: HarnessAttachmentIdentity,
-  occurrenceIdentity: string,
-  invocationIdentity?: HarnessInvocationIdentity,
-): string {
-  return invocationIdentity === undefined
-    ? `local-runtime:${runtimeGeneration}:${attachmentIdentity}:${occurrenceIdentity}:disconnected`
-    : `local-runtime:${runtimeGeneration}:${attachmentIdentity}:${occurrenceIdentity}:${invocationIdentity}:correlation-lost`;
-}
+const TERMINAL_OUTCOME: Readonly<Record<PiTerminalStopReason, 'ended-normally' | 'failed' | 'interrupted'>> = {
+  stop: 'ended-normally',
+  aborted: 'interrupted',
+  length: 'failed',
+  error: 'failed',
+  toolUse: 'failed',
+};
 
+/**
+ * One explicitly attached Pi session. Pi's events become facts for the
+ * connector kit, which decides correlation. Pi-specific proof stays here: the
+ * Send's own input is recognised before Pi starts it, and the settled run is
+ * matched to the correlation marker written beside it.
+ */
 export class PiReviewedAdapter implements ReviewedHarnessAdapter {
-  readonly manifest: ReviewedHarnessAdapter['manifest'];
-  readonly attachment: ReviewedHarnessAttachment;
+  readonly session: ConnectorSession;
   readonly #native: PiNativeHost;
-  readonly #scheduler: PiAdapterScheduler;
-  readonly #sessionEpoch: string;
   readonly #authority: PiDirectReviewAuthority;
-  readonly #pendingEvidence = new Map<string, NormalizedHarnessEvidence>();
-  #sink: HarnessEvidenceSink | undefined;
-  #active: ActiveInvocation | undefined;
-  #availabilitySequence = 0;
-  #bridgeLossSequence = 0;
-  #flushing = false;
+  #toolsBefore: readonly string[] = [];
+  /** The Send whose own input Pi echoed, and the one whose start Pi prepared. */
+  #inputSeen: string | undefined;
+  #prepared: string | undefined;
 
   constructor(request: CreatePiReviewedAdapterRequest) {
     this.#authority = request.authority ?? 'workspace-write';
-    this.manifest = createPiReviewedCapabilityManifest(request.hostVersion, this.#authority);
     this.#native = request.native;
-    this.#scheduler = request.scheduler ?? defaultScheduler();
-    this.#sessionEpoch = request.sessionEpoch;
-    const attachmentIdentity = exactIdentity(
-      'att',
-      'pi-attachment-v1',
-      request.workspaceIdentity,
-      request.hostVersion,
-      request.sessionIdentity,
-      request.sessionEpoch,
-    ) as HarnessAttachmentIdentity;
-    const attachment: ReviewedHarnessAttachment = {
-      evidenceIdentity: `pi-attachment:${sha256Parts([attachmentIdentity, request.sessionEpoch])}`,
-      attachmentIdentity,
+    const authority = this.#authority;
+    const native = request.native;
+    this.session = openConnectorSession({
+      manifest: createPiReviewedCapabilityManifest(request.hostVersion, authority),
       workspaceIdentity: request.workspaceIdentity,
+      canonicalCheckout: request.canonicalCheckout,
       hostVersion: request.hostVersion,
-      destination: {
-        harnessLabel: this.manifest.adapterDisplayName,
-        sessionLabel: `Pi session ${request.sessionIdentity.slice(0, 12)}`,
-        repositoryLabel: request.canonicalCheckout.split('/').filter(Boolean).at(-1) ?? 'workspace',
-        canonicalCheckout: request.canonicalCheckout,
+      sessionIdentity: request.sessionIdentity,
+      sessionEpoch: request.sessionEpoch,
+      sessionLabel: `Pi session ${request.sessionIdentity.slice(0, 12)}`,
+      naming: {
+        attachmentSeed: 'pi-attachment-v1',
+        attachmentEvidence: 'pi-attachment',
+        namespace: 'pi',
+        turnPrefix: 'pic',
       },
-      availability: request.native.isIdle() ? { status: 'available' } : { status: 'blocked', reason: 'busy' },
-    };
-    this.attachment = Object.freeze(attachment);
-  }
-
-  connect(sink: HarnessEvidenceSink): ReviewedHarnessConnection {
-    this.#sink = sink;
-    return Object.freeze({
-      perform: async (directive: CommittedHarnessDirective) => await this.#perform(directive),
+      maximumTextBytes: MAX_NATIVE_PROMPT_BYTES,
+      ...(request.scheduler === undefined ? {} : { scheduler: request.scheduler }),
+      host: {
+        isIdle: () => native.isIdle(),
+        render: (directive, dispatchId) => serializePiDirectReviewPrompt(directive, dispatchId, authority),
+        prepare: () => this.#gate(),
+        submit: turn => {
+          native.appendCorrelationMarker(this.#marker(turn));
+          native.sendUserMessage(turn.text);
+          return 'taken';
+        },
+        interrupt: () => {
+          try {
+            native.abort();
+          } catch {
+            throw new Error('Pi abort request was unavailable');
+          }
+        },
+        release: (_turn, how) => this.#release(how),
+      },
     });
   }
 
-  ownsInvocation(): boolean {
-    return this.#active !== undefined;
+  get manifest(): ReviewedHarnessAdapter['manifest'] {
+    return this.session.manifest;
   }
 
+  get attachment(): ReviewedHarnessAdapter['attachment'] {
+    return this.session.attachment;
+  }
+
+  connect(sink: HarnessEvidenceSink): ReviewedHarnessConnection {
+    return this.session.connect(sink);
+  }
+
+  ownsInvocation(): boolean {
+    return this.session.turn !== undefined;
+  }
+
+  /** Lets only the Send's own input through while it is in flight; other input waits. */
   onInput(event: {
     readonly text: string;
     readonly source: 'interactive' | 'rpc' | 'extension';
     readonly hasImages: boolean;
   }): { readonly action: 'continue' | 'handled' } {
-    const active = this.#active;
-    if (active === undefined) return { action: 'continue' };
+    const turn = this.session.turn;
+    if (turn === undefined) return { action: 'continue' };
     if (
-      active.phase === 'awaiting-preflight' &&
+      turn.phase !== 'started' &&
+      this.#prepared !== turn.dispatchId &&
       event.source === 'extension' &&
       !event.hasImages &&
-      event.text === active.prompt
+      event.text === turn.text
     ) {
-      active.inputObserved = true;
+      this.#inputSeen = turn.dispatchId;
       return { action: 'continue' };
     }
     return { action: 'handled' };
   }
 
   async beforeAgentStart(prompt: string | undefined, hasImages: boolean): Promise<void> {
-    const active = this.#active;
-    if (active === undefined || active.phase === 'started') return;
+    const turn = this.session.turn;
+    if (turn === undefined || turn.phase === 'started') return;
     if (
-      active.phase === 'awaiting-preflight' &&
-      active.inputObserved &&
+      this.#prepared !== turn.dispatchId &&
+      this.#inputSeen === turn.dispatchId &&
       !hasImages &&
-      prompt === active.prompt &&
+      prompt === turn.text &&
       this.#gateIsExact()
     ) {
-      active.phase = 'prepared';
+      this.#prepared = turn.dispatchId;
       return;
     }
-    await this.#loseCorrelation(active, 'correlation-lost');
+    await this.session.observe({ type: 'turn-started', own: false });
   }
 
   async agentStarted(): Promise<void> {
-    const active = this.#active;
-    if (active === undefined) {
-      await this.#emitAvailability({ status: 'blocked', reason: 'busy' }, 'native-busy');
-      return;
-    }
-    if (active.phase === 'started') return;
-    if (active.phase !== 'prepared') {
-      await this.#loseCorrelation(active, 'correlation-lost');
-      return;
-    }
-    this.#scheduler.clear(active.timeoutHandle);
-    active.phase = 'started';
-    const evidence: NormalizedHarnessEvidence = {
-      kind: 'harness.invocation.start-observed',
-      evidenceIdentity: this.#evidenceIdentity(active, 'start'),
-      attachmentIdentity: this.attachment.attachmentIdentity,
-      invocationIdentity: active.directive.invocationIdentity,
-    };
-    const acknowledgement = await this.#emit(evidence);
-    active.startEvidenceApplied = acknowledgement?.status === 'applied';
+    const turn = this.session.turn;
+    if (turn?.phase === 'started') return;
+    await this.session.observe({ type: 'turn-started', own: turn !== undefined && this.#prepared === turn.dispatchId });
   }
 
   onToolCall(toolName: string): { readonly block: true; readonly reason: string } | undefined {
@@ -359,33 +317,19 @@ export class PiReviewedAdapter implements ReviewedHarnessAdapter {
     // the enforced read-only authority narrows and blocks. Extensions and
     // operating-system effects stay outside both.
     if (this.#authority === 'workspace-write') return undefined;
-    if (this.#active !== undefined && !READ_TOOL_NAMES.includes(toolName as (typeof READ_TOOL_NAMES)[number])) {
-      return {
-        block: true,
-        reason: `BuildFrame discussion-only Review blocked non-read tool ${toolName}`,
-      };
+    if (this.session.turn !== undefined && !READ_TOOL_NAMES.includes(toolName as (typeof READ_TOOL_NAMES)[number])) {
+      return { block: true, reason: `BuildFrame discussion-only Review blocked non-read tool ${toolName}` };
     }
     return undefined;
   }
 
   async agentSettled(entries: readonly PiStoredEntry[]): Promise<void> {
-    const active = this.#active;
-    if (active === undefined) {
-      await this.#emitAvailability({ status: 'available' }, 'native-idle');
+    const turn = this.session.turn;
+    if (turn?.phase !== 'started') {
+      await this.session.observe({ type: 'turn-ended', outcome: 'unknown' });
       return;
     }
-    if (active.phase !== 'started' || !active.startEvidenceApplied) {
-      await this.#loseCorrelation(active, 'terminal-evidence-lost');
-      return;
-    }
-
-    const marker: PiCorrelationMarker = {
-      schema: 'neoflow.pi-correlation/1',
-      attachmentIdentity: this.attachment.attachmentIdentity,
-      invocationIdentity: active.directive.invocationIdentity,
-      correlationIdentity: active.correlationIdentity,
-      disclosureSha256: active.directive.disclosure.sha256,
-    };
+    const marker = this.#marker(turn);
     const markerIndex = entries.findIndex(
       entry =>
         entry.type === 'custom' && entry.customType === CORRELATION_ENTRY_TYPE && markerMatches(entry.data, marker),
@@ -396,217 +340,82 @@ export class PiReviewedAdapter implements ReviewedHarnessAdapter {
     const finalAssistant = assistants.at(-1)?.message;
     if (
       users.length !== 1 ||
-      userText(users[0]?.message?.content) !== active.prompt ||
+      userText(users[0]?.message?.content) !== turn.text ||
       finalAssistant?.stopReason === undefined
     ) {
-      await this.#loseCorrelation(active, 'terminal-evidence-lost');
+      await this.session.observe({ type: 'turn-ended', outcome: 'unknown' });
       return;
     }
-
-    const outcome =
-      finalAssistant.stopReason === 'stop'
-        ? 'ended-normally'
-        : finalAssistant.stopReason === 'aborted'
-          ? 'interrupted'
-          : 'failed';
-    const resultContract = active.directive.capabilitySnapshot.capability.artifactResultContract;
-    const finalText =
-      outcome === 'ended-normally'
-        ? finalizedAssistantText(finalAssistant.content, resultContract.maximumBytes)
-        : undefined;
-    const evidence: NormalizedHarnessEvidence = {
-      kind: 'harness.invocation.terminal-observed',
-      evidenceIdentity: this.#evidenceIdentity(active, 'terminal'),
-      attachmentIdentity: this.attachment.attachmentIdentity,
-      invocationIdentity: active.directive.invocationIdentity,
+    const outcome = TERMINAL_OUTCOME[finalAssistant.stopReason];
+    const contract = turn.directive.capabilitySnapshot.capability.artifactResultContract;
+    const answer =
+      outcome === 'ended-normally' ? finalizedAssistantText(finalAssistant.content, contract.maximumBytes) : undefined;
+    await this.session.observe({
+      type: 'turn-ended',
       outcome,
-      ...(finalText === undefined
-        ? {}
-        : {
-            result: {
-              contractVersion: 1,
-              contractIdentity: resultContract.contractIdentity,
-              source: resultContract.source,
-              ...finalText,
-            },
-          }),
-      ...(outcome === 'ended-normally'
-        ? {}
-        : {
-            reason: outcome === 'interrupted' ? ('interruption-observed' as const) : ('harness-failed' as const),
-          }),
-    };
-    await this.#emit(evidence);
-    this.#finishActive(active);
-    await this.#emitAvailability({ status: 'available' }, 'native-idle');
+      ...(answer === undefined ? {} : { answer: answer.body }),
+    });
   }
 
   async runtimeConnected(runtimeGeneration: string): Promise<void> {
-    await this.#flushEvidence();
-    await this.#emit({
-      kind: 'harness.availability.observed',
-      evidenceIdentity: this.#availabilityIdentity(`runtime-connected:${runtimeGeneration}`),
-      attachmentIdentity: this.attachment.attachmentIdentity,
-      availability: this.#native.isIdle() ? { status: 'available' } : { status: 'blocked', reason: 'busy' },
-    });
+    await this.session.runtimeConnected(runtimeGeneration);
   }
 
   async runtimeDisconnected(runtimeGeneration: string): Promise<void> {
-    this.#bridgeLossSequence += 1;
-    const occurrenceIdentity = `client-${this.#bridgeLossSequence.toString(36)}`;
-    await this.#emit({
-      kind: 'harness.availability.observed',
-      evidenceIdentity: bridgeEvidenceIdentity(
-        runtimeGeneration,
-        this.attachment.attachmentIdentity,
-        occurrenceIdentity,
-      ),
-      attachmentIdentity: this.attachment.attachmentIdentity,
-      availability: { status: 'blocked', reason: 'disconnected' },
-    });
-    const active = this.#active;
-    if (active === undefined) return;
-    if (!this.#native.isIdle()) {
-      try {
-        this.#native.abort();
-      } catch {
-        // Correlation is already being conservatively resolved as unknown.
-      }
-    }
-    await this.#emit({
-      kind: 'harness.invocation.correlation-lost',
-      evidenceIdentity: bridgeEvidenceIdentity(
-        runtimeGeneration,
-        this.attachment.attachmentIdentity,
-        occurrenceIdentity,
-        active.directive.invocationIdentity,
-      ),
-      attachmentIdentity: this.attachment.attachmentIdentity,
-      invocationIdentity: active.directive.invocationIdentity,
-      reason: 'attachment-lost',
-    });
-    this.#finishActive(active);
+    await this.session.runtimeDisconnected(runtimeGeneration);
   }
 
   async sessionEnding(): Promise<void> {
-    await this.#emitAvailability({ status: 'blocked', reason: 'host-unavailable' }, 'session-ending');
-    const active = this.#active;
-    if (active === undefined) return;
-    await this.#emit({
-      kind: 'harness.invocation.correlation-lost',
-      evidenceIdentity: this.#evidenceIdentity(active, 'session-replaced'),
-      attachmentIdentity: this.attachment.attachmentIdentity,
-      invocationIdentity: active.directive.invocationIdentity,
-      reason: 'attachment-lost',
-    });
-    this.#finishActive(active);
+    await this.session.observe({ type: 'session-ending' });
   }
 
-  async #perform(directive: CommittedHarnessDirective): Promise<HarnessDirectiveObservation> {
-    if (directive.attachmentIdentity !== this.attachment.attachmentIdentity) {
-      throw new TypeError('Pi Adapter received another Attachment occurrence');
-    }
-    if (directive.kind === 'harness.direct-invocation.interrupt') {
-      const active = this.#active;
-      if (active === undefined || active.directive.invocationIdentity !== directive.invocationIdentity) {
-        throw new Error('Pi Adapter lost the Invocation interruption correlation');
-      }
-      try {
-        this.#native.abort();
-      } catch {
-        throw new Error('Pi abort request was unavailable');
-      }
-      return { status: 'accepted-for-observation' };
-    }
-
-    const rejection = (reason: 'harness-rejected' | 'host-unavailable' | 'capability-withdrawn') => ({
-      status: 'proven-not-dispatched' as const,
-      evidenceIdentity: `pi-dispatch:${sha256Parts([
-        this.attachment.attachmentIdentity,
-        directive.invocationIdentity,
-        reason,
-      ])}`,
-      reason,
-    });
-    if (!this.manifest.reviewedHostVersions.includes(this.attachment.hostVersion)) {
-      return rejection('capability-withdrawn');
-    }
-    if (this.#active !== undefined) return rejection('harness-rejected');
-
-    let toolsBefore: string[] = [];
-    try {
-      if (!this.#native.isIdle()) return rejection('harness-rejected');
-      if (this.#authority === 'discussion-only') {
-        toolsBefore = [...this.#native.getActiveTools()];
-        const selected = this.#selectReadTools();
-        if (selected === undefined) return rejection('capability-withdrawn');
-        this.#native.setActiveTools(selected);
-        if (!sameStrings(this.#native.getActiveTools(), selected)) {
-          this.#native.setActiveTools(toolsBefore);
-          return rejection('capability-withdrawn');
-        }
-      }
-    } catch {
-      try {
-        this.#native.setActiveTools(toolsBefore);
-      } catch {
-        // A failed gate is a refusal; no native request is sent.
-      }
-      return rejection('capability-withdrawn');
-    }
-
-    const correlationIdentity = `pic_${sha256Parts([
-      this.attachment.attachmentIdentity,
-      directive.invocationIdentity,
-      this.#sessionEpoch,
-    ])}`;
-    let prompt: string;
-    try {
-      prompt = serializePiDirectReviewPrompt(directive, correlationIdentity, this.#authority);
-    } catch {
-      this.#restoreTools(toolsBefore);
-      return rejection('capability-withdrawn');
-    }
-    if (Buffer.byteLength(prompt, 'utf8') > MAX_NATIVE_PROMPT_BYTES) {
-      this.#restoreTools(toolsBefore);
-      return rejection('capability-withdrawn');
-    }
-    const marker: PiCorrelationMarker = {
+  #marker(turn: ConnectorTurn): PiCorrelationMarker {
+    return {
       schema: 'neoflow.pi-correlation/1',
       attachmentIdentity: this.attachment.attachmentIdentity,
-      invocationIdentity: directive.invocationIdentity,
-      correlationIdentity,
-      disclosureSha256: directive.disclosure.sha256,
+      invocationIdentity: turn.invocationIdentity,
+      correlationIdentity: turn.dispatchId,
+      disclosureSha256: turn.directive.disclosure.sha256,
     };
-    let active!: ActiveInvocation;
+  }
+
+  /** Arms the exact built-in read tools for a discussion-only Send; refuses rather than widen. */
+  #gate(): boolean {
+    this.#inputSeen = undefined;
+    this.#prepared = undefined;
+    if (this.#authority === 'workspace-write') return true;
+    let before: string[] = [];
     try {
-      this.#native.appendCorrelationMarker(marker);
-      active = {
-        directive,
-        correlationIdentity,
-        prompt,
-        toolsBefore,
-        phase: 'awaiting-preflight',
-        inputObserved: false,
-        startEvidenceApplied: false,
-        timeoutHandle: undefined,
-      };
-      active.timeoutHandle = this.#scheduler.set(directive.capabilitySnapshot.capability.noStartTimeoutMs, () => {
-        // A scheduler callback has no Promise observer. Contain every
-        // unexpected rejection at creation rather than leaking it into Pi.
-        void this.#noStartTimeout(active).catch(() => undefined);
-      });
-      this.#active = active;
-      this.#native.sendUserMessage(prompt);
-    } catch {
-      if (this.#active === active) this.#active = undefined;
-      if (active?.timeoutHandle !== undefined) {
-        this.#scheduler.clear(active.timeoutHandle);
+      before = [...this.#native.getActiveTools()];
+      const selected = this.#selectReadTools();
+      if (selected === undefined) return false;
+      this.#native.setActiveTools(selected);
+      if (!sameStrings(this.#native.getActiveTools(), selected)) {
+        this.#native.setActiveTools(before);
+        return false;
       }
-      this.#restoreTools(toolsBefore);
-      return rejection('harness-rejected');
+    } catch {
+      this.#restoreTools(before);
+      return false;
     }
-    return { status: 'accepted-for-observation' };
+    this.#toolsBefore = before;
+    return true;
+  }
+
+  #release(how: ConnectorTurnRelease): void {
+    if (how === 'lost') {
+      // A run whose correlation is lost must not keep going with narrowed tools.
+      try {
+        if (!this.#native.isIdle()) this.#native.abort();
+      } catch {
+        try {
+          this.#native.abort();
+        } catch {
+          // The normalized outcome remains unresolved.
+        }
+      }
+    }
+    this.#restoreTools(this.#toolsBefore);
   }
 
   #selectReadTools(): readonly string[] | undefined {
@@ -629,189 +438,12 @@ export class PiReviewedAdapter implements ReviewedHarnessAdapter {
     return selected !== undefined && sameStrings(this.#native.getActiveTools(), selected);
   }
 
-  async #noStartTimeout(expected: ActiveInvocation): Promise<void> {
-    if (this.#active !== expected || expected.phase === 'started') return;
-    let hostIsIdle: boolean;
-    try {
-      hostIsIdle = this.#native.isIdle();
-    } catch {
-      await this.#containNoStartHostFailure(expected);
-      return;
-    }
-    if (hostIsIdle) {
-      await this.#emit({
-        kind: 'harness.invocation.rejected',
-        evidenceIdentity: this.#evidenceIdentity(expected, 'no-start'),
-        attachmentIdentity: this.attachment.attachmentIdentity,
-        invocationIdentity: expected.directive.invocationIdentity,
-        reason: 'harness-rejected',
-      });
-      this.#finishActive(expected);
-      return;
-    }
-    await this.#loseCorrelation(expected, 'correlation-lost');
-  }
-
-  async #containNoStartHostFailure(active: ActiveInvocation): Promise<void> {
-    if (this.#active !== active) return;
-    try {
-      // Host state is unknowable. Abort best-effort so a possibly running
-      // constrained request cannot continue after its tools are restored.
-      this.#native.abort();
-    } catch {
-      // Correlation loss remains truthful even when native interruption fails.
-    }
-    try {
-      await this.#emit({
-        kind: 'harness.invocation.correlation-lost',
-        evidenceIdentity: this.#evidenceIdentity(active, 'correlation-lost'),
-        attachmentIdentity: this.attachment.attachmentIdentity,
-        invocationIdentity: active.directive.invocationIdentity,
-        reason: 'correlation-lost',
-      });
-    } finally {
-      this.#finishActive(active);
-    }
-  }
-
-  async #loseCorrelation(
-    active: ActiveInvocation,
-    reason: 'correlation-lost' | 'terminal-evidence-lost',
-  ): Promise<void> {
-    if (this.#active !== active) return;
-    if (!this.#native.isIdle()) {
-      try {
-        this.#native.abort();
-      } catch {
-        // The normalized outcome remains unresolved.
-      }
-    }
-    await this.#emit({
-      kind: 'harness.invocation.correlation-lost',
-      evidenceIdentity: this.#evidenceIdentity(active, reason),
-      attachmentIdentity: this.attachment.attachmentIdentity,
-      invocationIdentity: active.directive.invocationIdentity,
-      reason,
-    });
-    this.#finishActive(active);
-  }
-
-  #finishActive(active: ActiveInvocation): void {
-    if (this.#active !== active) return;
-    this.#scheduler.clear(active.timeoutHandle);
-    this.#active = undefined;
-    this.#restoreTools(active.toolsBefore);
-  }
-
   #restoreTools(tools: readonly string[]): void {
     if (this.#authority === 'workspace-write') return;
     try {
       this.#native.setActiveTools(tools);
     } catch {
       // Leaving fewer tools active is safer than widening after an uncertain host failure.
-    }
-  }
-
-  #evidenceIdentity(active: ActiveInvocation, phase: string): string {
-    return `pi-evidence:${sha256Parts([
-      this.attachment.attachmentIdentity,
-      active.directive.invocationIdentity,
-      active.correlationIdentity,
-      phase,
-    ])}`;
-  }
-
-  async #emitAvailability(availability: ReviewedHarnessAttachment['availability'], phase: string): Promise<void> {
-    await this.#emit({
-      kind: 'harness.availability.observed',
-      evidenceIdentity: this.#availabilityIdentity(phase),
-      attachmentIdentity: this.attachment.attachmentIdentity,
-      availability,
-    });
-  }
-
-  #availabilityIdentity(phase: string): string {
-    this.#availabilitySequence += 1;
-    return `pi-availability:${sha256Parts([
-      this.attachment.attachmentIdentity,
-      this.#sessionEpoch,
-      phase,
-      this.#availabilitySequence.toString(36),
-    ])}`;
-  }
-
-  async #emit(evidence: NormalizedHarnessEvidence): Promise<HarnessEvidenceAcknowledgement | undefined> {
-    const sink = this.#sink;
-    if (sink === undefined) {
-      this.#queueEvidence(evidence);
-      return undefined;
-    }
-    let acknowledgement: HarnessEvidenceAcknowledgement | undefined;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        acknowledgement = await sink.accept(evidence);
-      } catch {
-        this.#queueEvidence(evidence);
-        return undefined;
-      }
-      if (acknowledgement.status !== 'refused' || acknowledgement.reason !== 'state-version-changed') {
-        break;
-      }
-    }
-    if (
-      acknowledgement?.status === 'refused' &&
-      (acknowledgement.reason === 'state-version-changed' || acknowledgement.reason === 'state-unavailable')
-    ) {
-      this.#queueEvidence(evidence);
-    } else if (acknowledgement?.status === 'applied') {
-      this.#pendingEvidence.delete(evidence.evidenceIdentity);
-    }
-    return acknowledgement;
-  }
-
-  #queueEvidence(evidence: NormalizedHarnessEvidence): void {
-    if (evidence.kind === 'harness.availability.observed') {
-      for (const [identity, pending] of this.#pendingEvidence) {
-        if (pending.kind === 'harness.availability.observed') {
-          this.#pendingEvidence.delete(identity);
-        }
-      }
-    }
-    if (this.#pendingEvidence.size >= 128) {
-      const removable = [...this.#pendingEvidence].find(
-        ([, pending]) => pending.kind === 'harness.availability.observed',
-      );
-      if (removable !== undefined) this.#pendingEvidence.delete(removable[0]);
-      else if (evidence.kind === 'harness.availability.observed') return;
-    }
-    this.#pendingEvidence.set(evidence.evidenceIdentity, evidence);
-  }
-
-  async #flushEvidence(): Promise<void> {
-    if (this.#flushing || this.#sink === undefined) return;
-    this.#flushing = true;
-    try {
-      for (const evidence of [...this.#pendingEvidence.values()]) {
-        if (this.#sink === undefined) return;
-        let acknowledgement: HarnessEvidenceAcknowledgement;
-        try {
-          acknowledgement = await this.#sink.accept(evidence);
-        } catch {
-          return;
-        }
-        if (acknowledgement.status === 'applied') {
-          this.#pendingEvidence.delete(evidence.evidenceIdentity);
-        } else if (
-          acknowledgement.reason !== 'state-version-changed' &&
-          acknowledgement.reason !== 'state-unavailable'
-        ) {
-          this.#pendingEvidence.delete(evidence.evidenceIdentity);
-        } else {
-          return;
-        }
-      }
-    } finally {
-      this.#flushing = false;
     }
   }
 }

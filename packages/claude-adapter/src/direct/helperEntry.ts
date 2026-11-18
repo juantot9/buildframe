@@ -3,56 +3,16 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import process from 'node:process';
 
 import { bootstrapWorkspace } from '@buildframe/workspace';
-import {
-  connectHarnessAdapterRuntime,
-  type HarnessAdapterRuntimeConnected,
-  type HarnessAdapterRuntimeDiagnostic,
-} from '@buildframe/local-runtime/harness-adapter';
+import type { ConnectorStatus } from '@buildframe/local-runtime/harness-adapter';
 
 import { isReviewedClaudeDirectHostVersion } from './capability.js';
 import { ClaudeDirectAdapter } from './claudeDirectAdapter.js';
 import { ClaudeHelperServer } from './helperServer.js';
 import { parseClaudeModAttachRequest, type ClaudeModAttachOutcome } from './modProtocol.js';
 
-const RECONNECT_MINIMUM_MS = 250;
-const RECONNECT_MAXIMUM_MS = 5_000;
 /** The launcher answers the Mod's one-shot `$.process.run` well inside its timeout. */
 const FIRST_OUTCOME_TIMEOUT_MS = 12_000;
 const MAX_ATTACH_REQUEST_BYTES = 16 * 1024;
-
-function wait(delayMilliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise(resolve => {
-    const timer = setTimeout(finish, delayMilliseconds);
-    timer.unref();
-    const onAbort = (): void => finish();
-    function finish(): void {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-function retryable(diagnostic: HarnessAdapterRuntimeDiagnostic): boolean {
-  return (
-    diagnostic.code === 'runtime-unavailable' &&
-    (diagnostic.reason === 'not-running' ||
-      diagnostic.reason === 'connection-failed' ||
-      diagnostic.reason === 'timeout')
-  );
-}
-
-function diagnosticLabel(diagnostic: HarnessAdapterRuntimeDiagnostic): string {
-  if (diagnostic.code === 'runtime-unavailable') return 'runtime unavailable';
-  if (diagnostic.code === 'harness-adapter-establishment-refused') return `attachment refused: ${diagnostic.reason}`;
-  if (diagnostic.code === 'runtime-protocol-incompatible') return 'runtime protocol incompatible';
-  if (diagnostic.code === 'workspace-interface-incompatible') return 'Workspace Interface incompatible';
-  if (diagnostic.code === 'runtime-workspace-mismatch') return 'workspace mismatch';
-  if (diagnostic.code === 'runtime-role-rejected') return 'Adapter role rejected';
-  return 'attachment invalid';
-}
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -135,8 +95,6 @@ export async function runClaudeDirectHelperDaemon(): Promise<void> {
   }
   const identity = await bootstrapped.workspace.read({ kind: 'workspace.identity' });
 
-  const controller = new AbortController();
-  let connection: HarnessAdapterRuntimeConnected | undefined;
   let adapter!: ClaudeDirectAdapter;
   let shuttingDown: Promise<void> | undefined;
   const token = randomBytes(32).toString('hex');
@@ -150,9 +108,8 @@ export async function runClaudeDirectHelperDaemon(): Promise<void> {
   });
   const shutdown = (): Promise<void> => {
     shuttingDown ??= (async () => {
-      controller.abort();
       await adapter.detach().catch(() => undefined);
-      await connection?.dispose();
+      await adapter.session.close();
       await server.close();
       process.exit(0);
     })();
@@ -169,61 +126,30 @@ export async function runClaudeDirectHelperDaemon(): Promise<void> {
     channel: server,
   });
 
-  let reported = false;
-  const status = (label: string): void => {
-    server.deliver({ type: 'status', label });
-  };
-  let delayMilliseconds = RECONNECT_MINIMUM_MS;
-  while (!controller.signal.aborted) {
-    const connected = await connectHarnessAdapterRuntime({
-      workspaceIdentity: identity.workspaceIdentity,
-      adapter,
-      signal: controller.signal,
-    });
-    if (controller.signal.aborted) {
-      if (connected.status === 'connected') await connected.dispose();
-      return;
-    }
-    if (connected.status === 'rejected') {
-      const label = diagnosticLabel(connected.diagnostic);
-      if (!retryable(connected.diagnostic)) {
-        if (!reported) report({ status: 'refused', label });
-        else server.deliver({ type: 'detach', label });
-        await shutdown();
+  // The first outcome answers the launcher; later ones reach the Mod.
+  await adapter.session.attach((status: ConnectorStatus) => {
+    switch (status.kind) {
+      case 'connected':
+        if (status.first) report({ status: 'connected', port, token, label: status.text });
+        else server.deliver({ type: 'status', label: status.text });
+        return;
+      case 'retrying': {
+        const label = status.label === undefined ? 'runtime disconnected; retrying' : `${status.label}; retrying`;
+        if (status.first) report({ status: 'retrying', port, token, label });
+        else server.deliver({ type: 'status', label });
         return;
       }
-      if (!reported) {
-        reported = true;
-        report({ status: 'retrying', port, token, label: `${label}; retrying` });
-      } else {
-        status(`${label}; retrying`);
-      }
-      await wait(delayMilliseconds, controller.signal);
-      delayMilliseconds = Math.min(RECONNECT_MAXIMUM_MS, delayMilliseconds * 2);
-      continue;
+      case 'refused':
+        if (status.first) report({ status: 'refused', label: status.label });
+        else server.deliver({ type: 'detach', label: status.label });
+        void shutdown();
+        return;
+      case 'replaced':
+        server.deliver({ type: 'detach', label: 'another session connected to this repository' });
+        void shutdown();
+        return;
+      case 'cancelled':
+        return;
     }
-
-    connection = connected;
-    delayMilliseconds = RECONNECT_MINIMUM_MS;
-    if (!reported) {
-      reported = true;
-      report({ status: 'connected', port, token, label: 'BuildFrame Review attached' });
-    } else {
-      status('BuildFrame Review attached');
-    }
-    await adapter.runtimeConnected(connected.runtimeGeneration);
-    const reason = await connected.closed;
-    if (connection === connected) connection = undefined;
-    if (controller.signal.aborted || reason === 'disposed') return;
-    if (reason === 'replaced') {
-      // Another session took the connection; reconnecting would take it back.
-      await adapter.runtimeDisconnected(connected.runtimeGeneration);
-      server.deliver({ type: 'detach', label: 'another session connected to this repository' });
-      await shutdown();
-      return;
-    }
-    status('runtime disconnected; retrying');
-    await adapter.runtimeDisconnected(connected.runtimeGeneration);
-    await wait(delayMilliseconds, controller.signal);
-  }
+  });
 }

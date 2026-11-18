@@ -76,3 +76,80 @@ correlation marker; Claude's Mod-fact state machine
 - Each connector's remaining source is only host glue (line counts recorded).
 - `pnpm verify`, `pnpm risk:pi`, `pnpm smoke:build` pass; one live
   connect-and-send round trip per host.
+
+## Resolution (2026-11-18, before code)
+
+Designed three ways (smallest interface, most flexible, common case trivial);
+the owner took the recommended hybrid and one shared correlation rule.
+
+**Interface** — `openConnectorSession(options)` on
+`@buildframe/local-runtime/harness-adapter` returns a `ConnectorSession` that
+*is* the `ReviewedHarnessAdapter` and also keeps itself connected:
+
+- `attach(onStatus?)` resolves with the first status and keeps reconnecting
+  (250 ms doubling to 5 s; only `runtime-unavailable` not-running /
+  connection-failed / timeout retry; `replaced` never reconnects);
+  `close()` stops it. Statuses carry ready-made text.
+- `observe(fact)` takes host facts, applied in call order: `turn-started`
+  (`own`, `turnId?`), `turn-ended` (`outcome` incl. `unknown`, `turnId?`,
+  `answer?`), `input` (`joins: 'this-turn' | 'next-turn'`),
+  `own-input-dropped`, `own-input-unknown`, `session-ending`.
+- The host port: `submit(turn, signal)` returns a receipt (`taken`,
+  `harness-rejected`, `host-unavailable`, `unknown`), sync or async, so a
+  two-step handshake (Claude's Mod) stays in host glue; `interrupt(turn)`;
+  optional `isIdle`, `render` (non-message directive kinds), `prepare`
+  (Pi's read-only tool gate) and `release(turn, how)` (Pi: restore tools,
+  stop a run whose correlation was lost).
+- `naming` keeps today's identity strings byte-identical.
+
+**One correlation rule.** An outcome is attributable only when our own turn
+started, no foreign input landed or queued before that start, no other turn
+started, foreign input never joined our turn, and turn IDs agree when both are
+known. Otherwise: `correlation-lost` before our start, `terminal-evidence-lost`
+after it (also when our start evidence was never applied). A no-start timeout
+is a proven rejection only when `isIdle()` says idle; otherwise unknown.
+Availability is derived (ended / busy / available) and reported on change.
+
+**Accepted behaviour changes** (owner, 2026-11-18; none can turn an unknown
+into a success): Pi reports `busy` while its own turn runs; Pi reports
+`correlation-lost` (not `terminal-evidence-lost`) for an end before its start;
+a second start inside a Pi turn loses correlation; Pi refuses dispatch after
+session end; Pi refuses invalid material before touching the tool gate; Pi's
+tools are restored before its loss evidence is sent; Claude reports
+`terminal-evidence-lost` when its start evidence was never applied; Pi's
+no-start timer is armed once the send is taken, not before it.
+
+**Layout.** Kit files under `packages/local-runtime/src/connector/`, each
+under the file size budget; `harnessAdapter.ts` re-exports.
+
+## Implementation evidence (2026-11-18)
+
+- Kit: `packages/local-runtime/src/connector/` — `session.ts` (turn tracker,
+  correlation rule, `perform`), `attachLoop.ts`, `evidenceOutbox.ts`,
+  `turnEvidence.ts` (identities, exact message decoding, Response bound),
+  `contracts.ts`. `harnessAdapter.ts` adds `openConnectorSession` and
+  `exactReviewMessageText`; the kit receives the single-attempt connect
+  function, so there is no import cycle and the loop is testable on its own.
+- Built during implementation: `submit` answers synchronously (`taken`,
+  `pending`, or a refusal) and a pending answer arrives as an ordered fact
+  (`own-input-taken` / `-refused` / `-unknown`). A promise receipt would have
+  let the next native fact overtake the confirmation. Session end releases a
+  turn as `ended`, so Pi does not interrupt a closing session. Pi's no-start
+  timer stays armed before its send, as before.
+- Connectors (lines): Pi `piAdapter.ts` 819 → 446, `extension.ts` 329 → 221;
+  Claude `claudeDirectAdapter.ts` 596 → ~165, `helperEntry.ts` 229 → 155.
+  Public classes and methods are unchanged.
+- Tests: Claude's 27 pass unchanged. Pi's pass with three assertions moved for
+  the accepted availability change (an availability item now follows the
+  start or loss evidence). New kit tests at its interface:
+  `connectorCorrelation.test.ts` (the rule as a fact-sequence table,
+  Response bound, single flight, no-start, pending receipts, runtime and
+  session loss, two sessions in one process) and `connectorAttach.test.ts`
+  (retry, refusal, reconnect vs replaced, evidence held and delivered once,
+  acknowledgement retry).
+- Checks (macOS, Node 26.5.1): `pnpm verify` passed (74 files / 556 tests,
+  lint at the 36-warning baseline, firewall, typecheck, build, build and
+  Claude Direct smokes); `risk:pi` (Pi 1.5.0 live probe), `risk:runtime`,
+  `risk:dogfood` passed.
+- Not run: CI; a live human connect-and-send round trip in Pi and in Claude
+  Code (owner).
