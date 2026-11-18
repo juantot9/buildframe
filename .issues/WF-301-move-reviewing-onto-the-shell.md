@@ -42,3 +42,8 @@ Every frame, key and setting unchanged at every commit, as in WF-297.
 
 Alongside Planning (WF-300): Home rows from two screens are its natural
 proof.
+
+## Branch
+
+Reviewing work, so it lands on `main` (2026-11-18 split). Planning picks it up
+when `planning` next merges `main`.

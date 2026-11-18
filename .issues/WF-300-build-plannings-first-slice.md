@@ -36,3 +36,8 @@ comments and versions, approve a frozen version, and Implement.
 
 Manual Handoff, native plan-mode capture, comparing code against the plan,
 downloadable modules.
+
+## Branch
+
+Built on the `planning` branch, which merges `main` in often; nothing from it
+lands on `main` until Planning ships.
