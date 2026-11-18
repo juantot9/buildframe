@@ -24,9 +24,6 @@ export const MAX_PREPARATIONS = 512;
 
 export const MAX_ARMED_OCCURRENCES = 16;
 
-/** Exact claim-to-submit evidence window; expiry is unresolved, never rejection. */
-export const USER_PULL_START_OBSERVATION_WINDOW_MS = 30_000;
-
 export const MAX_EVIDENCE_PER_INVOCATION = 1_024;
 
 export const MAX_INTERRUPTION_INTENTS = 128;
@@ -37,9 +34,6 @@ export const MAX_PROJECTED_INTERACTIONS = 128;
 export const MAX_PROJECTED_EVIDENCE_IDENTITIES = 16;
 
 export const MAX_REVIEW_QUESTION_BYTES: number = 64 * 1024;
-
-/** Frozen Claude bridge transport bound for one rendered User Pull payload. */
-export const MAX_USER_PULL_PAYLOAD_BYTES: number = 64 * 1024;
 
 /** Body plus one 256 KiB saved-source line remains below both reviewed transport bounds. */
 export const MAX_REVIEW_MESSAGE_BYTES: number = 256 * 1024;
@@ -63,9 +57,6 @@ export const MAX_REVIEW_BATCHES = 128;
 
 /** Settled Handoffs one Review's history keeps; each Handoff spends one of its Review Batches. */
 export const MAX_REVIEW_HANDOFFS: number = MAX_REVIEW_BATCHES;
-
-/** Canonical checkout locators, matching the bridge's own path bound. */
-export const MAX_CANONICAL_PATH_BYTES: number = 4 * 1024;
 
 export const MAX_ANCHOR_LINE_BYTES: number = 256 * 1024;
 

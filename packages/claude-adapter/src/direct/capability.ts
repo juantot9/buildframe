@@ -1,9 +1,9 @@
 import type { ReviewedCapabilityManifest } from '@buildframe/workspace/harness-interaction';
 
 /**
- * Direct delivery runs through a native Claude Code Mod, so it is admitted on
- * its own policy, independent of the User Pull hook bridge: any stable Claude
- * Code 2.x.x from the oldest live-verified build upward. A version outside
+ * Direct delivery runs through a native Claude Code Mod and is admitted on its
+ * own policy: any stable Claude Code 2.x.x from the oldest live-verified
+ * build upward. A version outside
  * that range refuses attachment rather than guessing.
  */
 export const CLAUDE_DIRECT_HOST_COMPATIBILITY_RANGE = '>=2.1.310 <3.0.0';

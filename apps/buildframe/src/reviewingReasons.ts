@@ -16,10 +16,8 @@ export function reasonSentence(reason: string, agent: string = 'The agent'): str
     case 'attachment-selection-required':
       return `More than one agent session is connected. Close the extra one, then send again.`;
     case 'attachment-identity-conflict':
-    case 'identity-lost':
       return `${agent}’s session changed while sending. Send again.`;
     case 'unsupported-host-version':
-    case 'capability-incompatible':
       return `This version of ${lowerAgent} isn’t supported by BuildFrame yet. Use a supported version, then send again.`;
     case 'capability-unsupported':
       return `${agent} can’t take Messages from BuildFrame in this session. Restart it with the BuildFrame plugin, then send again.`;
@@ -33,10 +31,6 @@ export function reasonSentence(reason: string, agent: string = 'The agent'): str
       return `An earlier Message’s outcome is unknown. Check it in ${lowerAgent}, then confirm to send.`;
     case 'checkout-mismatch':
       return `${agent} is running in a different folder. Start it in this repository, then send again.`;
-    case 'bridge-protocol-mismatch':
-      return `The BuildFrame plugin in ${lowerAgent} doesn’t match this BuildFrame version. Update the plugin, then send again.`;
-    case 'route-deadline-passed':
-      return `${agent} didn’t pick up the Message in time. Send again.`;
 
     // Interrupting
     case 'invocation-not-found':
@@ -71,8 +65,6 @@ export function reasonSentence(reason: string, agent: string = 'The agent'): str
     case 'message-line-too-large':
     case 'anchor-line-too-large':
       return 'That line is too long to quote. Pick another line.';
-    case 'user-pull-payload-too-large':
-      return 'This Message is too large to send. Shorten it, then send again.';
 
     // The Review and its source
     case 'state-version-mismatch':

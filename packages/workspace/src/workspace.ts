@@ -333,7 +333,6 @@ class OpenWorkspace implements Workspace {
               : {
                   afterCommitBeforeDirective: internal.afterHarnessCommitBeforeDirective,
                 }),
-            ...(internal.harnessNow === undefined ? {} : { now: internal.harnessNow }),
           });
     if (this.#harnessInteraction !== undefined) {
       harnessInteractionOwners.set(this, this.#harnessInteraction);
@@ -471,8 +470,6 @@ export interface RuntimeWorkspaceAssembly {
 /** Internal deterministic fault seam; absent from the package Interface. */
 export interface RuntimeWorkspaceInternalOptions {
   readonly afterHarnessCommitBeforeDirective?: () => void | Promise<void>;
-  /** Private deterministic clock seam for User Pull expiry scenarios. */
-  readonly harnessNow?: () => Date;
   /** Private override for disposable discovery of old-product receipt paths. */
   readonly legacyReviewStateDirectory?: string;
   /** Private deterministic bound seam for legacy import contract tests. */

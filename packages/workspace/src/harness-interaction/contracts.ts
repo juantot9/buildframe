@@ -226,14 +226,6 @@ export interface FrozenDirectReviewCapabilitySnapshot {
   readonly availabilityAtCommit: 'available';
 }
 
-export interface FrozenUserPullReviewCapabilitySnapshot {
-  readonly snapshotIdentity: HarnessCapabilitySnapshotIdentity;
-  readonly compatibilityIdentity: HarnessCompatibilityIdentity;
-  readonly manifestSha256: string;
-  readonly capability: UserPullReviewCapabilityContract;
-  readonly availabilityAtCommit: 'available';
-}
-
 export type UserPullPreparationStatus = 'prepared' | 'claimed' | 'withdrawn' | 'expired';
 
 export type UserPullPreparationTerminalReason =
@@ -329,26 +321,6 @@ export interface NormalizedReviewResponseResult {
   readonly sha256: string;
 }
 
-export type UserPullInvocationUnresolvedReason =
-  | 'start-observation-window-expired'
-  | 'start-evidence-lost'
-  | 'session-ended-without-terminal'
-  | 'host-disconnected'
-  | 'attachment-identity-changed'
-  | 'background-activity-remains'
-  | 'background-activity-unverified'
-  | 'stop-continuation-active';
-
-export interface UserPullEvidenceCorrelation {
-  readonly preparationIdentity: UserPullPreparationIdentity;
-  readonly occurrenceIdentity: UserPullArmOccurrenceIdentity;
-  readonly sessionId: string;
-  readonly promptId: string;
-  readonly canonicalGitRoot: string;
-  readonly canonicalGitDir: string;
-  readonly bridgeProtocolVersion: 1;
-}
-
 export type NormalizedHarnessEvidence =
   | {
       readonly kind: 'harness.availability.observed';
@@ -384,48 +356,7 @@ export type NormalizedHarnessEvidence =
       readonly attachmentIdentity: HarnessAttachmentIdentity;
       readonly invocationIdentity: HarnessInvocationIdentity;
       readonly reason: 'attachment-lost' | 'correlation-lost' | 'terminal-evidence-lost';
-    }
-  | ({
-      readonly kind: 'harness.user-pull.start-observed';
-      readonly evidenceIdentity: string;
-      readonly attachmentIdentity: HarnessAttachmentIdentity;
-      readonly invocationIdentity: HarnessInvocationIdentity;
-    } & UserPullEvidenceCorrelation)
-  | ({
-      readonly kind: 'harness.user-pull.terminal-observed';
-      readonly evidenceIdentity: string;
-      readonly attachmentIdentity: HarnessAttachmentIdentity;
-      readonly invocationIdentity: HarnessInvocationIdentity;
-      readonly terminalEvent: 'normal-stop' | 'stop-failure';
-      readonly outcome: 'ended-normally' | 'failed';
-      readonly backgroundTaskCount?: number;
-      readonly sessionCronCount?: number;
-      readonly stopHookActive?: boolean;
-      readonly errorType?: string;
-      readonly failureType?: string;
-    } & UserPullEvidenceCorrelation)
-  | ({
-      readonly kind: 'harness.user-pull.correlation-lost';
-      readonly evidenceIdentity: string;
-      readonly attachmentIdentity: HarnessAttachmentIdentity;
-      readonly invocationIdentity: HarnessInvocationIdentity;
-      readonly reason: UserPullInvocationUnresolvedReason;
-      readonly trigger:
-        | 'start-observation-window'
-        | 'normal-stop-before-start'
-        | 'stop-failure-before-start'
-        | 'session-end'
-        | 'normal-stop'
-        | 'reconciliation';
-      readonly backgroundTaskCount?: number;
-      readonly sessionCronCount?: number;
-      readonly stopHookActive?: boolean;
-      readonly errorType?: string;
-      readonly failureType?: string;
-      readonly sessionReason?: string;
-      readonly observedCanonicalGitRoot?: string;
-      readonly observedCanonicalGitDir?: string;
-    } & UserPullEvidenceCorrelation);
+    };
 
 export type HarnessEvidenceRefusalReason =
   | 'invalid-evidence'
@@ -553,99 +484,6 @@ export interface RequestHarnessInterruptionCommand extends HarnessInteractionCom
   readonly invocationIdentity: HarnessInvocationIdentity;
 }
 
-/**
- * Establishes one Claude User Pull attachment from native hook facts. The
- * bridge carries the reviewed manifest and the observed host version; the four
- * identity parts are the exact facts every later arm and claim revalidates.
- */
-export interface AttachUserPullCommand extends HarnessInteractionCommandBase {
-  readonly kind: 'harness.user-pull.attach';
-  readonly sessionId: string;
-  readonly canonicalGitRoot: string;
-  readonly canonicalGitDir: string;
-  readonly hostVersion: string;
-  readonly manifest: ReviewedCapabilityManifest;
-}
-
-export interface PrepareUserPullCommand extends HarnessInteractionCommandBase {
-  readonly kind: 'harness.user-pull.prepare';
-  readonly reviewIdentity: ReviewIdentity;
-  readonly reviewBatchIdentity: ReviewBatchIdentity;
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-  readonly inspectionIdentity: string;
-  /** An exact disclosed route deadline; elapsed time alone otherwise never expires a Preparation. */
-  readonly disclosedDeadline?: string;
-}
-
-export interface ArmUserPullCommand extends HarnessInteractionCommandBase {
-  readonly kind: 'harness.user-pull.arm';
-  readonly bridgeProtocolVersion: number;
-  readonly sessionId: string;
-  readonly promptId: string;
-  readonly canonicalGitRoot: string;
-  readonly canonicalGitDir: string;
-}
-
-export interface ClaimUserPullCommand extends HarnessInteractionCommandBase {
-  readonly kind: 'harness.user-pull.claim';
-  readonly bridgeProtocolVersion: number;
-  readonly canonicalGitRoot: string;
-  readonly canonicalGitDir: string;
-}
-
-export interface WithdrawUserPullCommand extends HarnessInteractionCommandBase {
-  readonly kind: 'harness.user-pull.withdraw';
-  readonly preparationIdentity: UserPullPreparationIdentity;
-  readonly reason: 'explicit-withdrawal' | 'workflow-cancellation';
-}
-
-export type UserPullObservation =
-  | {
-      readonly kind: 'prompt-submitted';
-      readonly sessionId: string;
-      readonly promptId: string;
-      readonly canonicalGitRoot: string;
-      readonly canonicalGitDir: string;
-    }
-  | {
-      readonly kind: 'normal-stop';
-      readonly sessionId: string;
-      readonly promptId: string;
-      readonly canonicalGitRoot: string;
-      readonly canonicalGitDir: string;
-      readonly backgroundTaskCount?: number;
-      readonly sessionCronCount?: number;
-      readonly stopHookActive: boolean;
-    }
-  | {
-      readonly kind: 'stop-failure';
-      readonly sessionId: string;
-      readonly promptId: string;
-      readonly canonicalGitRoot: string;
-      readonly canonicalGitDir: string;
-      readonly errorType?: string;
-      readonly failureType?: string;
-    }
-  | {
-      readonly kind: 'session-ended';
-      readonly sessionId: string;
-      readonly canonicalGitRoot: string;
-      readonly canonicalGitDir: string;
-      readonly sessionReason?: string;
-    }
-  | {
-      readonly kind: 'correlation-lost';
-      readonly attachmentIdentity: HarnessAttachmentIdentity;
-      readonly invocationIdentity: HarnessInvocationIdentity;
-      readonly reason: 'host-disconnected' | 'attachment-identity-changed';
-    };
-
-export interface ObserveUserPullCommand extends HarnessInteractionCommandBase {
-  readonly kind: 'harness.user-pull.observe';
-  readonly bridgeProtocolVersion: number;
-  readonly observation: UserPullObservation;
-}
-
 export interface HarnessReportedContextUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -653,59 +491,11 @@ export interface HarnessReportedContextUsage {
   readonly cacheReadInputTokens: number;
 }
 
-export type UserPullObservabilityObservation =
-  | {
-      readonly kind: 'context-budget';
-      readonly evidenceIdentity: string;
-      readonly compatibilityIdentity: HarnessCompatibilityIdentity;
-      readonly source: 'claude-status-line';
-      readonly modelId: string;
-      readonly modelDisplayName: string;
-      readonly contextWindowSize: number;
-      readonly totalInputTokens: number;
-      readonly totalOutputTokens: number;
-      readonly currentUsage: HarnessReportedContextUsage | null;
-      readonly usedPercentage?: number;
-      readonly remainingPercentage?: number;
-      readonly promptId?: string;
-    }
-  | {
-      readonly kind: 'compaction';
-      readonly evidenceIdentity: string;
-      readonly phase: 'started' | 'completed';
-      readonly trigger: 'manual' | 'auto';
-    }
-  | {
-      readonly kind: 'availability-blocked';
-      readonly evidenceIdentity: string;
-      readonly reason: 'session-ended';
-    };
-
-/**
- * Records optional, non-authoritative awareness for one exact User Pull
- * Attachment. This command can never transition a Preparation or Invocation.
- */
-export interface RecordUserPullObservabilityCommand extends HarnessInteractionCommandBase {
-  readonly kind: 'harness.user-pull.observability.record';
-  readonly bridgeProtocolVersion: number;
-  readonly sessionId: string;
-  readonly canonicalGitRoot: string;
-  readonly canonicalGitDir: string;
-  readonly observation: UserPullObservabilityObservation;
-}
-
 export type HarnessInteractionCommand =
   | CommitReviewMessageCommand
   | AskPiReviewQuestionCommand
   | CommitDirectReviewHandoffCommand
-  | RequestHarnessInterruptionCommand
-  | AttachUserPullCommand
-  | PrepareUserPullCommand
-  | ArmUserPullCommand
-  | ClaimUserPullCommand
-  | WithdrawUserPullCommand
-  | ObserveUserPullCommand
-  | RecordUserPullObservabilityCommand;
+  | RequestHarnessInterruptionCommand;
 
 interface HarnessCommandAcceptedBase {
   readonly status: 'accepted';
@@ -764,6 +554,11 @@ export interface HarnessInterruptionRequested extends HarnessCommandAcceptedBase
   readonly route: 'direct-request';
 }
 
+/*
+ * Results of the retired User Pull route (removed 2026-11-12). No command
+ * produces them now; State written before 0.1.0 can still hold them, and
+ * `harness.command-result` returns them as recorded.
+ */
 export interface UserPullAttached extends HarnessCommandAcceptedBase {
   readonly kind: 'harness.user-pull.attached';
   readonly attachmentIdentity: HarnessAttachmentIdentity;
@@ -807,50 +602,10 @@ export interface UserPullClaimCommitted extends UserPullClaimResultBase {
   readonly payloadByteLength: number;
 }
 
-/** Returned only by the process that won the claim commit. It is never persisted or replayed. */
-export interface UserPullClaimed extends UserPullClaimResultBase {
-  readonly kind: 'harness.user-pull.claimed';
-  readonly payload: string;
-  readonly payloadSha256: string;
-  readonly payloadByteLength: number;
-}
-
-export interface UserPullClaimDuplicate extends HarnessCommandAcceptedBase {
-  readonly kind: 'harness.user-pull.claim-duplicate';
-  readonly reviewIdentity: ReviewIdentity;
-  readonly reviewBatchIdentity: ReviewBatchIdentity;
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-  readonly handoffIdentity: HarnessHandoffIdentity;
-  readonly preparationIdentity: UserPullPreparationIdentity;
-  readonly invocationIdentity: HarnessInvocationIdentity;
-}
-
 export interface UserPullWithdrawn extends HarnessCommandAcceptedBase {
   readonly kind: 'harness.user-pull.withdrawn';
   readonly preparationIdentity: UserPullPreparationIdentity;
   readonly reason: 'explicit-withdrawal' | 'workflow-cancellation';
-}
-
-export interface UserPullObserved extends HarnessCommandAcceptedBase {
-  readonly kind: 'harness.user-pull.observed';
-  readonly observationKind: UserPullObservation['kind'];
-  readonly disposition: 'started' | 'ended-normally' | 'failed' | 'unresolved';
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-  readonly invocationIdentity: HarnessInvocationIdentity;
-  readonly evidenceIdentity: string;
-}
-
-export interface UserPullObservationIgnored extends HarnessCommandAcceptedBase {
-  readonly kind: 'harness.user-pull.observation-ignored';
-  readonly observationKind: UserPullObservation['kind'];
-  readonly reason: 'no-correlated-invocation';
-}
-
-export interface UserPullObservabilityRecorded extends HarnessCommandAcceptedBase {
-  readonly kind: 'harness.user-pull.observability-recorded';
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-  readonly observationKind: UserPullObservabilityObservation['kind'];
-  readonly evidenceIdentity: string;
 }
 
 export type HarnessInteractionCommandAccepted =
@@ -862,7 +617,6 @@ export type HarnessInteractionCommandAccepted =
   | UserPullPrepared
   | UserPullArmed
   | UserPullClaimCommitted
-  | UserPullClaimDuplicate
   | UserPullWithdrawn;
 
 export type HarnessCommandRejectionReason =
@@ -885,21 +639,6 @@ export type HarnessCommandRejectionReason =
   | 'review-not-current'
   | 'batch-not-found'
   | 'batch-already-handed-off'
-  | 'preparation-already-open'
-  | 'preparation-not-found'
-  | 'preparation-not-open'
-  | 'preparation-expired'
-  | 'identity-lost'
-  | 'capability-incompatible'
-  | 'route-deadline-passed'
-  | 'no-armed-occurrence'
-  | 'ambiguous-armed-occurrence'
-  | 'armed-occurrence-limit-reached'
-  | 'occurrence-identity-conflict'
-  | 'observation-conflict'
-  | 'bridge-protocol-mismatch'
-  | 'checkout-mismatch'
-  | 'user-pull-payload-too-large'
   | 'snapshot-stale'
   | 'snapshot-unverified'
   | 'snapshot-context-disclosure-unavailable'
@@ -933,13 +672,7 @@ export interface HarnessInteractionCommandRejected {
   readonly blockerIdentities?: readonly string[];
 }
 
-export type HarnessInteractionCommandResult =
-  | HarnessInteractionCommandAccepted
-  | UserPullClaimed
-  | UserPullObserved
-  | UserPullObservationIgnored
-  | UserPullObservabilityRecorded
-  | HarnessInteractionCommandRejected;
+export type HarnessInteractionCommandResult = HarnessInteractionCommandAccepted | HarnessInteractionCommandRejected;
 
 export interface InspectDefaultReviewMessageViewRequest {
   readonly kind: 'harness.review-message.inspect-default';
@@ -981,18 +714,6 @@ export interface InspectDefaultDirectReviewHandoffViewRequest {
   readonly reviewBatchIdentity: ReviewBatchIdentity;
 }
 
-export interface InspectUserPullReviewHandoffViewRequest {
-  readonly kind: 'harness.user-pull.review-handoff.inspect';
-  readonly reviewIdentity: ReviewIdentity;
-  readonly reviewBatchIdentity: ReviewBatchIdentity;
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-}
-
-export interface UserPullPreparationViewRequest {
-  readonly kind: 'harness.user-pull.preparation';
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-}
-
 export interface ReviewHarnessInteractionViewRequest {
   readonly kind: 'harness.review-interaction';
   readonly reviewIdentity: ReviewIdentity;
@@ -1015,8 +736,6 @@ export type HarnessInteractionViewRequest =
   | InspectDefaultReviewQuestionAskViewRequest
   | InspectDirectReviewHandoffViewRequest
   | InspectDefaultDirectReviewHandoffViewRequest
-  | InspectUserPullReviewHandoffViewRequest
-  | UserPullPreparationViewRequest
   | ReviewHarnessInteractionViewRequest
   | HarnessCommandResultViewRequest
   | HarnessConnectionViewRequest;
@@ -1144,67 +863,6 @@ export type DefaultDirectReviewHandoffInspectionView =
   | DefaultDirectReviewHandoffAvailableView
   | DefaultDirectReviewHandoffUnavailableView;
 
-export interface UserPullReviewCapabilityView {
-  readonly route: 'user-pull';
-  readonly authority: DirectReviewAuthority;
-  readonly effectConstraint: UserPullReviewCapabilityContract['effectConstraint'];
-  readonly evidenceProfile: UserPullReviewCapabilityContract['evidenceProfile'];
-  readonly artifactResultContract?: NonNullable<UserPullReviewCapabilityContract['artifactResultContract']>;
-  readonly knownLimitations: readonly string[];
-}
-
-export interface UserPullReviewHandoffAvailableView {
-  readonly kind: 'harness.user-pull.review-handoff.inspection';
-  readonly status: 'available';
-  readonly stateVersion: number;
-  readonly inspectionIdentity: string;
-  readonly reviewIdentity: ReviewIdentity;
-  readonly reviewSnapshotIdentity: ReviewSnapshotIdentity;
-  readonly reviewBatchIdentity: ReviewBatchIdentity;
-  readonly destination: HarnessDestinationView;
-  readonly capability: UserPullReviewCapabilityView;
-  readonly disclosure: ReviewHandoffDisclosureSummary;
-}
-
-export interface UserPullReviewHandoffUnavailableView {
-  readonly kind: 'harness.user-pull.review-handoff.inspection';
-  readonly status: 'unavailable';
-  readonly stateVersion: number;
-  readonly reviewIdentity: ReviewIdentity;
-  readonly reviewBatchIdentity: ReviewBatchIdentity;
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-  readonly reason: HarnessCommandRejectionReason;
-  readonly blockerIdentities?: readonly string[];
-}
-
-export type UserPullReviewHandoffInspectionView =
-  | UserPullReviewHandoffAvailableView
-  | UserPullReviewHandoffUnavailableView;
-
-export type UserPullPreparationView =
-  | {
-      readonly kind: 'harness.user-pull.preparation';
-      readonly status: 'not-found';
-      readonly stateVersion: number;
-      readonly attachmentIdentity: HarnessAttachmentIdentity;
-    }
-  | {
-      readonly kind: 'harness.user-pull.preparation';
-      readonly status: UserPullPreparationStatus;
-      readonly stateVersion: number;
-      readonly attachmentIdentity: HarnessAttachmentIdentity;
-      readonly preparationIdentity: UserPullPreparationIdentity;
-      readonly handoffIdentity: HarnessHandoffIdentity;
-      readonly reviewIdentity: ReviewIdentity;
-      readonly reviewBatchIdentity: ReviewBatchIdentity;
-      readonly disclosure: ReviewHandoffDisclosureSummary;
-      readonly disclosedDeadline?: string;
-      readonly liveArmCount: number;
-      readonly invocationIdentity?: HarnessInvocationIdentity;
-      readonly startObservationDeadline?: string;
-      readonly terminalReason?: UserPullPreparationTerminalReason;
-    };
-
 export type HarnessInvocationStatus =
   | 'awaiting-start'
   | 'active'
@@ -1223,87 +881,6 @@ export interface HarnessHandoffView {
   readonly commitmentReceiptIdentity: HarnessCommitmentReceiptIdentity;
   readonly capabilitySnapshotIdentity: HarnessCapabilitySnapshotIdentity;
   readonly disclosure: ReviewHandoffDisclosureSummary;
-}
-
-export interface UserPullContextBudgetAvailableView {
-  readonly status: 'available';
-  readonly source: 'claude-status-line';
-  readonly evidenceIdentity: string;
-  readonly modelId: string;
-  readonly modelDisplayName: string;
-  readonly contextWindowSize: number;
-  readonly totalInputTokens: number;
-  readonly totalOutputTokens: number;
-  readonly currentUsage: HarnessReportedContextUsage;
-  readonly usedPercentage?: number;
-  readonly remainingPercentage?: number;
-  readonly promptId?: string;
-}
-
-export interface UserPullContextBudgetUnknownView {
-  readonly status: 'unknown';
-  readonly source: 'claude-status-line';
-  readonly reason:
-    | 'awaiting-response'
-    | 'model-changed'
-    | 'host-report-inconsistent'
-    | 'compacted'
-    | 'session-ended'
-    | 'attachment-stale';
-  readonly evidenceIdentity: string;
-  readonly modelId?: string;
-  readonly modelDisplayName?: string;
-  readonly contextWindowSize?: number;
-  readonly promptId?: string;
-}
-
-export interface UserPullContextBudgetUnavailableView {
-  readonly status: 'unavailable';
-  readonly reason: 'status-line-bridge-not-verified';
-}
-
-export type UserPullContextBudgetView =
-  | UserPullContextBudgetAvailableView
-  | UserPullContextBudgetUnknownView
-  | UserPullContextBudgetUnavailableView;
-
-export interface UserPullCompactionView {
-  readonly phase: 'started' | 'completed';
-  readonly trigger: 'manual' | 'auto';
-  readonly evidenceIdentity: string;
-}
-
-export type UserPullAvailabilityView =
-  | {
-      readonly state: 'unavailable';
-      readonly reason: 'attachment-not-observed' | 'attachment-not-selected' | 'attachment-lost';
-    }
-  | {
-      readonly state: 'blocked-by-runtime';
-      readonly reason: 'session-ended' | 'busy' | 'disconnected' | 'host-unavailable';
-    }
-  | {
-      readonly state: 'revalidated';
-      readonly reason: 'exact-identity-and-contract';
-    }
-  | {
-      readonly state: 'stale';
-      readonly reason: 'freshness-unverified' | 'runtime-revalidation-required';
-    };
-
-export interface UserPullAttachmentView {
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-  readonly destination: HarnessDestinationView;
-  readonly availability: UserPullAvailabilityView;
-  readonly contextBudget: UserPullContextBudgetView;
-  readonly compaction?: UserPullCompactionView;
-}
-
-export interface ReviewUserPullInteractionView {
-  readonly action: '/neoflow:review';
-  readonly availability: UserPullAvailabilityView;
-  readonly attachment?: UserPullAttachmentView;
-  readonly preparations: readonly Exclude<UserPullPreparationView, { readonly status: 'not-found' }>[];
 }
 
 export interface HarnessInvocationView {
@@ -1331,7 +908,6 @@ export interface ReviewHarnessInteractionView {
   readonly nextOffset: number | null;
   readonly handoffs: readonly HarnessHandoffView[];
   readonly invocations: readonly HarnessInvocationView[];
-  readonly userPull: ReviewUserPullInteractionView;
 }
 
 export interface HarnessCommandResultView {
@@ -1367,8 +943,6 @@ export type HarnessInteractionView =
   | DefaultReviewQuestionAskInspectionView
   | DirectReviewHandoffInspectionView
   | DefaultDirectReviewHandoffInspectionView
-  | UserPullReviewHandoffInspectionView
-  | UserPullPreparationView
   | ReviewHarnessInteractionView
   | HarnessCommandResultView
   | HarnessConnectionView;
@@ -1382,17 +956,13 @@ export type HarnessInteractionViewFor<Request extends HarnessInteractionViewRequ
         ? DirectReviewHandoffInspectionView
         : Request extends InspectDefaultDirectReviewHandoffViewRequest
           ? DefaultDirectReviewHandoffInspectionView
-          : Request extends InspectUserPullReviewHandoffViewRequest
-            ? UserPullReviewHandoffInspectionView
-            : Request extends UserPullPreparationViewRequest
-              ? UserPullPreparationView
-              : Request extends ReviewHarnessInteractionViewRequest
-                ? ReviewHarnessInteractionView
-                : Request extends HarnessCommandResultViewRequest
-                  ? HarnessCommandResultView
-                  : Request extends HarnessConnectionViewRequest
-                    ? HarnessConnectionView
-                    : never;
+          : Request extends ReviewHarnessInteractionViewRequest
+            ? ReviewHarnessInteractionView
+            : Request extends HarnessCommandResultViewRequest
+              ? HarnessCommandResultView
+              : Request extends HarnessConnectionViewRequest
+                ? HarnessConnectionView
+                : never;
 
 export interface ReviewHarnessInteractionViewScope {
   readonly kind: 'harness.review-interaction';

@@ -1,0 +1,25 @@
+{
+  "fixtureFormat": 2,
+  "storeFormatVersion": 2,
+  "producedBy": "BuildFrame at f7e4ac7, before WF-290 removed the User Pull write paths",
+  "workspaceIdentity": "wsp_a941be51-31c7-4fab-8618-f3ac54fae6b9",
+  "currentGeneration": "generation-0001-aaa0d15c-74f6-4f67-8fec-88231d509992.sqlite",
+  "generationSha256": "16388fec5dd98c3a32c9c710aafcc4a8784cb1bcfbc1000f0a8b9b2b43ab987b",
+  "stateVersion": 16,
+  "reviewIdentity": "rev_87cdf0bc758cdf462c0dc588271dc5718b91afab98a2bd1ec607ec86b2214b43",
+  "attachmentIdentity": "att_bff5f52d44a7bd398b4a74dd50dc0379a46a13aee63c709505751fdf9fc01290",
+  "preparations": [
+    "hpp_5eb214e4d5b1730909f82eca839285efa045d883ea9a7c63b1f583c9d4555f70",
+    "hpp_6e9d586f37d67f1b4d474c37a133c81aafafec9688a0bdd1e22ca9a59a605a95"
+  ],
+  "invocations": {
+    "settled": {
+      "invocationIdentity": "hin_3aa7f25f3e7e11bca1076293df82e06355b39d588e5918515650f6b06e0bcdee",
+      "status": "ended-normally"
+    },
+    "inFlight": {
+      "invocationIdentity": "hin_98380bd0432a898e69dfaad6296f1a8d63c8cb03cabf1ce8fdb2a14e7d08b858",
+      "status": "awaiting-start"
+    }
+  }
+}

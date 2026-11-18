@@ -105,11 +105,6 @@ function bundle(source: ReviewSource, reviewIdentity = REVIEW, stateVersion = 1)
       nextOffset: null,
       handoffs: [],
       invocations: [],
-      userPull: {
-        action: '/neoflow:review',
-        availability: { state: 'unavailable', reason: 'attachment-not-observed' },
-        preparations: [],
-      },
     },
   };
 }

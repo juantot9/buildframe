@@ -378,6 +378,7 @@ _Avoid_: Prompt template, transport envelope, generic context bag, attachment li
 
 **Handoff Route**:
 The correlated initiation pattern for a Harness Capability: Direct when BuildFrame initiates immediately or from its durable Direct Delivery queue, User Pull when BuildFrame prepares and the user invokes a correlated harness action, or Native Gate when the harness offers a proposal and waits for a durable BuildFrame decision.
+User Pull is retired (2026-11-12; WF-290): no command prepares, claims or observes it. State written before 0.1.0 may still hold its records; they stay readable, are not projected, and a runtime start resolves any of its Invocations still awaiting start or active as unresolved.
 _Avoid_: Transport name, uncorrelated instruction
 
 **Native Dispatch Provenance**:
@@ -388,17 +389,13 @@ _Avoid_: Hook correlation as authority, peer message means consent, transport ac
 The durable ordered authorization for one exact committed Direct Handoff to be dispatched to its bound Attachment. A queued Direct Delivery is not Harness activity; Workspace creates its Invocation only when it claims that Delivery for single-flight dispatch, and it never silently retargets or replays it. A route that cannot establish required Native Dispatch Provenance cannot exercise this authorization merely because it can deliver matching bytes.
 _Avoid_: Queued Invocation, Adapter-owned queue, pending prompt, automatic retry
 
-**User Pull Preparation**:
+**User Pull Preparation** (retired route):
 A durable, one-use authorization for one exact Attachment Identity to retrieve one exact Workflow Handoff through a User Pull route. It remains open until atomically claimed, withdrawn, or semantically expired; it is not an Invocation or evidence of Harness activity.
 _Avoid_: Queued Invocation, Sent Handoff, active Harness turn
 
-**User Pull Claim**:
+**User Pull Claim** (retired route):
 The atomic Durable Commit by which one exact harness command occurrence consumes an open User Pull Preparation and creates an Invocation awaiting correlated start. It proves BuildFrame accepted the claim, not that the payload arrived or Harness execution began.
 _Avoid_: Harness start, payload receipt, latest prepared Handoff
-
-**Start Observation Window**:
-The bounded interval after a User Pull Claim during which BuildFrame can retain the route’s correlated start callback. Its expiry proves only that start evidence was lost and makes the Invocation unresolved; it is neither a no-start timeout nor proof that the Harness did not begin.
-_Avoid_: Start timeout, dispatch timeout, rejection deadline
 
 **Harness Offer**:
 An immutable, deadline-bound proposal occurrence initiated by an Attached Harness through a Native Gate. It preserves the exact native occurrence, Attachment and Workspace evidence, and captured proposal before Workflow association; it is not an Invocation, and matching content or destination evidence establishes neither ownership nor consent.

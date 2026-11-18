@@ -654,7 +654,6 @@ class StressWorkspace implements Workspace {
     readonly messageProjectionCharacters: number | undefined = undefined,
     readonly messageResponseProjectionCharacters: number | undefined = undefined,
     readonly messageResponseRepeats = 60,
-    readonly userPullFixture = false,
   ) {}
 
   async execute(command: WorkspaceCommand): Promise<WorkspaceCommandResult> {
@@ -1176,62 +1175,6 @@ class StressWorkspace implements Workspace {
         nextOffset: null,
         handoffs: [],
         invocations: [],
-        userPull: this.userPullFixture
-          ? {
-              action: '/neoflow:review',
-              availability: { state: 'revalidated', reason: 'exact-identity-and-contract' },
-              attachment: {
-                attachmentIdentity: `att_${'8'.repeat(64)}` as never,
-                destination: {
-                  attachmentIdentity: `att_${'8'.repeat(64)}` as never,
-                  harnessLabel: 'Claude Code',
-                  sessionLabel: 'session-1',
-                  repositoryLabel: 'stress',
-                  canonicalCheckout: '/workspace',
-                },
-                availability: { state: 'revalidated', reason: 'exact-identity-and-contract' },
-                contextBudget: {
-                  status: 'available',
-                  source: 'claude-status-line',
-                  evidenceIdentity: 'claude-status-line:test',
-                  modelId: 'claude-opus-4-1',
-                  modelDisplayName: 'Opus 4.1',
-                  contextWindowSize: 200_000,
-                  totalInputTokens: 150,
-                  totalOutputTokens: 10,
-                  currentUsage: {
-                    inputTokens: 100,
-                    outputTokens: 10,
-                    cacheCreationInputTokens: 20,
-                    cacheReadInputTokens: 30,
-                  },
-                },
-              },
-              preparations: [
-                {
-                  kind: 'harness.user-pull.preparation',
-                  status: 'prepared',
-                  stateVersion: 7,
-                  preparationIdentity: `hpp_${'9'.repeat(64)}` as never,
-                  reviewIdentity: this.review,
-                  reviewBatchIdentity: `rbt_${'7'.repeat(64)}` as never,
-                  handoffIdentity: `hho_${'6'.repeat(64)}` as never,
-                  attachmentIdentity: `att_${'8'.repeat(64)}` as never,
-                  disclosure: {
-                    fileCount: 1,
-                    questionCount: 1,
-                    byteLength: 128,
-                    sha256: 'a'.repeat(64),
-                  },
-                  liveArmCount: 0,
-                },
-              ],
-            }
-          : {
-              action: '/neoflow:review',
-              availability: { state: 'unavailable', reason: 'attachment-not-observed' },
-              preparations: [],
-            },
       };
     }
     if (request.kind === 'harness.review-question.inspect-default') {
@@ -5823,21 +5766,6 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     }
     expect(longTerminal.setup.captureCharFrame()).toContain('visibleTail1');
     expect(longTerminal.setup.captureCharFrame()).toContain('2-2/2');
-  });
-
-  it('renders the exact Claude User Pull action, lifecycle, availability, and last-response budget evidence', async () => {
-    const workspace = new StressWorkspace(12, 80, 0, 80, undefined, undefined, 60, true);
-    const terminal = await ScriptedTerminal.create(132, 32);
-    const application = createReviewingApplicationForTest({ workspace, renderer: terminal.renderer });
-    applications.add(application);
-    await application.start();
-    await waitForOutput(terminal, '/neoflow:review');
-
-    const frame = terminal.setup.captureCharFrame();
-    expect(frame).toContain('Claude Code · /neoflow:review · Ready to pull');
-    expect(frame).toContain('Connected · last response used 150/200000 input tokens, 10 output (Opus 4.1)');
-    expect(frame).not.toContain('Delivered');
-    expect(frame).not.toContain('Completed');
   });
 
   it('keeps bounded Wide/Balanced/Linear rendering, wrapping, no-color, and ASCII safety', async () => {

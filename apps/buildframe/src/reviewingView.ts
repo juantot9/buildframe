@@ -1217,10 +1217,10 @@ function questionFileLabel(state: ReviewingApplicationState, item: ReviewProject
   );
 }
 
-function invocationLifecycleLabel(status: string, userPull: boolean): string {
+function invocationLifecycleLabel(status: string): string {
   switch (status) {
     case 'awaiting-start':
-      return userPull ? 'Claimed—waiting to start' : 'Waiting to start';
+      return 'Waiting to start';
     case 'active':
       return 'Active';
     case 'rejected':
@@ -1294,17 +1294,11 @@ function questionStateLabel(state: ReviewingApplicationState, item: ReviewProjec
     candidate => candidate.reviewBatchIdentity === item.reviewBatchIdentity,
   );
   if (handoff === undefined) return 'Not sent to the agent';
-  const preparation = state.review.harnessInteraction.userPull.preparations.find(
-    candidate => candidate.handoffIdentity === handoff.handoffIdentity,
-  );
-  if (preparation?.status === 'prepared') return 'Ready to pull';
-  if (preparation?.status === 'withdrawn') return 'Withdrawn';
-  if (preparation?.status === 'expired') return 'Expired';
   const invocation = state.review.harnessInteraction.invocations.find(
     candidate => candidate.handoffIdentity === handoff.handoffIdentity,
   );
   if (invocation === undefined) return 'Not sent to the agent';
-  return invocationLifecycleLabel(invocation.status, preparation?.status === 'claimed');
+  return invocationLifecycleLabel(invocation.status);
 }
 
 function responseSize(item: ReviewProjectedQuestionItem): string | undefined {
@@ -3410,61 +3404,6 @@ function statusCondition(state: ReviewingApplicationState): RenderChild[] {
     ];
   }
   return [];
-}
-
-function userPullCondition(state: ReviewingApplicationState): RenderChild[] {
-  const userPull = state.review?.harnessInteraction.userPull;
-  const preparation = userPull?.preparations.at(-1);
-  if (userPull === undefined || preparation === undefined) return [];
-  const colors = theme(state);
-  const separator = state.presentation.ascii ? '-' : '·';
-  const invocation =
-    preparation.invocationIdentity === undefined
-      ? undefined
-      : state.review?.harnessInteraction.invocations.find(
-          candidate => candidate.invocationIdentity === preparation.invocationIdentity,
-        );
-  const lifecycle =
-    preparation.status === 'prepared'
-      ? 'Ready to pull'
-      : preparation.status === 'withdrawn'
-        ? 'Withdrawn'
-        : preparation.status === 'expired'
-          ? 'Expired'
-          : invocation === undefined
-            ? 'Picked up, waiting to start'
-            : invocationLifecycleLabel(invocation.status, true);
-  const words = (reason: string): string => reason.replaceAll('-', ' ');
-  const availability = userPull.availability;
-  const availabilityLabel =
-    availability.state === 'revalidated'
-      ? 'Connected'
-      : availability.state === 'stale'
-        ? availability.reason === 'runtime-revalidation-required'
-          ? 'Not rechecked since BuildFrame restarted'
-          : 'Connection not checked yet'
-        : availability.state === 'blocked-by-runtime'
-          ? `Blocked (${words(availability.reason)})`
-          : availability.reason === 'attachment-not-observed'
-            ? 'Claude Code hasn’t connected yet'
-            : availability.reason === 'attachment-not-selected'
-              ? 'No Claude Code session chosen'
-              : 'The Claude Code session that picked this up is gone';
-  const budget = userPull.attachment?.contextBudget;
-  const budgetLabel =
-    budget === undefined || budget.status === 'unavailable'
-      ? 'context use unknown'
-      : budget.status === 'available'
-        ? `last response used ${budget.totalInputTokens}/${budget.contextWindowSize} input tokens, ${budget.totalOutputTokens} output (${budget.modelDisplayName})`
-        : `context use unknown (${words(budget.reason)}${budget.modelDisplayName === undefined ? '' : `, ${budget.modelDisplayName}`})`;
-  return [
-    label(state, `Claude Code ${separator} ${userPull.action} ${separator} ${lifecycle}`, {
-      fg: lifecycle === 'Outcome unknown' ? colors.warning : colors.text,
-      bold: true,
-      paddingLeft: 2,
-    }),
-    label(state, `${availabilityLabel} ${separator} ${budgetLabel}`, { fg: colors.muted, paddingLeft: 2 }),
-  ];
 }
 
 interface RailPiece {
@@ -6194,7 +6133,7 @@ function screen(
         }${reviewHeader?.historicalOutcome === undefined ? '' : ` / Historical ${reviewHeader.historicalOutcome}`}`;
   const header = reviewingHeader(presented, trail);
   const retention = [...reviewRetentionContext(presented, interaction), ...homeContextRow(presented)];
-  const conditions = [...statusCondition(presented), ...userPullCondition(presented)];
+  const conditions = statusCondition(presented);
   // The footer is always the same two rows: what is being said (or what this
   // mode means), then the keys. Neither row moves or swaps with the mode.
   const mode = footerMode(state);

@@ -27,7 +27,6 @@ import type {
   HarnessAvailability,
   HarnessCapabilitySnapshotIdentity,
   HarnessCommitmentReceiptIdentity,
-  HarnessCompatibilityIdentity,
   HarnessEvidenceAcknowledgement,
   HarnessHandoffIdentity,
   HarnessInteractionCommandAccepted,
@@ -36,14 +35,11 @@ import type {
   HarnessInterruptionIntentIdentity,
   HarnessInvocationIdentity,
   HarnessInvocationStatus,
-  HarnessReportedContextUsage,
   ReviewHandoffDisclosureSummary,
   UserPullArmOccurrenceIdentity,
   UserPullPreparationIdentity,
   UserPullPreparationStatus,
   UserPullPreparationTerminalReason,
-  UserPullReviewCapabilityContract,
-  UserPullReviewHandoffInspectionView,
   ReviewMessageAcknowledgementRequirementView,
   ReviewedCapabilityManifest,
   ReviewedHarnessAttachment,
@@ -133,111 +129,6 @@ export interface LoadedHarnessIndex {
   readonly stateVersion: number;
   readonly revision: number;
   readonly payload: HarnessIndexPayload;
-}
-
-export interface UserPullAttachmentRecordPayload {
-  readonly formatVersion: 1;
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-  readonly compatibilityIdentity: HarnessCompatibilityIdentity;
-  readonly harnessKind: 'claude-code';
-  readonly sessionId: string;
-  readonly canonicalGitRoot: string;
-  readonly canonicalGitDir: string;
-  readonly hostVersion: string;
-  readonly manifestSha256: string;
-  readonly destination: HarnessAttachmentDestination;
-  readonly manifest: ReviewedCapabilityManifest;
-  readonly establishedStateVersion: number;
-}
-
-export interface UserPullPreparationRecordPayload extends UserPullPreparationIndexEntry {
-  readonly formatVersion: 1;
-  readonly claimHandle: string;
-  readonly capabilitySnapshotIdentity: HarnessCapabilitySnapshotIdentity;
-}
-
-export type UserPullContextBudgetRecord =
-  | {
-      readonly status: 'available';
-      readonly source: 'claude-status-line';
-      readonly runtimeGeneration: string;
-      readonly evidenceIdentity: string;
-      readonly modelId: string;
-      readonly modelDisplayName: string;
-      readonly contextWindowSize: number;
-      readonly totalInputTokens: number;
-      readonly totalOutputTokens: number;
-      readonly currentUsage: HarnessReportedContextUsage;
-      readonly usedPercentage?: number;
-      readonly remainingPercentage?: number;
-      readonly promptId?: string;
-    }
-  | {
-      readonly status: 'unknown';
-      readonly source: 'claude-status-line';
-      readonly runtimeGeneration: string;
-      readonly evidenceIdentity: string;
-      readonly reason:
-        | 'awaiting-response'
-        | 'model-changed'
-        | 'host-report-inconsistent'
-        | 'compacted'
-        | 'session-ended';
-      readonly modelId?: string;
-      readonly modelDisplayName?: string;
-      readonly contextWindowSize?: number;
-      readonly promptId?: string;
-    };
-
-export interface UserPullObservabilityRecordPayload {
-  readonly formatVersion: 1;
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-  readonly compatibilityIdentity: HarnessCompatibilityIdentity;
-  readonly availability:
-    | {
-        readonly state: 'revalidated';
-        readonly reason: 'exact-identity-and-contract';
-        readonly runtimeGeneration: string;
-        readonly evidenceIdentity: string;
-      }
-    | {
-        readonly state: 'blocked-by-runtime';
-        readonly reason: 'session-ended';
-        readonly runtimeGeneration: string;
-        readonly evidenceIdentity: string;
-      };
-  readonly contextBudget?: UserPullContextBudgetRecord;
-  readonly compaction?: {
-    readonly phase: 'started' | 'completed';
-    readonly trigger: 'manual' | 'auto';
-    readonly runtimeGeneration: string;
-    readonly evidenceIdentity: string;
-  };
-}
-
-export interface LoadedUserPullObservability {
-  readonly stateVersion: number;
-  readonly revision: number;
-  readonly payload: UserPullObservabilityRecordPayload;
-}
-
-export interface UserPullArmRecordPayload {
-  readonly formatVersion: 1;
-  readonly occurrenceIdentity: UserPullArmOccurrenceIdentity;
-  readonly preparationIdentity: UserPullPreparationIdentity;
-  readonly attachmentIdentity: HarnessAttachmentIdentity;
-  readonly sessionId: string;
-  readonly promptId: string;
-  readonly canonicalGitRoot: string;
-  readonly canonicalGitDir: string;
-  readonly bridgeProtocolVersion: 1;
-  readonly armedStateVersion: number;
-}
-
-export interface LoadedUserPullPreparation {
-  readonly stateVersion: number;
-  readonly revision: number;
-  readonly payload: UserPullPreparationRecordPayload;
 }
 
 export interface AttachmentCompatibilityPayload {
@@ -340,14 +231,6 @@ export interface PreparedInspection {
   readonly capability?: DirectReviewCapabilityContract;
   readonly manifestSha256?: string;
   readonly compatibilityIdentity?: string;
-}
-
-export interface PreparedUserPullInspection {
-  readonly view: UserPullReviewHandoffInspectionView;
-  readonly basis?: ReviewDisclosureBasis;
-  readonly attachment?: HarnessAttachmentIndexEntry;
-  readonly attachmentRecord?: UserPullAttachmentRecordPayload;
-  readonly capability?: UserPullReviewCapabilityContract;
 }
 
 export interface Subscription {

@@ -7,7 +7,6 @@ import type {
   HarnessIndexPayload,
   HarnessInvocationIndexEntry,
   HarnessReviewHistoryPayload,
-  UserPullPreparationIndexEntry,
 } from './internalTypes.js';
 import { MAX_REVIEW_HANDOFFS } from './limits.js';
 import { encode, stableIdentity } from './utils.js';
@@ -251,18 +250,6 @@ export function replaceInvocation(
     ...index,
     invocations: index.invocations.map(item =>
       item.invocationIdentity === invocation.invocationIdentity ? invocation : item,
-    ),
-  };
-}
-
-export function replacePreparation(
-  index: HarnessIndexPayload,
-  preparation: UserPullPreparationIndexEntry,
-): HarnessIndexPayload {
-  return {
-    ...index,
-    preparations: index.preparations.map(item =>
-      item.preparationIdentity === preparation.preparationIdentity ? preparation : item,
     ),
   };
 }
