@@ -1,6 +1,4 @@
-import process from 'node:process';
-
-import { createCliRenderer, type CliRenderer } from '@opentui/core';
+import { type CliRenderer } from '@opentui/core';
 import { decodeBytesBase64 } from '@buildframe/workspace/bytes-base64';
 import type { Workspace, WorkspaceCommand } from '@buildframe/workspace';
 import type { ReviewHarnessInteractionViewScope } from '@buildframe/workspace/harness-interaction';
@@ -14,7 +12,6 @@ import type {
 } from '@buildframe/workspace/projection';
 import type { ReviewIdentity, ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
 
-import { createNoColorOutput } from './noColorOutput.js';
 import {
   ShellClipboard,
   productionClipboard,
@@ -24,6 +21,7 @@ import {
 import { DebouncedSave } from './shellPreferences.js';
 import { executeCommand, semanticError } from './shellCommands.js';
 import { liveViewIdentity, ShellWatch } from './shellWatch.js';
+import { ShellTerminal } from './shellTerminal.js';
 import {
   DIFF_WINDOW_SIZE,
   HARNESS_INTERACTION_WINDOW_SIZE,
@@ -58,8 +56,6 @@ const MESSAGE_BODY_WINDOW_BYTES = 16 * 1024;
 const MESSAGE_BODY_LIMIT_BYTES = 256 * 1024;
 const REVIEW_BASIS_WINDOW_SIZE = 64;
 const REVIEW_MESSAGE_WINDOW_SIZE = 32;
-/** How long the first frame waits for the terminal to report light or dark. */
-const TERMINAL_THEME_MODE_WAIT_MS = 100;
 const LIVE_FILE_WINDOW_SIZE = 64;
 const MAX_PROJECTION_ATTEMPTS = 5;
 
@@ -113,18 +109,7 @@ class OpenReviewingApplication implements ReviewingApplication {
   readonly #highlight: ReviewingHighlight;
   readonly #createClipboard: ShellClipboardFactory;
   #clipboard: ShellClipboard | undefined;
-  #noColorOutput: NodeJS.WriteStream | undefined;
-  readonly #onNoColorResize = (): void => {
-    if (this.#renderer === undefined) return;
-    this.#renderer.resize(process.stdout.columns ?? this.#renderer.width, process.stdout.rows ?? this.#renderer.height);
-  };
-  // The Workspace checks the working tree less often while the terminal is
-  // unfocused. Terminals that never report focus keep the foreground pace.
-  readonly #onTerminalFocus = (): void => this.#workspace.setAttention('foreground');
-  readonly #onTerminalBlur = (): void => this.#workspace.setAttention('background');
-  readonly #onTerminalThemeMode = (mode: 'dark' | 'light'): void => {
-    if (this.#model.setTerminalThemeMode(mode) && this.#view !== undefined) this.#render();
-  };
+  #terminal: ShellTerminal | undefined;
   #unsubscribeFromConnection: (() => void) | undefined;
   #route?: ActiveRoute;
   #routeGeneration = 0;
@@ -204,54 +189,22 @@ class OpenReviewingApplication implements ReviewingApplication {
     } catch (error) {
       configurationWarning = `Couldn’t read your settings, so defaults are in use. ${semanticError(error)}`;
     }
-    if (this.#providedRenderer === undefined && this.#model.state.presentation.noColor) {
-      this.#noColorOutput = createNoColorOutput();
-    }
-    try {
-      this.#renderer =
-        this.#providedRenderer ??
-        (await createCliRenderer({
-          exitOnCtrlC: false,
-          clearOnShutdown: true,
-          // 60 fps only matters while a pane glides; idle screens draw nothing.
-          targetFps: 60,
-          // Movement tracking expands the pointed Message inline; button
-          // tracking still owns activation and native text selection.
-          useMouse: true,
-          enableMouseMovement: true,
-          useKittyKeyboard: {
-            disambiguate: true,
-            alternateKeys: true,
-            events: true,
-            reportText: true,
-          },
-          ...(this.#noColorOutput === undefined
-            ? {}
-            : {
-                stdout: this.#noColorOutput,
-                width: process.stdout.columns ?? 80,
-                height: process.stdout.rows ?? 24,
-              }),
-        }));
-    } catch (error) {
-      this.#noColorOutput?.destroy();
-      this.#noColorOutput = undefined;
-      throw error;
-    }
-    // The private test adapter may have been created with other defaults.
-    // Keep production and tests on the same click-navigation posture.
-    this.#renderer.useMouse = true;
+    this.#terminal = await ShellTerminal.open({
+      provided: this.#providedRenderer,
+      noColor: this.#model.state.presentation.noColor,
+      host: {
+        attention: attention => this.#workspace.setAttention(attention),
+        themeMode: mode => {
+          if (this.#model.setTerminalThemeMode(mode) && this.#view !== undefined) this.#render();
+        },
+      },
+    });
+    this.#renderer = this.#terminal.renderer;
     this.#highlight.attachRenderer(this.#renderer.nativeScene);
     this.#clipboard = new ShellClipboard(this.#createClipboard, this.#renderer);
-    if (this.#noColorOutput !== undefined) {
-      process.on('SIGWINCH', this.#onNoColorResize);
-    }
-    this.#renderer.on('focus', this.#onTerminalFocus);
-    this.#renderer.on('blur', this.#onTerminalBlur);
-    this.#renderer.on('theme_mode', this.#onTerminalThemeMode);
     // Paint the first frame in the terminal's own light/dark so a light
     // terminal never flashes the dark theme; a silent terminal stays dark.
-    this.#model.setTerminalThemeMode((await this.#renderer.waitForThemeMode(TERMINAL_THEME_MODE_WAIT_MS)) ?? undefined);
+    this.#model.setTerminalThemeMode(await this.#terminal.listen());
     this.#view = new ReviewingView(
       this.#renderer,
       this.#model,
@@ -343,9 +296,7 @@ class OpenReviewingApplication implements ReviewingApplication {
     await this.#preferencesSave.settle();
     this.#view?.stop();
     this.#view = undefined;
-    if (this.#noColorOutput !== undefined) {
-      process.off('SIGWINCH', this.#onNoColorResize);
-    }
+    this.#terminal?.stopResizing();
     const clipboard = this.#clipboard;
     this.#clipboard = undefined;
     try {
@@ -354,19 +305,12 @@ class OpenReviewingApplication implements ReviewingApplication {
       try {
         await clipboard?.dispose();
       } finally {
-        // Terminal restore finishes asynchronously; the no-colour stdout must
-        // outlive it, or the renderer reports a closed stream.
-        const renderer = this.#renderer;
+        const terminal = this.#terminal;
+        this.#terminal = undefined;
         this.#renderer = undefined;
-        renderer?.off('focus', this.#onTerminalFocus);
-        renderer?.off('blur', this.#onTerminalBlur);
-        renderer?.off('theme_mode', this.#onTerminalThemeMode);
-        renderer?.destroy();
-        await renderer?.closed.catch(() => undefined);
+        await terminal?.close();
       }
     }
-    this.#noColorOutput?.destroy();
-    this.#noColorOutput = undefined;
     this.#resolveClosed();
   }
 
