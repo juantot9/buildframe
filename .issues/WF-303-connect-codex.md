@@ -34,3 +34,13 @@ protocol, within what WF-302 found Codex supports.
 ## Branch
 
 `main`.
+
+## Owner decisions (2026-11-19)
+
+- **Trigger:** `!buildframe` (Codex's shell escape), nothing installed into
+  Codex. Revisit only if experiment 4 shows its output entering the model's
+  context.
+- **Send path:** the experimental start-if-idle `thread/queue/*` API; version
+  admission accepts only verified Codex versions.
+- **WebSocket client:** no new dependency unless Node's built-in client can't
+  reach the Unix socket (experiment 8); `ws` needs the owner's go-ahead.
