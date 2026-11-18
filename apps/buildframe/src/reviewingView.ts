@@ -1,5 +1,4 @@
 import {
-  MacOSScrollAccel,
   MouseButton,
   StyledText,
   TextareaRenderable,
@@ -99,6 +98,7 @@ import {
 } from './shellLook.js';
 import { REVIEWING_KEYS, reviewingFooterMode, reviewingHelpMode } from './reviewingKeys.js';
 import { footerSentence, keyList, keysRow, type KeyListItem } from './shellKeys.js';
+import { PaneGlider } from './shellGlide.js';
 
 export { INDIGO_NIGHT, MATCH_TERMINAL_THEME, QUIET_GRAPHITE, QUIET_PAPER, WARM_CARBON } from './shellLook.js';
 
@@ -5564,26 +5564,6 @@ function screen(
   );
 }
 
-/** How long a pane takes to glide to its new offset. */
-const SCROLL_GLIDE_MS = 120;
-/** Rows one wheel notch moves before acceleration. */
-const WHEEL_ROWS = 3;
-
-interface PaneGlide {
-  readonly contentKey: string;
-  readonly anchorScope?: string;
-  readonly from: number;
-  readonly to: number;
-  readonly startedAt: number;
-}
-
-/** Ease-out cubic: fast at first, settling gently, in whole rows. */
-function glideOffset(glide: PaneGlide, now: number): number {
-  const progress = Math.min(1, Math.max(0, (now - glide.startedAt) / SCROLL_GLIDE_MS));
-  const eased = 1 - (1 - progress) ** 3;
-  return Math.round(glide.from + (glide.to - glide.from) * eased);
-}
-
 const QUESTION_EDITOR_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/gu;
 
 class QuestionTextareaRenderable extends TextareaRenderable {
@@ -5626,77 +5606,17 @@ export class ReviewingView {
     this.#model.synchronizeQuestionDiscussionOffset(page.offset);
   };
 
-  readonly #glides = new Map<ReviewRegion, PaneGlide>();
-  readonly #wheelAcceleration = new Map<ReviewRegion, MacOSScrollAccel>();
-  #glideTimer: NodeJS.Timeout | undefined;
+  readonly #glider = new PaneGlider<ReviewRegion>({
+    smooth: () => this.#model.smoothScrolling(),
+    running: () => this.#started,
+    selecting: () => this.renderer.getSelection()?.isDragging === true,
+    render: () => this.render(),
+  });
 
   readonly #synchronizePaneScroll = (
     region: ReviewRegion,
     layout: ReviewingPaneScrollLayout,
-  ): ReviewingPaneScrollState => this.#glide(region, this.#model.synchronizePaneScroll(region, layout));
-
-  /**
-   * The model owns where a pane should be; the View shows it gliding there.
-   * A new list (another file, another window) appears in place without motion.
-   */
-  #glide(region: ReviewRegion, scroll: ReviewingPaneScrollState): ReviewingPaneScrollState {
-    const now = performance.now();
-    let previous = this.#glides.get(region);
-    const scope = scroll.anchorScope === undefined ? {} : { anchorScope: scroll.anchorScope };
-    // Rows loaded above the view moved everything down; the glide moves with them.
-    if (
-      previous !== undefined &&
-      previous.contentKey !== scroll.contentKey &&
-      previous.anchorScope !== undefined &&
-      previous.anchorScope === scroll.anchorScope
-    ) {
-      previous = {
-        ...previous,
-        contentKey: scroll.contentKey,
-        from: previous.from + scroll.contentShift,
-        to: previous.to + scroll.contentShift,
-      };
-      this.#glides.set(region, previous);
-    }
-    if (!this.#model.smoothScrolling() || previous === undefined || previous.contentKey !== scroll.contentKey) {
-      this.#glides.set(region, {
-        contentKey: scroll.contentKey,
-        ...scope,
-        from: scroll.offset,
-        to: scroll.offset,
-        startedAt: now,
-      });
-      return scroll;
-    }
-    let glide = previous;
-    if (glide.to !== scroll.offset) {
-      const shown = glideOffset(glide, now);
-      // A long jump slides only its last two screenfuls, so it reads as motion, not a blur.
-      const reach = Math.max(1, scroll.viewportSize) * 2;
-      const from =
-        Math.abs(scroll.offset - shown) > reach ? scroll.offset - Math.sign(scroll.offset - shown) * reach : shown;
-      glide = { contentKey: scroll.contentKey, ...scope, from, to: scroll.offset, startedAt: now };
-      this.#glides.set(region, glide);
-    }
-    const offset = glideOffset(glide, now);
-    if (offset === scroll.offset) return scroll;
-    this.#scheduleGlideFrame();
-    return { ...scroll, offset };
-  }
-
-  #scheduleGlideFrame(): void {
-    if (this.#glideTimer !== undefined || !this.#started) return;
-    this.#glideTimer = setTimeout(() => {
-      this.#glideTimer = undefined;
-      if (!this.#started) return;
-      // Never rebuild under an active native text selection drag.
-      if (this.renderer.getSelection()?.isDragging) {
-        this.#scheduleGlideFrame();
-        return;
-      }
-      this.render();
-    }, 16);
-  }
+  ): ReviewingPaneScrollState => this.#glider.glide(region, this.#model.synchronizePaneScroll(region, layout));
 
   readonly #onWheelRenderFrame = (): void => {
     this.#wheelFramePending = false;
@@ -5733,18 +5653,7 @@ export class ReviewingView {
     event.stopPropagation();
     if (!this.#started) return;
     const inputStartedAt = performance.now();
-    // Quick flicks travel further; slow, deliberate notches stay precise.
-    let multiplier = 1;
-    if (this.#model.smoothScrolling()) {
-      let acceleration = this.#wheelAcceleration.get(region);
-      if (acceleration === undefined) {
-        acceleration = new MacOSScrollAccel();
-        this.#wheelAcceleration.set(region, acceleration);
-      }
-      multiplier = acceleration.tick(inputStartedAt);
-    }
-    const notches = Math.max(1, Math.abs(event.scroll?.delta ?? 1));
-    const rows = Math.max(1, Math.round(WHEEL_ROWS * notches * multiplier));
+    const rows = this.#glider.wheelRows(region, event.scroll?.delta, inputStartedAt);
     const effects = this.#model.handlePaneWheel(region, direction === 'up' ? -1 : 1, rows);
     this.#scheduleWheelRender();
     this.#onEffects(effects, inputStartedAt);
@@ -6234,9 +6143,7 @@ export class ReviewingView {
     this.renderer.off('frame', this.#onRetiredRootsFrame);
     this.renderer.off('frame', this.#onWheelRenderFrame);
     if (this.#wheelRenderQueued !== undefined) clearImmediate(this.#wheelRenderQueued);
-    if (this.#glideTimer !== undefined) clearTimeout(this.#glideTimer);
-    this.#glideTimer = undefined;
-    this.#glides.clear();
+    this.#glider.stop();
     this.#wheelRenderQueued = undefined;
     this.#wheelFramePending = false;
     this.#wheelRenderDirty = false;
