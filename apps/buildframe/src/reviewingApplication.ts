@@ -20,7 +20,7 @@ import {
 } from './shellClipboard.js';
 import { DebouncedSave } from './shellPreferences.js';
 import { executeCommand, semanticError } from './shellCommands.js';
-import { liveViewIdentity, ShellWatch } from './shellWatch.js';
+import { isLiveScope, liveViewIdentity, ShellWatch } from './shellWatch.js';
 import { ShellTerminal } from './shellTerminal.js';
 import {
   DIFF_WINDOW_SIZE,
@@ -166,10 +166,7 @@ class OpenReviewingApplication implements ReviewingApplication {
       workspace: this.#workspace,
       current: generation => !this.#stopped && generation === this.#routeGeneration,
       stopped: () => this.#stopped,
-      isLive: scope =>
-        scope.kind === 'review.live-manifest' ||
-        scope.kind === 'review.live-files' ||
-        scope.kind === 'review.continuation',
+      isLive: isLiveScope,
       failed: () => {
         this.#model.fail('Review projection records are invalid.');
         this.#render();

@@ -13,6 +13,13 @@ export interface ShellWatchHost {
   refresh(): Promise<void>;
 }
 
+/** Views that follow the working tree as well as State: they move without a new State version. */
+export function isLiveScope(scope: WorkspaceViewScope): boolean {
+  return (
+    scope.kind === 'review.live-manifest' || scope.kind === 'review.live-files' || scope.kind === 'review.continuation'
+  );
+}
+
 /** The Workspace's own rule for "same live view": its Live Changes identity, or status and reason. */
 export function liveViewIdentity(view: object): string | undefined {
   const value = view as { readonly status?: string; readonly reason?: string; readonly liveChangesIdentity?: string };

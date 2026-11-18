@@ -27,6 +27,10 @@ owns input, rendering and Home for every screen.
 - The spinner and notice timers become screen-reported (`animating`,
   `said`).
 - The import loop between `reviewingModel.ts` and `reviewingActions.ts` goes.
+- Configuration (`c`) and action checks (`!`) move into the shell. Until
+  then a `createShell` screen answers them with "… opens from Reviewing for
+  now." (WF-297 6e).
+- `defineScreen` gains `home` (the rows a screen adds to the Home card).
 - Behaviour checks move to renderer-free screen tests; the frame suite keeps
   layout and rendering only.
 

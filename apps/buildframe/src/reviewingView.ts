@@ -101,7 +101,7 @@ import { footerSentence, keyList, keysRow, type KeyListItem } from './shellKeys.
 import { PaneGlider } from './shellGlide.js';
 import { ShellRoots } from './shellRoots.js';
 import { shellFrame } from './shellFrame.js';
-import { agentIndicator, headerLine, keyListPanel } from './shellChrome.js';
+import { agentIndicator, keyListPanel, shellHeader } from './shellChrome.js';
 
 export { INDIGO_NIGHT, MATCH_TERMINAL_THEME, QUIET_GRAPHITE, QUIET_PAPER, WARM_CARBON } from './shellLook.js';
 
@@ -5225,33 +5225,16 @@ function reviewingHeader(
     word.toLowerCase() === facts.route.toLowerCase()
       ? undefined
       : { text: word, fg: state.shownStep !== undefined && state.screen === 'review' ? colors.warning : colors.muted };
-  return {
-    height: 1,
-    rows: [
-      Box(
-        {
-          id: 'reviewing-header',
-          width: '100%',
-          height: 1,
-          flexShrink: 0,
-          paddingLeft: 2,
-          paddingRight: 2,
-          backgroundColor: state.presentation.noColor ? 'transparent' : colors.surface,
-        },
-        headerLine(
-          state,
-          'reviewing',
-          // On a Review the row below names it ("Current Review · …"), so the header doesn't repeat it.
-          state.screen === 'review' && (facts.route === 'Current Review' || facts.route === 'Previous Review')
-            ? 'BuildFrame'
-            : `BuildFrame / ${facts.route}`,
-          source,
-          agentIndicator(state, state.harnessConnection),
-          Math.max(1, state.width - 4),
-        ),
-      ),
-    ],
-  };
+  return shellHeader(
+    state,
+    'reviewing',
+    // On a Review the row below names it ("Current Review · …"), so the header doesn't repeat it.
+    state.screen === 'review' && (facts.route === 'Current Review' || facts.route === 'Previous Review')
+      ? 'BuildFrame'
+      : `BuildFrame / ${facts.route}`,
+    source,
+    agentIndicator(state, state.harnessConnection),
+  );
 }
 
 function screen(

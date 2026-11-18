@@ -1,7 +1,7 @@
 ---
 id: WF-297
 title: "Split the app into a shell and screens"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-289
@@ -166,3 +166,19 @@ dialogs into shell-routed layers — the largest piece of the migration. So:
   a screen, Home becomes shell-owned with rows from every screen, the spinner
   and notice timers become screen-reported, the model ↔ actions import loop
   goes, and the scenario suite splits (old steps 7 and 8).
+
+## 6e landed (2026-11-18)
+
+- `shellScreen.ts`: `defineScreen` (checked at definition: no shell-owned
+  key, no key bound twice in a mode, at most four footer keys) builds the key
+  table the footer and `?` list are drawn from; `dispatchScreenKey` runs
+  bindings, saying why a `blocked` key can't act and that a `waits` key is
+  still loading.
+- `shell.ts`: `createShell({ workspace, screens, first })` runs screens on the
+  shell parts: terminal, frame, header and `?` panel (`shellChrome.ts`, moved
+  out of `reviewingView.ts`), the shell's key order, commands with result
+  recovery, copying, a screen stack (`open`, Esc returns), and views read
+  together at one State version (`shellViews.ts`) and kept current.
+- Proven by `test/fast/shellScreen.test.ts` and
+  `test/scenarios/shell.test.ts` (a two-screen app on a real Workspace).
+- Reviewing is unchanged; everything else continues in WF-301.

@@ -42,7 +42,7 @@ export function agentIndicator(state: Look, view: HarnessConnectionView | undefi
  * The one header row: where you are on the left, then what the screen shows
  * (live, saved, a past step) and whether the agent is connected on the right.
  */
-export function headerLine(
+function headerLine(
   state: Look,
   idPrefix: string,
   left: string,
@@ -79,6 +79,34 @@ export function headerLine(
       }),
     ]),
   );
+}
+
+/** The header: where you are on the left; what the screen shows and the agent on the right. */
+export function shellHeader(
+  state: SizedLook,
+  idPrefix: string,
+  left: string,
+  source: HeaderPart | undefined,
+  agent: HeaderPart | undefined,
+): { readonly height: number; readonly rows: readonly RenderChild[] } {
+  const colors = theme(state);
+  return {
+    height: 1,
+    rows: [
+      Box(
+        {
+          id: `${idPrefix}-header`,
+          width: '100%',
+          height: 1,
+          flexShrink: 0,
+          paddingLeft: 2,
+          paddingRight: 2,
+          backgroundColor: state.presentation.noColor ? 'transparent' : colors.surface,
+        },
+        headerLine(state, idPrefix, left, source, agent, Math.max(1, state.width - 4)),
+      ),
+    ],
+  };
 }
 
 /** The `?` panel: each group names itself once in a gutter, its keys in one or two columns. */
