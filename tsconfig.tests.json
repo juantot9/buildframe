@@ -10,6 +10,7 @@
     "apps/buildframe/test/**/*.ts",
     "packages/claude-adapter/test/**/*.ts",
     "packages/local-runtime/test/**/*.ts",
+    "packages/opencode-adapter/test/**/*.ts",
     "packages/pi-adapter/test/**/*.ts",
     "packages/workspace/test/**/*.ts"
   ]

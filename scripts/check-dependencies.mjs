@@ -84,6 +84,15 @@ const v1Packages = [
     }),
   },
   {
+    directory: path.join(repoRoot, 'packages/opencode-adapter'),
+    // OpenCode supplies its own plugin modules at load; the connector imports none of them.
+    allowedV1Dependencies: new Set(['@buildframe/local-runtime', '@buildframe/workspace']),
+    allowedProductionSubpaths: CONNECTOR_PRODUCTION_SUBPATHS,
+    allowedExternalDependencies: externalDependencyPolicy({
+      test: [TEST_RUNNER_PACKAGE],
+    }),
+  },
+  {
     directory: path.join(repoRoot, 'packages/claude-adapter'),
     // The Direct Mod's tests run under `claude plugin test`, which requires them inside the plugin.
     testDirectories: ['test', 'plugin/tests'],
