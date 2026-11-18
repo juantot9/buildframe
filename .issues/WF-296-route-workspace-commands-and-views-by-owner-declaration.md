@@ -1,7 +1,7 @@
 ---
 id: WF-296
 title: "Route Workspace commands and views by owner declaration"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-289
