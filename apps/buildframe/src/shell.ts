@@ -37,7 +37,7 @@ export interface ShellOptions {
   readonly presentation?: Partial<Look['presentation']>;
   /** Portable UI preferences; production supplies the file-backed Module. */
   readonly userConfiguration?: UserConfiguration;
-  /** A renderer a test provides instead of the terminal. */
+  /** A renderer a test provides instead of the terminal, owned by the shell once opened. */
   readonly renderer?: CliRenderer;
   readonly createClipboard?: ShellClipboardFactory;
 }
@@ -45,7 +45,7 @@ export interface ShellOptions {
 export interface Shell {
   /** Resolves when terminal ownership and the connected Workspace use have ended. */
   readonly closed: Promise<void>;
-  /** Opens the terminal and resolves once the first screen shows its views. */
+  /** Opens the terminal and shows the first screen, unless stopped during startup. */
   start(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -79,6 +79,7 @@ class ShellApplication implements Shell {
   readonly #stack: OpenScreen[] = [];
   readonly #views: ShellViews;
   #look: Look;
+  #openingTerminal: Promise<ShellTerminal> | undefined;
   #terminal: ShellTerminal | undefined;
   #roots: ShellRoots | undefined;
   #clipboard: ShellClipboard | undefined;
@@ -88,7 +89,8 @@ class ShellApplication implements Shell {
   #saidTimer: NodeJS.Timeout | undefined;
   #keyListOpen = false;
   #saving = 0;
-  #started = false;
+  #starting: Promise<void> | undefined;
+  #stopping: Promise<void> | undefined;
   #stopped = false;
   #resolveClosed!: () => void;
 
@@ -111,9 +113,16 @@ class ShellApplication implements Shell {
     });
   }
 
-  async start(): Promise<void> {
-    if (this.#started) return;
-    this.#started = true;
+  start(): Promise<void> {
+    if (this.#stopped) return this.closed;
+    return (this.#starting ??= this.#start().catch(async error => {
+      if (this.#stopped) return;
+      await this.stop().catch(() => undefined);
+      throw error;
+    }));
+  }
+
+  async #start(): Promise<void> {
     const configuration = this.#options.userConfiguration ?? createEphemeralUserConfiguration();
     let warning: string | undefined;
     try {
@@ -127,20 +136,30 @@ class ShellApplication implements Shell {
     } catch (error) {
       warning = `Couldn’t read your settings, so defaults are in use. ${semanticError(error)}`;
     }
-    this.#terminal = await ShellTerminal.open({
+    if (this.#stopped) return;
+    this.#openingTerminal = ShellTerminal.open({
       provided: this.#options.renderer,
       noColor: this.#look.presentation.noColor,
       host: {
-        attention: attention => this.#options.workspace.setAttention(attention),
+        attention: attention => {
+          if (!this.#stopped) this.#options.workspace.setAttention(attention);
+        },
         themeMode: mode => {
           this.#look = { ...this.#look, terminalThemeMode: mode };
           this.#render();
         },
       },
     });
-    const renderer = this.#terminal.renderer;
+    const terminal = await this.#openingTerminal;
+    if (this.#stopped) return; // stop owns a terminal that arrives after cancellation.
+    this.#openingTerminal = undefined;
+    this.#terminal = terminal;
+    const renderer = terminal.renderer;
     this.#clipboard = new ShellClipboard(this.#options.createClipboard ?? productionClipboard, renderer);
-    this.#look = { ...this.#look, terminalThemeMode: await this.#terminal.listen() };
+    if (this.#stopped) return;
+    const terminalThemeMode = await terminal.listen();
+    if (this.#stopped) return;
+    this.#look = { ...this.#look, terminalThemeMode };
     this.#roots = new ShellRoots(renderer, ROOT_ID);
     this.#roots.start();
     renderer.keyInput.on('keypress', this.#onKeyPress);
@@ -150,25 +169,34 @@ class ShellApplication implements Shell {
     await this.#open(this.#options.first.screen, this.#options.first.args);
   }
 
-  async stop(): Promise<void> {
-    if (this.#stopped) return;
+  stop(): Promise<void> {
     this.#stopped = true;
-    this.#clipboard?.cancel();
-    this.#views.stop();
-    this.#unsubscribeFromConnection?.();
-    if (this.#saidTimer !== undefined) clearTimeout(this.#saidTimer);
-    const terminal = this.#terminal;
-    terminal?.renderer.keyInput.off('keypress', this.#onKeyPress);
-    terminal?.renderer.off('resize', this.#onResize);
-    this.#roots?.stop();
-    terminal?.stopResizing();
+    return (this.#stopping ??= Promise.resolve()
+      .then(async () => await this.#stop())
+      .finally(() => this.#resolveClosed()));
+  }
+
+  async #stop(): Promise<void> {
+    // Opening a renderer can acquire the terminal; wait for that handle, not settings or theme detection.
+    const terminal = this.#terminal ?? (await this.#openingTerminal?.catch(() => undefined));
+    this.#openingTerminal = undefined;
     try {
-      await this.#clipboard?.dispose();
+      this.#clipboard?.cancel();
+      this.#views.stop();
+      this.#unsubscribeFromConnection?.();
+      if (this.#saidTimer !== undefined) clearTimeout(this.#saidTimer);
+      terminal?.renderer.keyInput.off('keypress', this.#onKeyPress);
+      terminal?.renderer.off('resize', this.#onResize);
+      this.#roots?.stop();
+      terminal?.stopResizing();
     } finally {
-      this.#terminal = undefined;
-      await terminal?.close();
+      try {
+        await this.#clipboard?.dispose();
+      } finally {
+        this.#terminal = undefined;
+        await terminal?.close();
+      }
     }
-    this.#resolveClosed();
   }
 
   get #current(): OpenScreen | undefined {
@@ -286,10 +314,12 @@ class ShellApplication implements Shell {
     // Workspace I/O waits until the screen's own pending state is on screen.
     void this.#terminal.renderer
       .idle()
-      .then(async () => await executeCommand(this.#options.workspace, command, () => this.#stopped))
+      .then(async () => {
+        if (!this.#stopped) return await executeCommand(this.#options.workspace, command, () => this.#stopped);
+      })
       .then(outcome => {
         this.#saving -= 1;
-        if (outcome.status === 'stopped' || this.#stopped) return;
+        if (outcome === undefined || outcome.status === 'stopped' || this.#stopped) return;
         if (outcome.status === 'lost') this.#say(outcome.sentence, 'error');
         this.#run(open.screen.settled?.(open.state, command, outcome) ?? []);
         this.#render();
@@ -304,6 +334,7 @@ class ShellApplication implements Shell {
   }
 
   #say(text: string, tone: NoticeTone): void {
+    if (this.#stopped) return;
     const said = { text, tone };
     this.#said = said;
     if (this.#saidTimer !== undefined) clearTimeout(this.#saidTimer);
