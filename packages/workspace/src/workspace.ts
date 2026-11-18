@@ -29,6 +29,13 @@ import {
   type WorkspaceProjectionViewUpdateFor,
 } from './projection/index.js';
 import { ReviewingOwner, type ReviewingCommand, type ReviewingCommandResult } from './reviewing/index.js';
+import { HARNESS_COMMAND_KINDS, HARNESS_SCOPE_KINDS, HARNESS_VIEW_KINDS } from './harness-interaction/kinds.js';
+import { KindRoutes } from './kindRoutes.js';
+import type { WorkspaceBootstrapDiagnostic } from './workspaceBootstrapDiagnostics.js';
+import { LEGACY_REVIEW_COMMAND_KINDS, LEGACY_REVIEW_VIEW_KINDS } from './legacyReviewImport/kinds.js';
+import { PROJECTION_SCOPE_KINDS, PROJECTION_VIEW_KINDS } from './projection/kinds.js';
+import { REVIEWING_COMMAND_KINDS } from './reviewing/kinds.js';
+import { EVIDENCE_VIEW_KINDS } from './workspaceEvidence/kinds.js';
 import { resolveWorkspaceIdentity } from './workspaceIdentity.js';
 import { workspaceInvalidationSource, type SubscribeToWorkspaceInvalidation } from './workspaceInvalidation.js';
 import {
@@ -134,85 +141,20 @@ export interface WorkspaceBootstrapRequest {
   readonly startPath: string;
 }
 
-export interface UnsupportedPlatformDiagnostic {
-  readonly code: 'unsupported-platform';
-  readonly platform: NodeJS.Platform;
-  readonly reason: 'native-windows' | 'wsl1' | 'unsupported-operating-system';
-}
-
-export interface PathUnavailableDiagnostic {
-  readonly code: 'path-unavailable';
-  readonly requestedPath: string;
-  readonly reason: 'missing' | 'not-directory' | 'unreadable';
-}
-
-export interface NotGitWorktreeDiagnostic {
-  readonly code: 'not-git-worktree';
-  readonly requestedPath: string;
-}
-
-export interface BareGitRepositoryDiagnostic {
-  readonly code: 'bare-git-repository';
-  readonly requestedPath: string;
-}
-
-export interface GitInspectionFailedDiagnostic {
-  readonly code: 'git-inspection-failed';
-  readonly requestedPath: string;
-  readonly reason: 'git-unavailable' | 'repository-inaccessible' | 'inconsistent-worktree' | 'inspection-failed';
-}
-
-export interface WorkspaceMarkerInvalidDiagnostic {
-  readonly code: 'workspace-marker-invalid';
-  readonly canonicalCheckout: string;
-}
-
-export interface WorkspaceMarkerMissingDiagnostic {
-  readonly code: 'workspace-marker-missing';
-  readonly canonicalCheckout: string;
-}
-
-export interface WorkspaceRegistryInvalidDiagnostic {
-  readonly code: 'workspace-registry-invalid';
-  readonly reason: 'malformed' | 'unsupported-version' | 'invalid-registration';
-}
-
-export interface WorkspaceIdentityCollisionDiagnostic {
-  readonly code: 'workspace-identity-collision';
-  readonly reason: 'duplicate-marker' | 'registered-worktree-mismatch';
-  readonly workspaceIdentity: WorkspaceIdentity;
-  readonly registeredCheckout: string;
-  readonly attemptedCheckout: string;
-}
-
-export interface WorkspaceRegistryBusyDiagnostic {
-  readonly code: 'workspace-registry-busy';
-}
-
-export interface WorkspaceAuthorityUnavailableDiagnostic {
-  readonly code: 'workspace-authority-unavailable';
-  readonly requestedPath: string;
-  readonly operation:
-    | 'resolve-user-state'
-    | 'lock-registry'
-    | 'read-registry'
-    | 'write-registry'
-    | 'read-marker'
-    | 'write-marker';
-}
-
-export type WorkspaceBootstrapDiagnostic =
-  | UnsupportedPlatformDiagnostic
-  | PathUnavailableDiagnostic
-  | NotGitWorktreeDiagnostic
-  | BareGitRepositoryDiagnostic
-  | GitInspectionFailedDiagnostic
-  | WorkspaceMarkerInvalidDiagnostic
-  | WorkspaceMarkerMissingDiagnostic
-  | WorkspaceRegistryInvalidDiagnostic
-  | WorkspaceIdentityCollisionDiagnostic
-  | WorkspaceRegistryBusyDiagnostic
-  | WorkspaceAuthorityUnavailableDiagnostic;
+export type {
+  UnsupportedPlatformDiagnostic,
+  PathUnavailableDiagnostic,
+  NotGitWorktreeDiagnostic,
+  BareGitRepositoryDiagnostic,
+  GitInspectionFailedDiagnostic,
+  WorkspaceMarkerInvalidDiagnostic,
+  WorkspaceMarkerMissingDiagnostic,
+  WorkspaceRegistryInvalidDiagnostic,
+  WorkspaceIdentityCollisionDiagnostic,
+  WorkspaceRegistryBusyDiagnostic,
+  WorkspaceAuthorityUnavailableDiagnostic,
+  WorkspaceBootstrapDiagnostic,
+} from './workspaceBootstrapDiagnostics.js';
 
 export interface WorkspaceBootstrapReady {
   readonly status: 'ready';
@@ -229,6 +171,12 @@ export type WorkspaceBootstrapResult = WorkspaceBootstrapReady | WorkspaceBootst
 const harnessInteractionOwners = new WeakMap<Workspace, HarnessInteractionOwner>();
 const gitDirectories = new WeakMap<Workspace, string>();
 
+/** A Workspace opened without State serves identity and evidence only. */
+function writer<Owner>(owner: Owner | undefined): Owner {
+  if (owner === undefined) throw new TypeError('This Workspace requires the runtime-owned writer');
+  return owner;
+}
+
 class OpenWorkspace implements Workspace {
   readonly #identityView: WorkspaceIdentityView;
   readonly #evidence: WorkspaceEvidence;
@@ -236,6 +184,9 @@ class OpenWorkspace implements Workspace {
   readonly #reviewing: ReviewingOwner | undefined;
   readonly #projection: WorkspaceProjection | undefined;
   readonly #harnessInteraction: HarnessInteractionOwner | undefined;
+  readonly #commands: KindRoutes<(command: never) => Promise<WorkspaceCommandResult>>;
+  readonly #views: KindRoutes<(request: never) => Promise<unknown>>;
+  readonly #scopes: KindRoutes<(scope: never, onUpdate: never) => UnsubscribeWorkspace>;
 
   constructor(
     workspaceIdentity: WorkspaceIdentity,
@@ -325,9 +276,7 @@ class OpenWorkspace implements Workspace {
             canonicalCheckout,
             state,
             evidence: this.#evidence,
-            onCommittedStateVersion: stateVersion => {
-              this.#projection?.publishCommittedVersion(stateVersion);
-            },
+            onCommittedStateVersion: stateVersion => this.#publishCommitted(stateVersion, 'harness-interaction'),
             ...(internal.afterHarnessCommitBeforeDirective === undefined
               ? {}
               : {
@@ -337,114 +286,82 @@ class OpenWorkspace implements Workspace {
     if (this.#harnessInteraction !== undefined) {
       harnessInteractionOwners.set(this, this.#harnessInteraction);
     }
+    // Each owner declares its kinds; a kind with two owners fails here.
+    const legacy = (): LegacyReviewImportOwner => writer(this.#legacyReviewImport);
+    const harness = (): HarnessInteractionOwner => writer(this.#harnessInteraction);
+    const projection = (): WorkspaceProjection => writer(this.#projection);
+    this.#commands = new KindRoutes<(command: never) => Promise<WorkspaceCommandResult>>('command', [
+      [
+        REVIEWING_COMMAND_KINDS,
+        async (command: ReviewingCommand) => this.#announce(await writer(this.#reviewing).execute(command)),
+      ],
+      [
+        LEGACY_REVIEW_COMMAND_KINDS,
+        async (command: LegacyReviewCommand) => this.#announce(await legacy().execute(command)),
+      ],
+      // Harness Interaction also commits outside commands, so it announces its own commits.
+      [HARNESS_COMMAND_KINDS, async (command: HarnessInteractionCommand) => await harness().execute(command)],
+    ]);
+    this.#views = new KindRoutes<(request: never) => Promise<unknown>>('view', [
+      [['workspace.identity'], async () => this.#identityView],
+      [EVIDENCE_VIEW_KINDS, async (request: WorkspaceEvidenceViewRequest) => await this.#evidence.read(request)],
+      [LEGACY_REVIEW_VIEW_KINDS, async (request: LegacyReviewImportViewRequest) => await legacy().read(request)],
+      [HARNESS_VIEW_KINDS, async (request: HarnessInteractionViewRequest) => await harness().read(request)],
+      [PROJECTION_VIEW_KINDS, async (request: WorkspaceProjectionViewRequest) => await projection().read(request)],
+    ]);
+    this.#scopes = new KindRoutes<(scope: never, onUpdate: never) => UnsubscribeWorkspace>('subscription', [
+      [
+        ['workspace.identity'],
+        (_scope: WorkspaceIdentityViewScope, onUpdate: (update: WorkspaceIdentityView) => void) =>
+          this.#subscribeIdentity(onUpdate),
+      ],
+      [
+        HARNESS_SCOPE_KINDS,
+        (scope: HarnessInteractionViewScope, onUpdate: (update: HarnessInteractionViewUpdate) => void) =>
+          harness().subscribe(scope, onUpdate),
+      ],
+      [
+        PROJECTION_SCOPE_KINDS,
+        (scope: WorkspaceProjectionViewScope, onUpdate: (update: WorkspaceProjectionViewUpdate) => void) =>
+          projection().subscribe(scope, onUpdate),
+      ],
+    ]);
   }
 
-  async execute(command: WorkspaceCommand): Promise<WorkspaceCommandResult> {
-    if (
-      this.#reviewing === undefined ||
-      this.#harnessInteraction === undefined ||
-      this.#legacyReviewImport === undefined
-    ) {
-      throw new TypeError('Workspace commands require the runtime-owned writer');
-    }
-    if (
-      command.kind === 'legacy-review.source.import' ||
-      command.kind === 'legacy-review.source.decision.set' ||
-      command.kind === 'legacy-review.queue-candidate.decision.set' ||
-      command.kind === 'legacy-review.moved-receipt-source.associate-and-import'
-    ) {
-      const result = await this.#legacyReviewImport.execute(command);
-      if (result.status === 'accepted') {
-        this.#projection?.publishCommittedVersion(result.stateVersion);
-        this.#harnessInteraction.publishCommittedVersion(result.stateVersion);
-      }
-      return result;
-    }
-    if (
-      command.kind.startsWith('harness.') ||
-      command.kind === 'review.question.ask' ||
-      command.kind === 'review.message.commit'
-    ) {
-      return await this.#harnessInteraction.execute(command);
-    }
-    const result = await this.#reviewing.execute(command);
-    if (result.status === 'accepted') {
-      this.#projection?.publishCommittedVersion(result.stateVersion);
-      this.#harnessInteraction.publishCommittedVersion(result.stateVersion);
-    }
+  /** The one path a committed State version takes to every owner that serves live views. */
+  #publishCommitted(stateVersion: number, committedBy?: 'harness-interaction'): void {
+    this.#projection?.publishCommittedVersion(stateVersion);
+    if (committedBy !== 'harness-interaction') this.#harnessInteraction?.publishCommittedVersion(stateVersion);
+  }
+
+  #announce<Result extends WorkspaceCommandResult>(result: Result): Result {
+    if (result.status === 'accepted') this.#publishCommitted(result.stateVersion);
     return result;
   }
 
+  #subscribeIdentity(onUpdate: (update: WorkspaceIdentityView) => void): UnsubscribeWorkspace {
+    let subscribed = true;
+    queueMicrotask(() => {
+      if (subscribed) onUpdate(this.#identityView);
+    });
+    return (): void => {
+      subscribed = false;
+    };
+  }
+
+  async execute(command: WorkspaceCommand): Promise<WorkspaceCommandResult> {
+    return await this.#commands.route(command?.kind, 'command')(command as never);
+  }
+
   async read<Request extends WorkspaceViewRequest>(request: Request): Promise<WorkspaceViewFor<Request>> {
-    if (request.kind === 'workspace.identity') {
-      return this.#identityView as WorkspaceViewFor<Request>;
-    }
-    if (
-      request.kind === 'legacy-review.sources' ||
-      request.kind === 'legacy-review.receipt-history' ||
-      request.kind === 'legacy-review.receipt-batch' ||
-      request.kind === 'legacy-review.queue-candidates' ||
-      request.kind === 'legacy-review.queue-candidate' ||
-      request.kind === 'legacy-review.moved-receipt-sources' ||
-      request.kind === 'legacy-review.moved-receipt-source'
-    ) {
-      if (this.#legacyReviewImport === undefined) {
-        throw new TypeError('Legacy Review projections require the runtime-owned writer');
-      }
-      return (await this.#legacyReviewImport.read(request)) as WorkspaceViewFor<Request>;
-    }
-    if (
-      request.kind.startsWith('workspace.current-changes.') ||
-      request.kind.startsWith('workspace.context.') ||
-      request.kind === 'workspace.review-comparison.capture'
-    ) {
-      return (await this.#evidence.read(request as WorkspaceEvidenceViewRequest)) as WorkspaceViewFor<Request>;
-    }
-    if (request.kind.startsWith('harness.')) {
-      if (this.#harnessInteraction === undefined) {
-        throw new TypeError('Harness projections require the runtime-owned writer');
-      }
-      return (await this.#harnessInteraction.read(
-        request as HarnessInteractionViewRequest,
-      )) as WorkspaceViewFor<Request>;
-    }
-    if (this.#projection === undefined) {
-      throw new TypeError('Workspace projections require the runtime-owned writer');
-    }
-    return (await this.#projection.read(request as WorkspaceProjectionViewRequest)) as WorkspaceViewFor<Request>;
+    return (await this.#views.route(request?.kind, 'view')(request as never)) as WorkspaceViewFor<Request>;
   }
 
   subscribe<Scope extends WorkspaceViewScope>(
     scope: Scope,
     onUpdate: (update: WorkspaceViewUpdateFor<Scope>) => void,
   ): UnsubscribeWorkspace {
-    if (scope.kind === 'workspace.identity') {
-      let subscribed = true;
-      queueMicrotask(() => {
-        if (subscribed) {
-          onUpdate(this.#identityView as WorkspaceViewUpdateFor<Scope>);
-        }
-      });
-      return (): void => {
-        subscribed = false;
-      };
-    }
-    if (scope.kind.startsWith('harness.')) {
-      if (this.#harnessInteraction === undefined) {
-        throw new TypeError('Harness projections require the runtime-owned writer');
-      }
-      return this.#harnessInteraction.subscribe(
-        scope as HarnessInteractionViewScope,
-        onUpdate as (update: HarnessInteractionViewUpdate) => void,
-      );
-    }
-    if (this.#projection === undefined) {
-      throw new TypeError('Workspace projections require the runtime-owned writer');
-    }
-    return this.#projection.subscribe(
-      scope as WorkspaceProjectionViewScope,
-      onUpdate as (update: WorkspaceProjectionViewUpdate) => void,
-    );
+    return this.#scopes.route(scope?.kind, 'subscription')(scope as never, onUpdate as never);
   }
 
   setAttention(attention: WorkspaceAttention): void {

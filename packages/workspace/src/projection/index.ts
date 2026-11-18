@@ -77,6 +77,7 @@ import {
   type StepChangedFile,
 } from './history.js';
 import type { SubscribeToWorkspaceInvalidation } from '../workspaceInvalidation.js';
+import { isLive } from './kinds.js';
 
 import {
   LIVE_BACKGROUND_FALLBACK_VERIFICATION_MS,
@@ -474,13 +475,7 @@ export class WorkspaceProjection {
       lastDeliveredLiveIdentity: undefined,
     };
     this.#subscriptions.add(subscription);
-    if (
-      scope.kind === 'review.live-manifest' ||
-      scope.kind === 'review.live-files' ||
-      scope.kind === 'review.continuation'
-    ) {
-      this.#startLiveInvalidation();
-    }
+    if (isLive(scope)) this.#startLiveInvalidation();
     queueMicrotask(() => this.#schedule(subscription));
     return (): void => {
       subscription.active = false;
@@ -522,14 +517,11 @@ export class WorkspaceProjection {
     void this.read(subscription.scope)
       .then(update => {
         if (!subscription.active) return;
-        const liveIdentity =
-          update.kind === 'review.live-manifest' ||
-          update.kind === 'review.live-files' ||
-          update.kind === 'review.continuation'
-            ? update.status === 'available'
-              ? update.liveChangesIdentity
-              : `${update.status}:${update.reason}`
-            : undefined;
+        const liveIdentity = isLive(update)
+          ? update.status === 'available'
+            ? update.liveChangesIdentity
+            : `${update.status}:${update.reason}`
+          : undefined;
         if (
           update.stateVersion <= subscription.lastDeliveredVersion &&
           liveIdentity === subscription.lastDeliveredLiveIdentity
@@ -618,25 +610,12 @@ export class WorkspaceProjection {
 
   #scheduleLiveSubscriptions(): void {
     for (const subscription of this.#subscriptions) {
-      if (
-        subscription.scope.kind === 'review.live-manifest' ||
-        subscription.scope.kind === 'review.live-files' ||
-        subscription.scope.kind === 'review.continuation'
-      ) {
-        this.#schedule(subscription);
-      }
+      if (isLive(subscription.scope)) this.#schedule(subscription);
     }
   }
 
   #stopLiveInvalidationWhenUnused(): void {
-    if (
-      [...this.#subscriptions].some(
-        subscription =>
-          subscription.scope.kind === 'review.live-manifest' ||
-          subscription.scope.kind === 'review.live-files' ||
-          subscription.scope.kind === 'review.continuation',
-      )
-    ) {
+    if ([...this.#subscriptions].some(subscription => isLive(subscription.scope))) {
       return;
     }
     this.#unsubscribeFromEvidenceInvalidation?.();
