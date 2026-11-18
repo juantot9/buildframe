@@ -2,7 +2,7 @@ import process from 'node:process';
 
 import { createCliRenderer, type CliRenderer } from '@opentui/core';
 import { decodeBytesBase64 } from '@buildframe/workspace/bytes-base64';
-import type { Workspace, WorkspaceCommand, WorkspaceCommandResult } from '@buildframe/workspace';
+import type { Workspace, WorkspaceCommand } from '@buildframe/workspace';
 import type { ReviewHarnessInteractionViewScope } from '@buildframe/workspace/harness-interaction';
 import type {
   ReviewLiveFilesView,
@@ -22,6 +22,7 @@ import {
   type ShellClipboardFactory,
 } from './shellClipboard.js';
 import { DebouncedSave } from './shellPreferences.js';
+import { executeCommand, semanticError } from './shellCommands.js';
 import {
   DIFF_WINDOW_SIZE,
   HARNESS_INTERACTION_WINDOW_SIZE,
@@ -43,7 +44,6 @@ import {
   type ReviewViewBundle,
 } from './reviewingModel.js';
 import { ReviewingView } from './reviewingView.js';
-import { runtimeErrorSentence } from './reviewingReasons.js';
 import { NOTICE_LIFETIME_MS, SPINNER_FRAME_MS } from './reviewingStatus.js';
 import { ReviewingHighlight } from './reviewingHighlight.js';
 import {
@@ -95,20 +95,6 @@ interface ActiveReviewRoute {
 }
 
 type ActiveRoute = ActiveHomeRoute | ActiveReviewRoute;
-
-const RUNTIME_SESSION_ERROR_CODES = new Set([
-  'runtime-disconnected',
-  'workspace-call-rejected',
-  'runtime-protocol-failure',
-]);
-
-/** A sentence for a failed Workspace call; runtime codes get their own wording. */
-function semanticError(error: unknown): string {
-  const code = error instanceof Error ? (error as Error & { readonly code?: unknown }).code : undefined;
-  if (typeof code === 'string' && RUNTIME_SESSION_ERROR_CODES.has(code)) return runtimeErrorSentence(code);
-  const detail = error instanceof Error && error.message.trim().length > 0 ? ` (${error.message.trim()})` : '';
-  return `Try again; if it keeps happening, restart BuildFrame${detail}.`;
-}
 
 type ReviewingSubscriptionScope = WorkspaceProjectionViewScope | ReviewHarnessInteractionViewScope;
 
@@ -1531,46 +1517,19 @@ class OpenReviewingApplication implements ReviewingApplication {
   }
 
   async #execute(command: WorkspaceCommand): Promise<void> {
-    try {
-      const result = await this.#workspace.execute(command);
-      if (this.#stopped) return;
-      const effects = this.#model.applyCommandResult(result);
+    const outcome = await executeCommand(this.#workspace, command, () => this.#stopped);
+    if (outcome.status === 'stopped') return;
+    if (outcome.status === 'lost') {
+      this.#model.markCommandResultUnavailable(outcome.sentence);
       this.#render();
-      this.#runEffects(effects);
-      if (!effects.some(effect => effect.type === 'show-home' || effect.type === 'show-review')) {
-        this.#scheduleRefresh();
-      }
-    } catch (error) {
-      if (this.#stopped) return;
-      const recovered = await this.#recoverCommandResult(command).catch(() => undefined);
-      if (recovered !== undefined) {
-        const effects = this.#model.applyCommandResult(recovered);
-        this.#render();
-        this.#runEffects(effects);
-        if (!effects.some(effect => effect.type === 'show-home' || effect.type === 'show-review')) {
-          this.#scheduleRefresh();
-        }
-        return;
-      }
-      this.#model.markCommandResultUnavailable(`Lost contact before BuildFrame answered. ${semanticError(error)}`);
-      this.#render();
+      return;
     }
-  }
-
-  async #recoverCommandResult(command: WorkspaceCommand): Promise<WorkspaceCommandResult | undefined> {
-    const view =
-      command.kind.startsWith('harness.') ||
-      command.kind === 'review.question.ask' ||
-      command.kind === 'review.message.commit'
-        ? await this.#workspace.read({
-            kind: 'harness.command-result',
-            commandIdentity: command.commandIdentity,
-          })
-        : await this.#workspace.read({
-            kind: 'review.command-result',
-            commandIdentity: command.commandIdentity,
-          });
-    return view.status === 'available' ? view.result : undefined;
+    const effects = this.#model.applyCommandResult(outcome.result);
+    this.#render();
+    this.#runEffects(effects);
+    if (!effects.some(effect => effect.type === 'show-home' || effect.type === 'show-review')) {
+      this.#scheduleRefresh();
+    }
   }
 
   async #loadCommitGraph(): Promise<void> {
