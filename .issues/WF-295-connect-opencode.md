@@ -56,3 +56,11 @@ Two changes to the plan:
   unknown. Only steered input and background reports make it unknown.
 - A reused message ID returns the original admission even with different text:
   the glue checks the admitted text on every submit.
+
+Owner decisions (2026-11-18, after the experiments):
+
+- **Release:** a third published package, `@buildframe/opencode`, installed
+  with `opencode plugin add @buildframe/opencode@x.y.z` (as Pi's
+  `@buildframe/pi`).
+- **Feedback:** include a small TUI part, so a successful `/buildframe` shows a
+  toast too, as with Pi and Claude.
