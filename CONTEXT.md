@@ -193,12 +193,12 @@ The stable lineage of candidate Plan Revisions owned by one Planning workflow. A
 _Avoid_: Current plan content, approved plan
 
 **Planning Origin**:
-The immutable provenance-bearing basis on which one Planning Workflow begins. It binds one user-confirmed goal to either the exact Planning Context Snapshot committed before exploration or the exact Offer Association and initial Plan Revision that created the Workflow. The associated-offer form explicitly records that BuildFrame captured no pre-Offer Harness context; its goal frames the Workflow from association onward and does not claim the Harness previously received it or generated the Revision from it. A Workflow has exactly one Origin, and later context, Revisions, Handoffs, or session changes never rewrite it.
+The immutable provenance-bearing basis on which one Planning Workflow begins. It binds one user-confirmed goal to the exact Planning Context Snapshot committed before exploration or the exact Offer Association and initial Plan Revision that created the Workflow. The associated-offer form records that BuildFrame captured no pre-Offer Harness context; its goal frames the Workflow from association onward, not claiming the Harness received it or generated the Revision from it. A Workflow has one Origin; later context, Revisions, Handoffs or session changes never rewrite it.
 _Avoid_: Harness-specific origin type, nullable Snapshot as provenance, inferred conversation goal, retrospective context capture
 
 **Planning Context Snapshot**:
-An immutable capture of the goal and selected context handed to a harness when exploration starts. It is the context-bearing form of a Planning Origin; later context changes do not alter it.
-_Avoid_: Prompt, attachment list, context inferred after a native Offer
+The immutable goal and `file:line` pointers handed to a harness when exploration starts; the harness reads the files itself, so no content is captured. It is the context-bearing form of a Planning Origin; later changes never alter it.
+_Avoid_: Prompt, captured file contents, context inferred after an Offer
 
 **Context Reuse**:
 An explicit action that seeds a new Workflow’s draft context selection from an existing Planning Context Snapshot or Review’s supporting context. It never carries context forward automatically: refreshed, changed, or missing material remains visible and subject to the new Workflow’s own preview and Handoff commitment.
