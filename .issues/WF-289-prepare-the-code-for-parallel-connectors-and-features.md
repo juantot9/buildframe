@@ -59,6 +59,7 @@ Features stream (only `workspace.ts`, `projection/` and `apps/buildframe`):
 
 - [Route Workspace commands and views by owner declaration](./WF-296-route-workspace-commands-and-views-by-owner-declaration.md)
 - [Split the app into a shell and screens](./WF-297-split-the-app-into-a-shell-and-screens.md) — supersedes WF-214's pane-split framing
+- [Move Reviewing onto the shell](./WF-301-move-reviewing-onto-the-shell.md) — blocked by WF-297, alongside WF-300
 - [Re-scope Planning's first slice for the post-0.1.0 product](./WF-298-re-scope-plannings-first-slice.md) — resolved 2026-11-18
 - [Try plan review with today's Reviewing](./WF-299-try-plan-review-with-todays-reviewing.md) — owner, no code
 - [Build Planning's first slice](./WF-300-build-plannings-first-slice.md) — blocked by WF-296, WF-297, WF-299

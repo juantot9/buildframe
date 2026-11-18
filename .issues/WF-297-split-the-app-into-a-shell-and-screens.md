@@ -144,3 +144,25 @@ three big files only shrinking:
 7. `shellHome.ts` and `reviewingHome.ts`.
 8. Behaviour tests move to a renderer-free `screenTest`; the frame suite
    shrinks to layout and rendering.
+
+## Progress and re-scope (2026-11-18)
+
+Steps 1–6d landed (`2124073` … `c221014`): the look, the key table and
+`?` list, the shell key order, Reviewing's ordered key actions, smooth
+scrolling, screen-tree swapping, the frame, copying and preference saving,
+commands with result recovery, keeping views current, and the terminal's
+lifecycle — each frame-identical, each with renderer-free tests where the
+part allows.
+
+**Re-scoped (owner, 2026-11-18): shell first, Reviewing later.** Moving
+Reviewing onto the screen interface means moving its keyboard, pointer,
+wheel, selection and composer wiring out of `ReviewingView` and turning its
+dialogs into shell-routed layers — the largest piece of the migration. So:
+
+- **Here (6e):** `defineScreen` and `createShell` built from the shell parts,
+  proven end-to-end by a small test screen on a real Workspace. Reviewing
+  keeps running on its own application, composed of the same parts.
+- **[WF-301](./WF-301-move-reviewing-onto-the-shell.md):** Reviewing becomes
+  a screen, Home becomes shell-owned with rows from every screen, the spinner
+  and notice timers become screen-reported, the model ↔ actions import loop
+  goes, and the scenario suite splits (old steps 7 and 8).
