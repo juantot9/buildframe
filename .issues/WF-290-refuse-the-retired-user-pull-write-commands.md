@@ -1,7 +1,7 @@
 ---
 id: WF-290
 title: "Refuse the retired User Pull write commands"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-289
@@ -69,7 +69,7 @@ stored stops being readable.
 - An interaction read never commits (a test that counts commits).
 - `pnpm verify` and the four risk probes pass.
 
-## Implementation evidence (2026-11-17, uncommitted on `review-commits-and-calm-panes`)
+## Implementation evidence (2026-11-17, landed in `f049ebc`)
 
 - `harnessInteraction.ts` 6,305 → 4,090 lines; `userPull.ts` and the four
   User Pull scenario files deleted; about 7,300 lines removed in total. The

@@ -1,7 +1,7 @@
 ---
 id: WF-293
 title: "Build the connector kit and move Pi and Claude onto it"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-289
@@ -151,5 +151,12 @@ under the file size budget; `harnessAdapter.ts` re-exports.
   lint at the 36-warning baseline, firewall, typecheck, build, build and
   Claude Direct smokes); `risk:pi` (Pi 1.5.0 live probe), `risk:runtime`,
   `risk:dogfood` passed.
-- Not run: CI; a live human connect-and-send round trip in Pi and in Claude
-  Code (owner).
+- Landed in `5079c68`. Live check on 2026-11-18 with the packed CLI and Pi
+  package from that commit, Pi 1.5.2 and Claude Code 2.1.323, in a throwaway
+  repository: Pi answered a Message; `/buildframe` in Claude replaced Pi, which
+  was told and stayed disconnected; Claude answered; Pi took the connection
+  back and Claude was told; `x` interrupted a running Pi turn; a stopped
+  runtime left Pi retrying and it reconnected when BuildFrame started again;
+  exiting Pi showed it disconnected; `/buildframe readonly` refused an edit and
+  Pi's full tools came back afterwards. Not checked live: typing during a
+  running Send (covered by the kit's tests).
