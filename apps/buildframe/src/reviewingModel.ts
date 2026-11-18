@@ -58,6 +58,7 @@ import { fitDisplayCellsEnd } from './displayCells.js';
 import { contentWindowContainsLine } from './reviewingContent.js';
 import { Key, matchesKey, printableInput, type ReviewingInput } from './reviewingInput.js';
 import { routeShellKey, type ShellKeyHost } from './shellInput.js';
+import { dispatchReviewingKey } from './reviewingActions.js';
 import { reasonSentence } from './reviewingReasons.js';
 import { outgoingStateSpins, type MessageState, type NoticeTone } from './reviewingStatus.js';
 import {
@@ -82,7 +83,6 @@ export const SEARCH_RESULT_WINDOW_SIZE = 64;
 export const HARNESS_INTERACTION_WINDOW_SIZE = 128;
 const MESSAGE_MAX_BYTES = 256 * 1024;
 /** Keys that write a Message or move the Review's own files or saved points; a shown step waits for Esc first. */
-const SHOWN_STEP_BLOCKED_KEYS: ReadonlySet<string> = new Set(['a', 'r', 'x', 'f', 't', 'R', 'C']);
 
 /** Outcomes a Message can be written again from: nothing it asked for is still running. */
 export const SEND_AGAIN_STATES: ReadonlySet<MessageState> = new Set([
@@ -660,8 +660,6 @@ const HELD_NAVIGATION_LIMIT = 16;
 /** Keys a read-only Snapshot dialog refuses until it is closed. */
 const HISTORICAL_REFUSED_KEYS: ReadonlySet<string> = new Set(['c', 's', '/', 'C', '?', '!', '<', '>']);
 
-const ACTS_ON_LOADED_REVIEW: ReadonlySet<string> = new Set(['a', 'y', 'f', 'r', 'x', 't', 'v', 'w', 'R', 'C']);
-
 /** Keys that only move selection or focus, safe to replay once a Message is saved. */
 function isHeldNavigation(data: ReviewingInput): boolean {
   if (data.ctrl || data.alt || data.super) return false;
@@ -1014,7 +1012,7 @@ function diffReloadOffset(state: ReviewingApplicationState): number {
   return Math.floor((view.window.offset + local) / DIFF_WINDOW_SIZE) * DIFF_WINDOW_SIZE;
 }
 
-function diffRow(state: ReviewingApplicationState) {
+export function diffRow(state: ReviewingApplicationState): ReviewProjectedDiffRow | undefined {
   return diffView(state)?.window.rows.find(row => row.rowIdentity === state.selectedRowIdentity);
 }
 
@@ -1582,7 +1580,7 @@ export class ReviewingApplicationModel {
    * changed code. Past the newest step is now again. A Review without history
    * (a fixed comparison) walks its saved Versions instead.
    */
-  private moveStep(delta: -1 | 1, keepFocus = false): readonly ReviewingModelEffect[] {
+  moveStep(delta: -1 | 1, keepFocus = false): readonly ReviewingModelEffect[] {
     const steps = navigableHistorySteps(this.state);
     if (steps === undefined) return this.moveVersion(delta);
     const shownKey = this.state.shownStep?.key;
@@ -2042,7 +2040,7 @@ export class ReviewingApplicationModel {
   }
 
   /** A key arrived mid-load: name what is loading and what to do, so nothing happens silently. */
-  private sayStillLoading(key: string): void {
+  sayStillLoading(key: string): void {
     const what = this.state.loading?.label ?? (this.state.pending === undefined ? 'the Review' : 'your last action');
     this.say(
       key === 'q'
@@ -2985,7 +2983,7 @@ export class ReviewingApplicationModel {
         },
       },
       escape: () => this.escapeScreen(),
-      screenKey: data => this.handleScreenKey(data, now),
+      screenKey: data => dispatchReviewingKey(this, data, now),
     };
   }
 
@@ -3008,220 +3006,21 @@ export class ReviewingApplicationModel {
     return [];
   }
 
-  private handleScreenKey(data: ReviewingInput, now: number): readonly ReviewingModelEffect[] {
-    if (
-      this.state.screen === 'home' &&
-      this.state.homeMode === 'comparison' &&
-      (matchesKey(data, Key.tab) || matchesKey(data, Key.shift('tab')))
-    ) {
-      this.state.comparisonMode = this.state.comparisonMode === 'commit' ? 'range-to-head' : 'commit';
-      this.state.comparisonPreview = undefined;
-      this.state.comparisonRequestedSelection = undefined;
-      this.state.selectedMergeParentIdentity = undefined;
-      const graph = this.state.commitGraph;
-      if (
-        this.state.comparisonMode === 'range-to-head' &&
-        graph?.status === 'available' &&
-        this.state.selectedCommitIdentity === graph.headObjectIdentity
-      ) {
-        const head = this.commitGraphCommits()[0];
-        const parent = head?.parentIdentities[0];
-        if (parent !== undefined) this.state.selectedCommitIdentity = parent;
-      }
-      return this.previewSelectedCommit();
-    }
-    if (
-      this.state.screen === 'home' &&
-      this.state.homeMode === 'comparison' &&
-      (matchesKey(data, Key.left) || matchesKey(data, Key.right) || data.text === 'h' || data.text === 'l')
-    ) {
-      return this.moveMergeParent(matchesKey(data, Key.left) || data.text === 'h' ? -1 : 1);
-    }
-    if (matchesKey(data, Key.tab)) return this.moveFocus(1);
-    if (matchesKey(data, Key.shift('tab'))) return this.moveFocus(-1);
-    if (matchesKey(data, Key.pageUp)) return this.page(-1);
-    if (matchesKey(data, Key.pageDown)) return this.page(1);
-    if (matchesKey(data, Key.home) || data.text === 'g') return this.moveToEdge('first');
-    if (matchesKey(data, Key.end) || data.text === 'G') return this.moveToEdge('last');
-    if (matchesKey(data, Key.up) || data.text === 'k') return this.move(-1);
-    if (matchesKey(data, Key.down) || data.text === 'j') return this.move(1);
-
-    if (this.state.screen === 'home') return this.handleHomeAction(data, now);
-    if (this.state.screen !== 'review') return [];
-    // While the Review loads, a key that acts on what is loading (write, copy,
-    // switch, send, interrupt) would act on the wrong thing or on nothing. Say
-    // so instead of running it; movement above keeps working.
-    if (this.state.loading !== undefined && data.text !== undefined && ACTS_ON_LOADED_REVIEW.has(data.text)) {
-      this.sayStillLoading(data.text);
+  /** Enter on a listed Message opens it where it lives: the Diff takes focus on its line. */
+  openListedMessage(): readonly ReviewingModelEffect[] {
+    const item = messageItem(this.state);
+    if (item === undefined) {
+      this.say('No Messages yet. Select a Diff line and press a to write one.', 'info');
       return [];
     }
-    if (data.text === 'y') return this.copyFocusedContent();
-    if (this.state.shownStep !== undefined) {
-      if (this.state.focus === 'files' && matchesKey(data, Key.enter)) {
-        this.state.focus = 'diff';
-        return [];
-      }
-      const actsOnReviewFiles =
-        this.state.focus === 'files' &&
-        (data.text === 'h' || data.text === 'l' || data.text === 'H' || data.text === 'L');
-      if (actsOnReviewFiles || SHOWN_STEP_BLOCKED_KEYS.has(data.text ?? '')) {
-        this.say('Press Esc to come back to now first.', 'info');
-        return [];
-      }
-    }
-    // r and x act on the selected Message from any pane: its card says so wherever it shows.
-    if (data.text === 'r') return this.sendSelectedMessageAgain();
-    if (data.text === 'x') return this.interruptSelectedMessage(now);
-    if (data.text === '[') return this.moveStep(-1);
-    if (data.text === ']') return this.moveStep(1);
-    if (data.text === 'R') return this.returnToLiveChanges();
-    if (data.text === 'C') return this.continueComparisonWithLiveChanges(now);
-    // Ctrl+H arrives as Backspace on terminals without the kitty keyboard protocol.
-    if (data.text === '<' || matchesKey(data, Key.ctrl('h'))) return this.resizeFocusedPaneBorder(-2);
-    if (data.text === '>' || matchesKey(data, Key.ctrl('l'))) return this.resizeFocusedPaneBorder(2);
-    if (data.text === 't') {
-      const active = this.state.activeReviewBasisIdentity ?? this.state.review?.bases.liveReviewBasisIdentity;
-      if (active !== undefined) {
-        this.state.basisPicker = { selectedReviewBasisIdentity: active };
-        this.state.notice = undefined;
-        this.state.showDetails = false;
-      }
-      return [];
-    }
-    if (data.text === 'f') {
-      const currentPath = reviewingFiles(this.state.review, this.state.fileScope).find(
-        file => file.fileIdentity === this.state.selectedFileIdentity,
-      )?.pathBytesBase64;
-      this.state.fileScope = this.state.fileScope === 'changed' ? 'all' : 'changed';
-      const files = reviewingFiles(this.state.review, this.state.fileScope);
-      // Stay on the same file when the other list has it; otherwise start at
-      // the top of the list as it is shown.
-      this.state.selectedFileIdentity = (
-        files.find(file => file.pathBytesBase64 === currentPath) ??
-        firstListedFile(files, this.state.collapsedDirectories)
-      )?.fileIdentity;
-      this.state.selectedDirectory = undefined;
-      this.state.selectedRowIdentity = undefined;
-      this.state.focus = 'files';
-      this.state.balancedContext = 'files';
-      this.state.notice =
-        this.state.fileScope === 'all'
-          ? 'Showing all files; you can leave a Message on any line.'
-          : 'Showing changed files only.';
-      return this.previewSelectedFile();
-    }
-    if (this.state.focus === 'files' && (data.text === 'h' || matchesKey(data, Key.left))) {
-      return this.collapseSelected();
-    }
-    if (this.state.focus === 'files' && (data.text === 'l' || matchesKey(data, Key.right))) {
-      return this.expandSelected();
-    }
-    if (this.state.focus === 'files' && data.text === 'H') return this.collapseAllFolders();
-    if (this.state.focus === 'files' && data.text === 'L') return this.expandAllFolders();
-    if (data.text === 'z') return this.toggleCodeOnly();
-    if (data.text === 'e') return this.openJumpList('files');
-    if (data.text === 'm') return this.openJumpList('messages');
-    if (data.text === 'J') return this.jumpFile(1);
-    if (data.text === 'K') return this.jumpFile(-1);
-    if (data.text === 's') {
-      this.state.filePaneVisible = !this.state.filePaneVisible;
-      if (!this.state.filePaneVisible && this.state.focus === 'files') {
-        this.state.focus = 'diff';
-      }
-      if (this.state.filePaneVisible) {
-        this.state.balancedContext = 'files';
-        this.setViewport(this.state.width, this.state.height);
-      } else if (this.state.balancedContext === 'files') {
-        this.state.balancedContext = 'questions';
-      }
-      this.state.notice = this.state.filePaneVisible ? 'Files pane shown.' : 'Files pane hidden.';
-      return [this.reviewingPreferencesSaveEffect()];
-    }
-    if (data.text === '/') {
-      this.state.search = {
-        query: '',
-        cursor: 0,
-        view: undefined,
-        selectedResultIdentity: undefined,
-        loading: false,
-        preview: undefined,
-        previewResultIdentity: undefined,
-        previewLoading: false,
-        requestedResultAbsolute: undefined,
-      };
-      this.state.notice = undefined;
-      return [];
-    }
-
-    if (this.state.focus === 'diff' && (matchesKey(data, Key.shift('left')) || matchesKey(data, Key.shift('right')))) {
-      if (this.state.wrapDiffLines) {
-        this.say('Lines wrap, so there is nothing to scroll sideways. Press w to stop wrapping.', 'info');
-        return [];
-      }
-      const direction = matchesKey(data, Key.shift('left')) ? -4 : 4;
-      this.state.diffHorizontalOffset = Math.max(0, this.state.diffHorizontalOffset + direction);
-      return [];
-    }
-    if (this.state.focus === 'diff' && (matchesKey(data, Key.left) || data.text === 'h')) {
-      const row = diffRow(this.state);
-      if (row?.oldLine !== undefined) this.state.anchorSide = 'old';
-      else if (row !== undefined) this.say('This line was added, so it has no old side.', 'info');
-      return [];
-    }
-    if (this.state.focus === 'diff' && (matchesKey(data, Key.right) || data.text === 'l')) {
-      const row = diffRow(this.state);
-      if (row?.newLine !== undefined) this.state.anchorSide = 'new';
-      else if (row !== undefined) this.say('This line was removed, so it has no new side.', 'info');
-      return [];
-    }
-    if (data.text === 'w' && this.state.focus === 'diff') {
-      this.state.wrapDiffLines = !this.state.wrapDiffLines;
-      this.state.diffHorizontalOffset = 0;
-      this.state.notice = this.state.wrapDiffLines
-        ? 'Diff line wrapping enabled.'
-        : 'Diff line wrapping disabled; use Shift+Left/Right to scroll code.';
-      return [];
-    }
-    if (data.text === 'v' && this.state.focus === 'diff') {
-      this.state.diffMode = this.state.diffMode === 'inline' ? 'side-by-side' : 'inline';
-      this.state.notice = this.state.diffMode === 'inline' ? 'Showing inline Diff.' : 'Showing side-by-side Diff.';
-      return [];
-    }
-    if (data.text === 'w' || data.text === 'v') {
-      this.say(
-        `Press Tab to reach the Diff, then press ${data.text} to ${data.text === 'w' ? 'wrap lines' : 'switch the Diff layout'}.`,
-        'info',
-      );
-      return [];
-    }
-    if (data.text === 'a') return this.openCreateEditor();
-    if (matchesKey(data, Key.enter)) {
-      if (this.state.focus === 'files') {
-        if (this.state.selectedDirectory !== undefined) return this.expandSelected();
-        return this.openSelectedFile();
-      }
-      if (this.state.focus === 'questions') {
-        // Enter opens the Message where it lives: the Diff takes focus on its line.
-        const item = messageItem(this.state);
-        if (item === undefined) {
-          this.say('No Messages yet. Select a Diff line and press a to write one.', 'info');
-          return [];
-        }
-        // Say where Enter went, since the Diff may already have been on that line.
-        this.#landingNotice = `${messageOrdinal(this.state, item)} · ${item.location.file.display}:${item.location.line}`;
-        // Only what this navigation says may replace the landing line.
-        this.state.notice = undefined;
-        const effects = this.openSelectedMessage();
-        this.state.focus = 'diff';
-        if (this.state.loading === undefined) this.announceLanding();
-        return effects;
-      }
-      if (this.state.focus === 'diff') {
-        this.say('Press a to write a Message on this line.', 'info');
-        return [];
-      }
-    }
-    return [];
+    // Say where Enter went, since the Diff may already have been on that line.
+    this.#landingNotice = `${messageOrdinal(this.state, item)} · ${item.location.file.display}:${item.location.line}`;
+    // Only what this navigation says may replace the landing line.
+    this.state.notice = undefined;
+    const effects = this.openSelectedMessage();
+    this.state.focus = 'diff';
+    if (this.state.loading === undefined) this.announceLanding();
+    return effects;
   }
 
   handlePointerTarget(target: ReviewingPointerTarget): readonly ReviewingModelEffect[] {
@@ -3565,7 +3364,7 @@ export class ReviewingApplicationModel {
    * code, with its text, so a failed or lost Message can go again without
    * retyping. Nothing is sent until Enter; it is saved as a new Message.
    */
-  private sendSelectedMessageAgain(
+  sendSelectedMessageAgain(
     /** Its file was just loaded by path, so a missing file now really is missing. */
     landed = false,
   ): readonly ReviewingModelEffect[] {
@@ -3662,7 +3461,7 @@ export class ReviewingApplicationModel {
   }
 
   /** Asks the agent to stop the selected Message's running turn; the card shows the outcome. */
-  private interruptSelectedMessage(now: number): readonly ReviewingModelEffect[] {
+  interruptSelectedMessage(now: number): readonly ReviewingModelEffect[] {
     const review = this.state.review;
     const messageIdentity = this.state.selectedMessageIdentity;
     if (review === undefined) return [];
@@ -3710,7 +3509,7 @@ export class ReviewingApplicationModel {
     return [{ type: 'execute', command }];
   }
 
-  private copyFocusedContent(): readonly ReviewingModelEffect[] {
+  copyFocusedContent(): readonly ReviewingModelEffect[] {
     if (this.state.focus === 'diff') {
       const row = diffRow(this.state);
       if (row === undefined) {
@@ -3767,7 +3566,7 @@ export class ReviewingApplicationModel {
   }
 
   /** e or m: opens the list on the file or Message you're on; it says so instead when there's nothing to list. */
-  private openJumpList(kind: JumpListState['kind']): readonly ReviewingModelEffect[] {
+  openJumpList(kind: JumpListState['kind']): readonly ReviewingModelEffect[] {
     if (this.state.review === undefined) return [];
     this.state.jumpList = { kind, selectedKey: undefined, query: '', filtering: false };
     const rows = jumpListRows(this.state);
@@ -3877,7 +3676,7 @@ export class ReviewingApplicationModel {
    * J/K: the next or previous file in the Diff, from any pane and without the
    * Files pane on screen; a shown step moves through its own files.
    */
-  private jumpFile(direction: 1 | -1): readonly ReviewingModelEffect[] {
+  jumpFile(direction: 1 | -1): readonly ReviewingModelEffect[] {
     const edge = direction > 0 ? 'This is the last file.' : 'This is the first file.';
     if (this.state.shownStep !== undefined) {
       const files = this.state.shownStep.files ?? [];
@@ -3923,7 +3722,7 @@ export class ReviewingApplicationModel {
   }
 
   /** z: the Diff alone at every width, or every pane again; remembered like the other layout choices. */
-  private toggleCodeOnly(): readonly ReviewingModelEffect[] {
+  toggleCodeOnly(): readonly ReviewingModelEffect[] {
     this.setCodeOnly(!this.state.codeOnly);
     const narrow = layoutForWidth(this.state.width) === 'linear';
     this.say(
@@ -3944,7 +3743,7 @@ export class ReviewingApplicationModel {
     this.setViewport(this.state.width, this.state.height);
   }
 
-  private reviewingPreferencesSaveEffect(): ReviewingModelEffect {
+  reviewingPreferencesSaveEffect(): ReviewingModelEffect {
     return {
       type: 'save-reviewing-preferences',
       preferences: {
@@ -3962,7 +3761,7 @@ export class ReviewingApplicationModel {
     };
   }
 
-  private resizeFocusedPaneBorder(borderDelta: -2 | 2): readonly ReviewingModelEffect[] {
+  resizeFocusedPaneBorder(borderDelta: -2 | 2): readonly ReviewingModelEffect[] {
     if (this.state.layout === 'linear' || this.state.focus === 'diff') {
       this.say(`Press Tab to reach Files or ${messagesPaneName(this.state)}, then press < or > to resize it.`, 'info');
       return [];
@@ -3993,7 +3792,7 @@ export class ReviewingApplicationModel {
     return [];
   }
 
-  private moveFocus(direction: -1 | 1): readonly ReviewingModelEffect[] {
+  moveFocus(direction: -1 | 1): readonly ReviewingModelEffect[] {
     if (this.state.screen !== 'review') return [];
     const order: readonly ReviewRegion[] =
       this.state.shownStep !== undefined
@@ -4027,7 +3826,7 @@ export class ReviewingApplicationModel {
     return [];
   }
 
-  private move(direction: -1 | 1): readonly ReviewingModelEffect[] {
+  move(direction: -1 | 1): readonly ReviewingModelEffect[] {
     if (this.state.screen === 'home') return this.moveHome(direction, true);
     if (this.state.screen !== 'review' || this.state.review === undefined) return [];
     if (this.state.focus === 'files' && this.state.shownStep !== undefined) return this.moveChangedFile(direction);
@@ -4043,7 +3842,7 @@ export class ReviewingApplicationModel {
     return this.moveDiff(direction);
   }
 
-  private page(direction: -1 | 1): readonly ReviewingModelEffect[] {
+  page(direction: -1 | 1): readonly ReviewingModelEffect[] {
     const visible = Math.max(1, this.state.height - 10);
     if (this.state.screen === 'home') return this.moveHome(direction * visible);
     if (this.state.screen !== 'review') return [];
@@ -4067,7 +3866,7 @@ export class ReviewingApplicationModel {
     return this.moveDiff(direction * distance);
   }
 
-  private moveToEdge(edge: 'first' | 'last'): readonly ReviewingModelEffect[] {
+  moveToEdge(edge: 'first' | 'last'): readonly ReviewingModelEffect[] {
     // Edge jumps clamp to the opposite extreme; only single steps and pages cycle.
     const direction = edge === 'first' ? -Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
     if (this.state.screen === 'home') return this.moveHome(direction);
@@ -4269,7 +4068,7 @@ export class ReviewingApplicationModel {
     ];
   }
 
-  private returnToLiveChanges(): readonly ReviewingModelEffect[] {
+  returnToLiveChanges(): readonly ReviewingModelEffect[] {
     if (this.state.historicalDialog !== undefined) {
       return this.closeHistoricalDialog();
     }
@@ -4311,7 +4110,7 @@ export class ReviewingApplicationModel {
   }
 
   /** Follows Files-pane selection with a bounded Diff load; skipped for unchanged files. */
-  private previewSelectedFile(anchorLine?: number): readonly ReviewingModelEffect[] {
+  previewSelectedFile(anchorLine?: number): readonly ReviewingModelEffect[] {
     const review = this.state.review;
     const file = this.selectedFileEntry();
     if (review === undefined || file === undefined) {
@@ -4683,7 +4482,7 @@ export class ReviewingApplicationModel {
   }
 
   /** neo-tree h: collapse the selected folder, or the file's parent folder. */
-  private collapseSelected(): readonly ReviewingModelEffect[] {
+  collapseSelected(): readonly ReviewingModelEffect[] {
     if (this.state.selectedDirectory !== undefined) {
       const directory = this.state.selectedDirectory;
       if (!this.state.collapsedDirectories.includes(directory)) {
@@ -4709,7 +4508,7 @@ export class ReviewingApplicationModel {
   }
 
   /** neo-tree l: expand the selected folder, descend into it, or open the file. */
-  private expandSelected(): readonly ReviewingModelEffect[] {
+  expandSelected(): readonly ReviewingModelEffect[] {
     if (this.state.selectedDirectory !== undefined) {
       const directory = this.state.selectedDirectory;
       if (this.state.collapsedDirectories.includes(directory)) {
@@ -4729,7 +4528,7 @@ export class ReviewingApplicationModel {
   }
 
   /** neo-tree W/E equivalents: fold or unfold every folder at once. */
-  private collapseAllFolders(): readonly ReviewingModelEffect[] {
+  collapseAllFolders(): readonly ReviewingModelEffect[] {
     const directories = new Set<string>();
     for (const file of reviewingFiles(this.state.review, this.state.fileScope)) {
       const slash = file.displayPath.lastIndexOf('/');
@@ -4745,7 +4544,7 @@ export class ReviewingApplicationModel {
     return this.previewSelectedFile();
   }
 
-  private expandAllFolders(): readonly ReviewingModelEffect[] {
+  expandAllFolders(): readonly ReviewingModelEffect[] {
     this.state.collapsedDirectories = Object.freeze([]);
     this.state.notice = 'All folders expanded.';
     return this.previewSelectedFile();
@@ -4768,7 +4567,7 @@ export class ReviewingApplicationModel {
     return [];
   }
 
-  private openSelectedFile(): readonly ReviewingModelEffect[] {
+  openSelectedFile(): readonly ReviewingModelEffect[] {
     const review = this.state.review;
     if (review === undefined) return [];
     const file = reviewingFiles(review, this.state.fileScope).find(
@@ -5250,7 +5049,7 @@ export class ReviewingApplicationModel {
     ];
   }
 
-  private handleHomeAction(data: ReviewingInput, now: number): readonly ReviewingModelEffect[] {
+  handleHomeAction(data: ReviewingInput, now: number): readonly ReviewingModelEffect[] {
     const home = this.state.home;
     if (home === undefined) return [];
     if (this.state.homeMode === 'comparison') {
@@ -5361,7 +5160,7 @@ export class ReviewingApplicationModel {
     return [];
   }
 
-  private commitGraphCommits(): readonly ReviewCommitGraphCommit[] {
+  commitGraphCommits(): readonly ReviewCommitGraphCommit[] {
     const graph = this.state.commitGraph;
     return graph?.status === 'available' ? graph.rows.filter(row => row.kind === 'commit') : [];
   }
@@ -5381,7 +5180,7 @@ export class ReviewingApplicationModel {
     return this.previewSelectedCommit();
   }
 
-  private previewSelectedCommit(): readonly ReviewingModelEffect[] {
+  previewSelectedCommit(): readonly ReviewingModelEffect[] {
     const revision = this.state.selectedCommitIdentity;
     if (revision === undefined) return [];
     if (this.state.comparisonMode === 'commit') {
@@ -5406,7 +5205,7 @@ export class ReviewingApplicationModel {
     return this.requestComparisonPreview({ kind: 'commit-to-head', revision });
   }
 
-  private moveMergeParent(direction: -1 | 1): readonly ReviewingModelEffect[] {
+  moveMergeParent(direction: -1 | 1): readonly ReviewingModelEffect[] {
     if (this.state.comparisonMode !== 'commit') return [];
     const commit = this.commitGraphCommits().find(item => item.objectIdentity === this.state.selectedCommitIdentity);
     if (commit === undefined || commit.parentIdentities.length < 2) return [];
@@ -5863,7 +5662,7 @@ export class ReviewingApplicationModel {
     };
   }
 
-  private openCreateEditor(): readonly ReviewingModelEffect[] {
+  openCreateEditor(): readonly ReviewingModelEffect[] {
     if (this.state.pending !== undefined) return [];
     if (this.state.loading !== undefined) {
       this.sayStillLoading('a');
@@ -5897,7 +5696,7 @@ export class ReviewingApplicationModel {
     return [];
   }
 
-  private continueComparisonWithLiveChanges(now: number): readonly ReviewingModelEffect[] {
+  continueComparisonWithLiveChanges(now: number): readonly ReviewingModelEffect[] {
     if (this.state.pending !== undefined || this.state.editor !== undefined || this.state.loading !== undefined) {
       return [];
     }

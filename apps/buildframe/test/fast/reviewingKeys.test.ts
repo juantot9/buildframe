@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { ReviewingApplicationState } from '../../src/reviewingModel.js';
 import { reviewingFooterSentence, reviewingKeyList, reviewingKeysRow } from '../../src/reviewingView.js';
+import { REVIEWING_ACTED_KEYS } from '../../src/reviewingActions.js';
+import { REVIEWING_KEYS } from '../../src/reviewingKeys.js';
 import { defineKeyTable } from '../../src/shellKeys.js';
 
 /**
@@ -147,5 +149,19 @@ describe('the Reviewing key table', () => {
         helpFor: {},
       }),
     ).toThrow('Footer mode main shows more than 4 keys');
+  });
+
+  it('shows only keys that act: every key in a footer or `?` list has an action', () => {
+    const shown = [
+      ...Object.values(REVIEWING_KEYS.footer)
+        .filter(mode => !mode.typing)
+        .flatMap(mode => mode.keys.map(placement => placement.id)),
+      ...Object.values(REVIEWING_KEYS.help).flatMap(mode =>
+        mode.keys.flatMap(placement => [placement.id, ...(placement.alsoCovers ?? [])]),
+      ),
+    ];
+    // Esc belongs to the shell: it closes what is open, then the screen's own Esc runs.
+    const silent = [...new Set(shown)].filter(id => id !== 'esc' && !REVIEWING_ACTED_KEYS.has(id));
+    expect(silent).toEqual([]);
   });
 });

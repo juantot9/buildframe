@@ -1,4 +1,5 @@
 import { displayCells, fitDisplayCellsEnd } from './displayCells.js';
+import { matchesKey, type ReviewingInput, type ReviewingKeySpec } from './reviewingInput.js';
 
 /**
  * A screen's keys as data. One table names every key once, and each mode says
@@ -178,3 +179,46 @@ export function keyList<S, Id extends string, F extends string, H extends string
   );
   return items;
 }
+
+/**
+ * What one key does, in the order a screen checks it. The first action whose
+ * key matches and whose condition holds runs; a key nothing matches does
+ * nothing. `actsFor` names the table keys this action carries out, so a test
+ * can check that every key the footer or `?` shows really acts.
+ */
+export interface KeyAction<M, E> {
+  readonly actsFor: readonly string[];
+  readonly match: (input: ReviewingInput) => boolean;
+  readonly when?: (model: M) => boolean;
+  run(model: M, input: ReviewingInput, now: number): readonly E[];
+}
+
+export function dispatchKey<M, E>(
+  actions: readonly KeyAction<M, E>[],
+  model: M,
+  input: ReviewingInput,
+  now: number,
+): readonly E[] {
+  for (const action of actions) {
+    if (action.match(input) && (action.when === undefined || action.when(model))) return action.run(model, input, now);
+  }
+  return [];
+}
+
+/** Matches a printed character. */
+export const onText =
+  (...texts: readonly string[]) =>
+  (input: ReviewingInput): boolean =>
+    input.text !== undefined && texts.includes(input.text);
+
+/** Matches a named key or chord. */
+export const onKey =
+  (...keys: readonly ReviewingKeySpec[]) =>
+  (input: ReviewingInput): boolean =>
+    keys.some(key => matchesKey(input, key));
+
+/** Matches any of several matchers. */
+export const either =
+  (...matchers: readonly ((input: ReviewingInput) => boolean)[]) =>
+  (input: ReviewingInput): boolean =>
+    matchers.some(matcher => matcher(input));
