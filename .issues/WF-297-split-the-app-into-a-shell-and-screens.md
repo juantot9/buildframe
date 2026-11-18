@@ -74,3 +74,73 @@ of the Reviewing screen.
 - A test that every binding in a screen's table appears in its `?` list.
 - `pnpm verify` passes; manual pass in wide, narrow, `--no-color`, `--ascii`,
   light and dark terminals.
+
+## UX brief (Impeccable shape, owner-confirmed 2026-11-18)
+
+- **No visible change in WF-297.** Every frame, key and setting stays as it is;
+  the scenario suite's captured frames prove it. Planning (WF-300) then adds
+  a screen and Home rows without editing Reviewing.
+- **The shell owns** the header row and the context-row slot under it, the
+  two-row footer with its fixed right anchor (`[?] keys  [q] quit`, or
+  `[Ctrl+C] quit` while typing), the `?` key list, Configuration, the dialog
+  stack, theme, notices, smooth scrolling, Esc to Home, and the quit rule (`q`
+  only when nothing is loading or saving).
+- **A screen supplies** its route name, its context row, its body, its modes
+  (a sentence and three or four keys each), and one key table — label, rank
+  for narrow dropping, modes, action — that drives both the keys row and the
+  `?` list, so they cannot drift.
+- **Switching is through Home, plus Implement.** Esc closes what is open
+  inside a screen first, then goes Home. Implement on an approved plan sends
+  its Message and opens Reviewing of the current changes. No new global key,
+  no tab bar, no screen switcher, no second accent.
+- **Home stays one card**, grouped: Review current changes · Review a commit
+  or range · Plan something new · Previous Reviews · Plans. With Planning off
+  the Planning rows disappear and the card is exactly today's. "Plans (none
+  yet)" in Pewter when empty.
+- **On a Plan** the header reads `BuildFrame / Plan` with the connection on
+  the right; the row below names the plan and its versions, like a Review's
+  history row.
+- **Left to WF-300:** Plan icons and their ASCII twins (not `>`, `-`, `+`, `@`,
+  `=`, `%`).
+
+## Resolution (2026-11-18, before code)
+
+Designed three ways (smallest interface, most flexible, easiest next screen);
+the owner chose the easiest-next-screen design after a worked Planning
+example, with three pieces from the flexible one.
+
+- **`defineScreen({...})`** in `shellScreen.ts`: state, `open`, `title`,
+  `mode`/`modes` (a sentence and up to four footer keys each), one key table,
+  `context`/`body`, `views`/`receive` (the shell reads every view at one State
+  version and re-reads when State changes), `settled` (command results), and
+  `home` (rows the screen adds to the Home card). Screens return effects
+  (`execute`, `open`, `home`, `copy`) and never do I/O themselves.
+- **One key table** drives dispatch, the keys row and the `?` list. Each
+  binding has a stable `id`, a footer `label` and a separate `help` text
+  (today's wording differs between the two), optional `modes`, `rank`,
+  `waits` (still loading) and `blocked` (keeps its slot and says why).
+  `defineScreen` checks at definition time: no reserved key (`q ? c ! Space
+  Ctrl+C`), no key claimed twice in one mode, at most four footer keys.
+- **The shell owns Home**, built from each registered screen's `home`
+  section; Planning off means it is not registered.
+- **`extend`** holds what only Reviewing needs (its dialogs, its own loaders,
+  glide targets, pointer and wheel). It has one user, so it is migration
+  scaffolding expected to shrink; WF-300 does not use it.
+- **Owner decision:** in comparison mode `?` always lists Enter, and pressing
+  it without a preview says why (DESIGN.md: a key that can't act yet keeps its
+  slot). A small visible change, made in the key-table step.
+
+**Migration**, each step committed with every scenario frame unchanged and the
+three big files only shrinking:
+1. Move the look (themes, presets, text and box helpers) out of
+   `reviewingView.ts` into `shellLook.ts`; re-export the presets.
+2. The key table draws the keys row and the `?` list (display only), proved by
+   exact strings for every mode at several widths.
+3. The shell routes the global keys (`q`, `?`, `c`, `!`, Esc, Ctrl+C).
+4. Bindings dispatch directly; the legacy `handleInput` tail goes.
+5. Frame, render loop, glide and textarea move to `shell*.ts`.
+6. Effects and views move to `shellEffects.ts` / `shellViews.ts`;
+   `createReviewingApplication` becomes `createShell({ screens })`.
+7. `shellHome.ts` and `reviewingHome.ts`.
+8. Behaviour tests move to a renderer-free `screenTest`; the frame suite
+   shrinks to layout and rendering.
