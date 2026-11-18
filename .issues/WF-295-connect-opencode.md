@@ -85,5 +85,5 @@ Owner decisions (2026-11-18, after the experiments):
   delivery, answered), and a second Message during which a typed `steer` prompt
   was held as `queue` and BuildFrame's Message still settled as answered;
   `pnpm verify` passes (602 tests).
-- Not done: a read-only mode (Pi only today), and publishing (WF-213's release
-  process).
+- Not done: a read-only mode (Pi only today), and publishing the package to
+  npm with the next release.
