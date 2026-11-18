@@ -44,3 +44,17 @@ amendments:
 A resolution in this ticket that supersedes the P31–P41 cards in WF-051 (that
 file is past the size budget, so the amendment lives here), and the first
 Planning implementation ticket, blocked by WF-296 and WF-297.
+
+## Grilling, round 1 (2026-11-18)
+
+- **What Planning is for — open.** The owner leans towards shaping the plan
+  together from the start (goal and context before the agent explores) over
+  reviewing a finished plan, and asked for research first: how feasible each
+  is, the impact on the user, and what Plannotator and similar tools do.
+- **Starts now**, without waiting for P30. WF-296 and WF-297 replace its gate:
+  Reviewing must need no special cases once Planning arrives.
+- **No Manual Handoff** in the first slice; the connected session only.
+- **The July design (WF-005, P31–P41) is background reference**, not
+  authority. Its truth rules stay; its vocabulary is kept where it still fits.
+- **One path for every connected agent** through the connector kit; native
+  plan-mode capture (Claude, OpenCode, Pi) is a later slice per host.
