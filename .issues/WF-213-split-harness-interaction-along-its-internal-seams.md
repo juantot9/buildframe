@@ -6,7 +6,7 @@ labels:
   - wayfinder:task
 parent: WF-205
 assignee: null
-blocked_by: []
+blocked_by: [WF-290]
 created: 2026-09-07
 ---
 
@@ -117,6 +117,12 @@ local 381-test full suite, so both are recorded as runner timing flakes, not
 WF-213 regressions.
 
 ## Stage 2 (open design question)
+
+> **2026-11-17:** stage 2 is now part of
+> [WF-289](./WF-289-prepare-the-code-for-parallel-connectors-and-features.md)'s
+> shared clean-up and waits for
+> [Refuse the retired User Pull write commands](./WF-290-refuse-the-retired-user-pull-write-commands.md),
+> which removes ~2,000 lines first. The class is 6,305 lines at `f7e4ac7`.
 
 The class statement is still 3,483 lines and ~50 methods. The proposed
 composition follows the method families the class already has: adapter

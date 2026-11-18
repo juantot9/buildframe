@@ -1,7 +1,7 @@
 ---
 id: WF-214
 title: "Split the Reviewing view and its scenario along pane seams"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-205
@@ -9,6 +9,13 @@ assignee: null
 blocked_by: []
 created: 2026-09-07
 ---
+
+## Superseded (2026-11-17)
+
+[Split the app into a shell and screens](./WF-297-split-the-app-into-a-shell-and-screens.md)
+replaces this ticket. Planning needs a second top-level screen, so the seam
+that matters is shell versus screen; the pane split becomes internal to the
+Reviewing screen there, and the scenario test splits with it.
 
 ## Question
 
