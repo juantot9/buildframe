@@ -8,15 +8,26 @@ type Listener = (update: object) => void;
 
 /** A Workspace that only subscribes; the test pushes updates by scope kind. */
 function fakeWorkspace() {
-  const listeners = new Map<string, Listener>();
+  const listeners = new Map<string, Set<Listener>>();
   const unsubscribed: string[] = [];
   const workspace = {
     subscribe: (scope: WorkspaceViewScope, listener: Listener) => {
-      listeners.set(scope.kind, listener);
-      return () => unsubscribed.push(scope.kind);
+      const current = listeners.get(scope.kind) ?? new Set<Listener>();
+      listeners.set(scope.kind, current);
+      current.add(listener);
+      return () => {
+        current.delete(listener);
+        unsubscribed.push(scope.kind);
+      };
     },
   } as unknown as Workspace;
-  return { workspace, push: (kind: string, update: object) => listeners.get(kind)?.(update), unsubscribed };
+  return {
+    workspace,
+    push: (kind: string, update: object) => {
+      for (const listener of listeners.get(kind) ?? []) listener(update);
+    },
+    unsubscribed,
+  };
 }
 
 async function settle(): Promise<void> {
@@ -80,8 +91,22 @@ describe('keeping views current', () => {
   it('replaces the subscription in a slot as a whole', () => {
     const { watch, fake } = watcher();
     watch.watch(scope('review.diff'), 1, -1, undefined, 'diff');
-    watch.release('diff');
-    watch.release('diff');
+    watch.watch(scope('review.manifest'), 1, -1, undefined, 'diff');
     expect(fake.unsubscribed).toEqual(['review.diff']);
+    watch.release('diff');
+    watch.release('diff');
+    expect(fake.unsubscribed).toEqual(['review.diff', 'review.manifest']);
+  });
+
+  it('keeps watching a scope after one of two slots using it is released', async () => {
+    const { watch, fake, refreshes } = watcher();
+    watch.watch(scope('workspace.home'), 1, 4, undefined, 'first');
+    watch.watch(scope('workspace.home'), 1, 4, undefined, 'second');
+    expect(fake.unsubscribed).toEqual([]);
+    watch.release('first');
+    fake.push('workspace.home', { stateVersion: 5 });
+    await settle();
+    expect(refreshes()).toBe(1);
+    expect(fake.unsubscribed).toEqual(['workspace.home']);
   });
 });

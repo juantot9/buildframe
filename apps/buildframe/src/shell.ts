@@ -20,8 +20,7 @@ import { theme, type Look } from './shellLook.js';
 import { ShellRoots } from './shellRoots.js';
 import { dispatchScreenKey, type Screen, type ScreenEffect } from './shellScreen.js';
 import { ShellTerminal } from './shellTerminal.js';
-import { isLiveScope, liveViewIdentity, ShellWatch } from './shellWatch.js';
-import { readTogether } from './shellViews.js';
+import { ShellViews } from './shellViews.js';
 import {
   DEFAULT_REVIEWING_PREFERENCES,
   createEphemeralUserConfiguration,
@@ -56,8 +55,6 @@ type ShellEffect = ScreenEffect | { readonly type: 'stop' };
 interface OpenScreen {
   readonly screen: Screen<any, any>;
   readonly state: unknown;
-  /** Each view's scope as last watched, by the screen's name for it. */
-  readonly watched: Map<string, string>;
 }
 
 const ROOT_ID = 'shell';
@@ -80,7 +77,7 @@ class ShellApplication implements Shell {
   readonly #options: ShellOptions;
   readonly #screens: ReadonlyMap<string, Screen<any, any>>;
   readonly #stack: OpenScreen[] = [];
-  readonly #watch: ShellWatch;
+  readonly #views: ShellViews;
   #look: Look;
   #terminal: ShellTerminal | undefined;
   #roots: ShellRoots | undefined;
@@ -90,8 +87,6 @@ class ShellApplication implements Shell {
   #said: { readonly text: string; readonly tone: NoticeTone } | undefined;
   #saidTimer: NodeJS.Timeout | undefined;
   #keyListOpen = false;
-  #generation = 0;
-  #loading = false;
   #saving = 0;
   #started = false;
   #stopped = false;
@@ -110,13 +105,9 @@ class ShellApplication implements Shell {
       background: DEFAULT_REVIEWING_PREFERENCES.background,
       terminalThemeMode: undefined,
     };
-    this.#watch = new ShellWatch({
-      workspace: options.workspace,
-      current: generation => !this.#stopped && generation === this.#generation,
-      stopped: () => this.#stopped,
-      isLive: isLiveScope,
-      failed: () => this.#say('Workspace projection records are invalid.', 'error'),
-      refresh: async () => await this.#readViews(),
+    this.#views = new ShellViews(options.workspace, {
+      changed: () => this.#render(),
+      say: (sentence, tone) => this.#say(sentence, tone),
     });
   }
 
@@ -162,9 +153,8 @@ class ShellApplication implements Shell {
   async stop(): Promise<void> {
     if (this.#stopped) return;
     this.#stopped = true;
-    this.#generation += 1;
     this.#clipboard?.cancel();
-    this.#watch.clear();
+    this.#views.stop();
     this.#unsubscribeFromConnection?.();
     if (this.#saidTimer !== undefined) clearTimeout(this.#saidTimer);
     const terminal = this.#terminal;
@@ -200,66 +190,22 @@ class ShellApplication implements Shell {
   async #open(name: string, args: unknown): Promise<void> {
     const screen = this.#screens.get(name);
     if (screen === undefined) throw new TypeError(`No screen named ${name}`);
-    this.#stack.push({ screen, state: screen.open(args), watched: new Map() });
+    this.#stack.push({ screen, state: screen.open(args) });
     await this.#show();
   }
 
   /** Shows the top screen afresh: its own subscriptions, its views read. */
   async #show(): Promise<void> {
-    this.#generation += 1;
-    this.#watch.clear();
-    this.#current?.watched.clear();
     this.#keyListOpen = false;
-    this.#loading = this.#current?.screen.views !== undefined;
-    this.#render();
-    await this.#readViews();
-  }
-
-  /** Reads the screen's views together, hands them over, and watches each for news. */
-  async #readViews(): Promise<void> {
     const open = this.#current;
-    const scopes = open?.screen.views?.(open.state);
-    if (open === undefined || scopes === undefined || this.#stopped) return;
-    const generation = this.#generation;
-    let read: Awaited<ReturnType<typeof readTogether>>;
-    try {
-      read = await readTogether(this.#options.workspace, scopes);
-    } catch (error) {
-      if (generation !== this.#generation || this.#stopped) return;
-      this.#loading = false;
-      this.#say(`Couldn’t read this screen. ${semanticError(error)}`, 'error');
-      return;
-    }
-    if (generation !== this.#generation || this.#stopped) return;
-    this.#loading = false;
-    if (read.status === 'unsettled') {
-      this.#say(
-        'The Workspace kept changing while this screen read it; it will try again on the next change.',
-        'warning',
-      );
-    } else {
-      open.screen.receive?.(open.state, read.views);
-    }
-    for (const [slot, scope] of Object.entries(scopes)) {
-      const identity = JSON.stringify(scope);
-      if (open.watched.get(slot) === identity) continue;
-      this.#watch.release(slot);
-      const view = read.status === 'settled' ? read.views[slot] : undefined;
-      const known = (view as { readonly stateVersion?: number } | undefined)?.stateVersion;
-      this.#watch.watch(
-        scope,
-        generation,
-        known,
-        view !== undefined && isLiveScope(scope) ? liveViewIdentity(view) : undefined,
-        slot,
-      );
-      open.watched.set(slot, identity);
-    }
-    for (const slot of [...open.watched.keys()].filter(slot => !(slot in scopes))) {
-      this.#watch.release(slot);
-      open.watched.delete(slot);
-    }
-    this.#render();
+    await this.#views.show(
+      open?.screen.views === undefined
+        ? undefined
+        : {
+            scopes: () => open.screen.views!(open.state),
+            receive: views => open.screen.receive?.(open.state, views),
+          },
+    );
   }
 
   readonly #onResize = (): void => this.#render();
@@ -280,12 +226,12 @@ class ShellApplication implements Shell {
       guard: () => undefined,
       guarded: false,
       ready: open !== undefined,
-      loading: this.#loading,
+      loading: this.#views.loading,
       saving: this.#saving > 0,
       sayStillLoading: key =>
         this.#say(
           key === 'q'
-            ? `Still ${this.#loading ? 'loading' : 'saving'}; press q again once it’s done to quit.`
+            ? `Still ${this.#views.loading ? 'loading' : 'saving'}; press q again once it’s done to quit.`
             : `Still loading; press ${key} again in a moment.`,
           'info',
         ),
@@ -330,6 +276,7 @@ class ShellApplication implements Shell {
           break;
       }
     }
+    this.#views.reconcile();
   }
 
   #execute(command: WorkspaceCommand): void {

@@ -36,10 +36,8 @@ export function liveViewIdentity(view: object): string | undefined {
  */
 export class ShellWatch {
   readonly #host: ShellWatchHost;
-  readonly #unsubscribers = new Map<string, () => void>();
-  readonly #announcedVersions = new Map<string, number>();
-  readonly #announcedLive = new Map<string, string | undefined>();
-  readonly #slots = new Map<string, string>();
+  readonly #scopes = new Map<string, () => void>();
+  readonly #slots = new Map<string, () => void>();
   #refreshScheduled = false;
   #refreshInFlight = false;
   #refreshRequested = false;
@@ -55,48 +53,48 @@ export class ShellWatch {
     knownLiveIdentity?: string,
     slot?: string,
   ): void {
-    const identity = JSON.stringify(scope);
-    this.#unsubscribers.get(identity)?.();
-    this.#announcedVersions.set(identity, knownStateVersion);
-    this.#announcedLive.set(identity, knownLiveIdentity);
+    // Named slots own their subscriptions, even when two ask for the same scope.
+    const subscriptions = slot === undefined ? this.#scopes : this.#slots;
+    const key = slot ?? JSON.stringify(scope);
+    subscriptions.get(key)?.();
+    subscriptions.delete(key);
+    let active = true;
+    let announcedVersion = knownStateVersion;
+    let announcedLive = knownLiveIdentity;
     const live = this.#host.isLive(scope);
     const unsubscribe = this.#host.workspace.subscribe(scope, update => {
-      if (!this.#host.current(generation)) return;
+      if (!active || !this.#host.current(generation)) return;
       if (update.kind === 'workspace.projection-failed') {
         this.#host.failed();
         return;
       }
       // Every watched view carries the State version it was read at.
       const stateVersion = (update as { readonly stateVersion: number }).stateVersion;
-      const previous = this.#announcedVersions.get(identity) ?? -1;
       const liveIdentity = live ? liveViewIdentity(update) : undefined;
-      if (stateVersion <= previous) {
+      if (stateVersion <= announcedVersion) {
         // Live Changes move without a new committed version; only a different identity is news.
-        if (!live || liveIdentity === this.#announcedLive.get(identity)) return;
+        if (!live || liveIdentity === announcedLive) return;
       }
-      this.#announcedVersions.set(identity, stateVersion);
-      this.#announcedLive.set(identity, liveIdentity);
+      announcedVersion = stateVersion;
+      announcedLive = liveIdentity;
       this.requestRefresh();
     });
-    this.#unsubscribers.set(identity, unsubscribe);
-    if (slot !== undefined) this.#slots.set(slot, identity);
+    subscriptions.set(key, () => {
+      active = false;
+      unsubscribe();
+    });
   }
 
   /** Ends the subscription in `slot`, if any. */
   release(slot: string): void {
-    const identity = this.#slots.get(slot);
-    if (identity === undefined) return;
-    this.#unsubscribers.get(identity)?.();
-    this.#unsubscribers.delete(identity);
-    this.#announcedVersions.delete(identity);
+    this.#slots.get(slot)?.();
     this.#slots.delete(slot);
   }
 
   clear(): void {
-    for (const unsubscribe of this.#unsubscribers.values()) unsubscribe();
-    this.#unsubscribers.clear();
-    this.#announcedVersions.clear();
-    this.#announcedLive.clear();
+    for (const unsubscribe of this.#scopes.values()) unsubscribe();
+    for (const unsubscribe of this.#slots.values()) unsubscribe();
+    this.#scopes.clear();
     this.#slots.clear();
   }
 

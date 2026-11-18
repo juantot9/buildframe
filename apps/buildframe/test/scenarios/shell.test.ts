@@ -27,11 +27,12 @@ const execFileAsync = promisify(execFile);
 interface SummaryState {
   home: WorkspaceHomeView | undefined;
   starting: boolean;
+  offset: number;
 }
 
 const summary = defineScreen<SummaryState, 'idle' | 'reviewing'>({
   name: 'summary',
-  open: () => ({ home: undefined, starting: false }),
+  open: () => ({ home: undefined, starting: false, offset: 0 }),
   title: () => 'Summary',
   mode: state => (state.home?.currentReview === undefined ? 'idle' : 'reviewing'),
   modes: { idle: { sentence: 'No Review yet.' }, reviewing: { sentence: 'A Review is open.' } },
@@ -68,6 +69,15 @@ const summary = defineScreen<SummaryState, 'idle' | 'reviewing'>({
       run: state => [{ type: 'copy', text: String(state.home?.header.totalReviews ?? 0), what: 'the count' }],
     },
     {
+      id: 'next',
+      keys: ['n'],
+      show: 'n',
+      help: { group: 'MOVE', text: 'Next page' },
+      run: state => {
+        state.offset += 1;
+      },
+    },
+    {
       id: 'details',
       keys: [Key.enter],
       show: 'Enter',
@@ -77,15 +87,22 @@ const summary = defineScreen<SummaryState, 'idle' | 'reviewing'>({
     },
   ],
   body: (state, look) => [
-    label(look, state.home === undefined ? 'Reading…' : `Reviews: ${state.home.header.totalReviews}`),
+    label(
+      look,
+      state.home === undefined
+        ? 'Reading…'
+        : `Reviews: ${state.home.header.totalReviews} · page ${state.home.reviews.offset + 1}`,
+    ),
   ],
-  views: () => ({ home: { kind: 'workspace.home', offset: 0, limit: 10 } }),
+  views: state => ({ home: { kind: 'workspace.home', offset: state.offset, limit: 1 } }),
   receive: (state, views) => {
     state.home = views.home as WorkspaceHomeView;
   },
   settled: (state, _command, outcome) => {
     state.starting = false;
-    return outcome.status === 'answered' ? [{ type: 'say', text: 'Started.', tone: 'success' }] : [];
+    if (outcome.status !== 'answered') return [];
+    state.offset = 1;
+    return [{ type: 'say', text: 'Started.', tone: 'success' }];
   },
 });
 
@@ -188,8 +205,12 @@ describe('the shell', () => {
     // The command runs, and Home changes on its own: the shell re-reads it.
     terminal.mockInput.pressKey('s');
     await shows(terminal, 'Started.');
-    await shows(terminal, 'Reviews: 1');
+    await shows(terminal, 'Reviews: 1 · page 2');
     expect(frame(terminal)).not.toContain('[s] start');
+
+    // Changing the requested page doesn't change Workspace State, but still reads the new scope.
+    terminal.mockInput.pressKey('n');
+    await shows(terminal, 'Reviews: 1 · page 3');
 
     terminal.mockInput.pressKey('y');
     await shows(terminal, '✓ Copied the count.');
