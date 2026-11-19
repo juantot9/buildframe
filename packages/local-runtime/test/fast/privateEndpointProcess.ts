@@ -19,7 +19,7 @@ const server = createServer();
 try {
   await preparePrivateRuntimeDirectory(location);
   process.umask(0o022);
-  await listenPrivateEndpoint(server, location.endpoint);
+  await listenPrivateEndpoint(server, location);
   // No secureBoundEndpoint yet: the first thing a connector could observe.
   const mode = (await lstat(location.endpoint)).mode & 0o777;
   let validation = 'valid';

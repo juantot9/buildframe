@@ -6,46 +6,27 @@ import process from 'node:process';
 import { isMainThread } from 'node:worker_threads';
 
 import type { WorkspaceIdentity } from '@buildframe/workspace';
-import { protectWindowsDirectory, windowsDirectoryPrivacy } from '@buildframe/workspace/private-directories';
+
+import { RuntimeLocationProblem, type OwnedEndpoint, type RuntimeLocation } from './runtimeLocationProblem.js';
+import {
+  listenWindowsEndpoint,
+  prepareWindowsRuntimeDirectory,
+  secureWindowsEndpoint,
+  validateWindowsRuntimeEndpoint,
+  windowsRuntimeLocation,
+} from './windowsRuntimeEndpoint.js';
+
+export {
+  RuntimeLocationProblem,
+  type RuntimeLocation,
+  type RuntimeLocationProblemCode,
+} from './runtimeLocationProblem.js';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_SOCKET_MODE = 0o600;
 const MAX_UNIX_ENDPOINT_BYTES = 100;
 
-export type RuntimeLocationProblemCode =
-  | 'unsupported-platform'
-  | 'runtime-directory-insecure'
-  | 'runtime-endpoint-missing'
-  | 'runtime-endpoint-insecure'
-  | 'runtime-endpoint-active';
-
-export class RuntimeLocationProblem extends Error {
-  readonly code: RuntimeLocationProblemCode;
-
-  constructor(code: RuntimeLocationProblemCode) {
-    super(code);
-    this.name = 'RuntimeLocationProblem';
-    this.code = code;
-  }
-}
-
-export interface RuntimeLocation {
-  readonly directory: string;
-  readonly endpoint: string;
-  /**
-   * A base directory BuildFrame creates itself in a shared location (the `/tmp`
-   * fallback). Another local user could create it first, or rename the
-   * private directory inside it, so it must be owner-private too.
-   */
-  readonly ownedBase?: string;
-}
-
-interface OwnedEndpoint {
-  readonly device: bigint;
-  readonly inode: bigint;
-}
-
-/** Windows has no user id; its runtime location comes with the named-pipe endpoint (WF-310). */
+/** macOS and Linux; Windows has no user id and proves the endpoint by handshake instead. */
 function currentUserId(): number {
   if ((process.platform !== 'darwin' && process.platform !== 'linux') || process.getuid === undefined) {
     throw new RuntimeLocationProblem('unsupported-platform');
@@ -53,18 +34,22 @@ function currentUserId(): number {
   return process.getuid();
 }
 
+function workspaceDigest(workspaceIdentity: WorkspaceIdentity): string {
+  return createHash('sha256').update(workspaceIdentity, 'utf8').digest('hex').slice(0, 32);
+}
+
 function locationUnder(base: string, workspaceIdentity: WorkspaceIdentity, ownedBase: boolean): RuntimeLocation {
-  const digest = createHash('sha256').update(workspaceIdentity, 'utf8').digest('hex').slice(0, 32);
   const directory = path.join(base, 'buildframe');
   return {
     directory,
-    endpoint: path.join(directory, `w-${digest}.sock`),
+    endpoint: path.join(directory, `w-${workspaceDigest(workspaceIdentity)}.sock`),
     ...(ownedBase ? { ownedBase: base } : {}),
   };
 }
 
 /** Private endpoint discovery. No caller receives this locator. */
 export function runtimeLocationForWorkspace(workspaceIdentity: WorkspaceIdentity): RuntimeLocation {
+  if (process.platform === 'win32') return windowsRuntimeLocation(workspaceDigest(workspaceIdentity));
   const userId = currentUserId();
   const configuredBase = process.env.XDG_RUNTIME_DIR;
   if (configuredBase !== undefined && path.isAbsolute(configuredBase)) {
@@ -121,49 +106,6 @@ async function preparePrivateDirectory(directory: string, userId: number): Promi
   }
 }
 
-/**
- * Windows: creates the runtime directory under the user's profile, refuses a
- * link in its place, and gives it the user's protected access list. Only the
- * runtime prepares it, and the runtime always has `node:ffi`, so this fails
- * closed without it.
- */
-export async function prepareWindowsRuntimeDirectory(directory: string): Promise<void> {
-  try {
-    await mkdir(directory, { recursive: true });
-    const status = await lstat(directory);
-    if (!status.isDirectory() || status.isSymbolicLink()) throw new Error('not a plain directory');
-    protectWindowsDirectory(directory);
-  } catch {
-    throw new RuntimeLocationProblem('runtime-directory-insecure');
-  }
-}
-
-/**
- * Windows: refuses a missing, linked or no-longer-private runtime directory.
- * An agent host that loads a connector has no `node:ffi` and cannot read the
- * access list; it gets `unverifiable` and relies on the directory sitting in
- * the user's profile and on the endpoint's own authentication (WF-310).
- */
-export async function validateWindowsRuntimeDirectory(directory: string): Promise<'private' | 'unverifiable'> {
-  let status;
-  try {
-    status = await lstat(directory);
-  } catch {
-    throw new RuntimeLocationProblem('runtime-endpoint-missing');
-  }
-  if (!status.isDirectory() || status.isSymbolicLink()) {
-    throw new RuntimeLocationProblem('runtime-directory-insecure');
-  }
-  let privacy;
-  try {
-    privacy = windowsDirectoryPrivacy(directory);
-  } catch {
-    throw new RuntimeLocationProblem('runtime-directory-insecure');
-  }
-  if (privacy === 'not-private') throw new RuntimeLocationProblem('runtime-directory-insecure');
-  return privacy;
-}
-
 export async function preparePrivateRuntimeDirectory(location: RuntimeLocation): Promise<void> {
   if (process.platform === 'win32') {
     await prepareWindowsRuntimeDirectory(location.directory);
@@ -179,6 +121,10 @@ export async function preparePrivateRuntimeDirectory(location: RuntimeLocation):
 }
 
 export async function validatePrivateRuntimeEndpoint(location: RuntimeLocation): Promise<void> {
+  if (process.platform === 'win32') {
+    await validateWindowsRuntimeEndpoint(location);
+    return;
+  }
   const userId = currentUserId();
   const privateDirectories =
     location.ownedBase === undefined ? [location.directory] : [location.ownedBase, location.directory];
@@ -242,6 +188,10 @@ function endpointProbe(location: RuntimeLocation): Promise<'active' | 'stale' | 
  * never replaced.
  */
 export async function removeStaleRuntimeEndpoint(location: RuntimeLocation): Promise<'missing' | 'removed'> {
+  // A pipe disappears with its process, and a left-over secret is replaced
+  // when the next runtime publishes its own; a live runtime keeps the pipe
+  // name, so the next one fails to bind (`runtime-already-active`).
+  if (process.platform === 'win32') return 'missing';
   try {
     await validatePrivateRuntimeEndpoint(location);
   } catch (error) {
@@ -269,8 +219,16 @@ export async function removeStaleRuntimeEndpoint(location: RuntimeLocation): Pro
  * connector checking in that gap sees an insecure runtime and stops retrying.
  * A Unix socket binds synchronously inside `listen()`, so the narrowed process
  * umask is restored before any other file is created.
+ *
+ * Windows has no socket mode: the pipe's connections pass the handshake
+ * first (`windowsRuntimeEndpoint.ts`).
  */
-export async function listenPrivateEndpoint(server: Server, endpoint: string): Promise<void> {
+export async function listenPrivateEndpoint(server: Server, location: RuntimeLocation): Promise<void> {
+  if (process.platform === 'win32') {
+    await listenWindowsEndpoint(server, location);
+    return;
+  }
+  const endpoint = location.endpoint;
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error): void => {
       server.off('listening', onListening);
@@ -298,6 +256,7 @@ export async function listenPrivateEndpoint(server: Server, endpoint: string): P
 }
 
 export async function secureBoundEndpoint(location: RuntimeLocation): Promise<OwnedEndpoint> {
+  if (process.platform === 'win32') return await secureWindowsEndpoint(location);
   const userId = currentUserId();
   await chmod(location.endpoint, PRIVATE_SOCKET_MODE);
   const endpoint = await lstat(location.endpoint, { bigint: true });
@@ -313,11 +272,13 @@ export async function secureBoundEndpoint(location: RuntimeLocation): Promise<Ow
   return { device: endpoint.dev, inode: endpoint.ino };
 }
 
+/** Removes the socket (on Windows, the secret) only while it is still the one this runtime published. */
 export async function removeOwnedEndpoint(location: RuntimeLocation, owned: OwnedEndpoint): Promise<void> {
+  const published = location.secret ?? location.endpoint;
   try {
-    const endpoint = await lstat(location.endpoint, { bigint: true });
+    const endpoint = await lstat(published, { bigint: true });
     if (endpoint.dev === owned.device && endpoint.ino === owned.inode) {
-      await rm(location.endpoint, { force: true });
+      await rm(published, { force: true });
     }
   } catch (error) {
     if (!(error instanceof Error) || !('code' in error) || (error as NodeJS.ErrnoException).code !== 'ENOENT') {

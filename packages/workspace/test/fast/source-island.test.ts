@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import * as durableFiles from '@buildframe/workspace/durable-files';
 import * as legacyReviewImport from '@buildframe/workspace/legacy-review-import';
 import * as privateDirectories from '@buildframe/workspace/private-directories';
 import * as projection from '@buildframe/workspace/projection';
@@ -30,6 +31,17 @@ describe('Workspace Interface', () => {
     expect(Object.keys(reviewing)).toEqual([]);
     expect(Object.keys(legacyReviewImport)).toEqual([]);
     expect(Object.keys(workspaceEvidence)).toEqual([]);
+  });
+
+  it('keeps the durable-files subpath to publishing files under the platform rules', () => {
+    expect(Object.keys(durableFiles).sort()).toEqual([
+      'fsyncPath',
+      'renameFile',
+      'renameFileSync',
+      'syncDirectory',
+      'syncDirectorySync',
+      'writeBytesDurably',
+    ]);
   });
 
   it('keeps the private-directories subpath to file locations and Windows privacy', () => {

@@ -41,6 +41,14 @@
       "types": "./dist/sha256.d.ts",
       "import": "./dist/sha256.js"
     },
+    "./durable-files": {
+      "development": {
+        "types": "./src/durableFiles.ts",
+        "import": "./src/durableFiles.ts"
+      },
+      "types": "./dist/durableFiles.d.ts",
+      "import": "./dist/durableFiles.js"
+    },
     "./private-directories": {
       "development": {
         "types": "./src/privateDirectories.ts",

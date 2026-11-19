@@ -1,7 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { once } from 'node:events';
 import { lstat, mkdtemp, rm } from 'node:fs/promises';
-import { createConnection, type Socket } from 'node:net';
 
 import type { Workspace, WorkspaceIdentity, WorkspaceViewUpdate } from '@buildframe/workspace';
 import type { ReviewIdentity, ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
@@ -19,6 +17,7 @@ import { startLocalRuntimeServer, type LocalRuntimeServer } from '../../src/laun
 import { waitForLocalRuntimeServerIdle } from '../../src/server.js';
 import { MAX_FRAME_BYTES } from '../../src/protocol.js';
 import { runtimeLocationForWorkspace } from '../../src/runtimeLocation.js';
+import { connectRawPeer, type RawPeer } from './rawRuntimePeer.js';
 
 const WORKSPACE_IDENTITY = 'wsp_00000000-0000-4000-8000-000000000001' as WorkspaceIdentity;
 const OTHER_WORKSPACE_IDENTITY = 'wsp_00000000-0000-4000-8000-000000000002' as WorkspaceIdentity;
@@ -808,72 +807,7 @@ class GatedOperationWorkspace implements WorkspaceTestAdapter {
   }
 }
 
-class RawPeer {
-  readonly socket: Socket;
-  readonly #frames: unknown[] = [];
-  readonly #waiters: Array<{
-    readonly resolve: (frame: unknown) => void;
-    readonly reject: (error: Error) => void;
-  }> = [];
-  #buffer = Buffer.alloc(0);
-  #closed = false;
-
-  constructor(socket: Socket) {
-    this.socket = socket;
-    socket.on('data', (chunk: Buffer) => this.#accept(chunk));
-    socket.once('close', () => this.#close());
-    socket.once('error', () => this.#close());
-  }
-
-  send(frame: object): void {
-    this.socket.write(`${JSON.stringify(frame)}\n`);
-  }
-
-  next<T>(): Promise<T> {
-    const queued = this.#frames.shift();
-    if (queued !== undefined) return Promise.resolve(queued as T);
-    if (this.#closed) return Promise.reject(new Error('raw peer closed'));
-    return new Promise<T>((resolve, reject) => {
-      this.#waiters.push({
-        resolve: frame => resolve(frame as T),
-        reject,
-      });
-    });
-  }
-
-  async closed(): Promise<void> {
-    if (this.#closed) return;
-    await once(this.socket, 'close');
-  }
-
-  #accept(chunk: Buffer): void {
-    this.#buffer = Buffer.concat([this.#buffer, chunk]);
-    while (true) {
-      const newline = this.#buffer.indexOf(0x0a);
-      if (newline < 0) return;
-      const frame = JSON.parse(this.#buffer.subarray(0, newline).toString('utf8')) as unknown;
-      this.#buffer = this.#buffer.subarray(newline + 1);
-      const waiter = this.#waiters.shift();
-      if (waiter === undefined) this.#frames.push(frame);
-      else waiter.resolve(frame);
-    }
-  }
-
-  #close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
-    for (const waiter of this.#waiters.splice(0)) {
-      waiter.reject(new Error('raw peer closed'));
-    }
-  }
-}
-
-async function connectRaw(workspaceIdentity: WorkspaceIdentity = WORKSPACE_IDENTITY): Promise<RawPeer> {
-  const endpoint = runtimeLocationForWorkspace(workspaceIdentity).endpoint;
-  const socket = createConnection(endpoint);
-  await once(socket, 'connect');
-  return new RawPeer(socket);
-}
+const connectRaw = async (): Promise<RawPeer> => await connectRawPeer(WORKSPACE_IDENTITY);
 
 function bootstrapFrame(overrides: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
@@ -1949,14 +1883,15 @@ describe('semantic local-runtime client/server contract', () => {
   it('creates an owner-private endpoint and rejects oversized frames', async () => {
     await start();
     const location = runtimeLocationForWorkspace(WORKSPACE_IDENTITY);
-    const directory = await lstat(location.directory);
-    const endpoint = await lstat(location.endpoint);
-    expect(directory.mode & 0o777).toBe(0o700);
-    expect(endpoint.mode & 0o777).toBe(0o600);
-    expect(endpoint.isSocket()).toBe(true);
-    if (process.getuid !== undefined) {
-      expect(directory.uid).toBe(process.getuid());
-      expect(endpoint.uid).toBe(process.getuid());
+    // A Windows pipe has no mode; its privacy is the handshake (runtimeHandshake.test.ts).
+    if (location.secret === undefined) {
+      const directory = await lstat(location.directory);
+      const endpoint = await lstat(location.endpoint);
+      expect(directory.mode & 0o777).toBe(0o700);
+      expect(endpoint.mode & 0o777).toBe(0o600);
+      expect(endpoint.isSocket()).toBe(true);
+      expect(directory.uid).toBe(process.getuid?.());
+      expect(endpoint.uid).toBe(process.getuid?.());
     }
 
     const peer = await connectRaw();

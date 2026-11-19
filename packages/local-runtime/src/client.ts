@@ -1,4 +1,4 @@
-import { createConnection, type Socket } from 'node:net';
+import type { Socket } from 'node:net';
 
 import {
   WORKSPACE_INTERFACE_VERSION,
@@ -23,6 +23,7 @@ import {
   type RuntimeGeneration,
   type WorkspaceRuntimeBootstrapDiagnostic,
 } from './contracts.js';
+import { connectRuntimeEndpoint, endpointConnectionFailure } from './endpointConnection.js';
 import { FramedSocket, type FramedSocketCloseCode } from './framing.js';
 import {
   BOOTSTRAP_TIMEOUT_MS,
@@ -302,44 +303,6 @@ function mapBootstrapRejection(
   return { code: 'invalid-runtime-bootstrap' };
 }
 
-async function connectSocket(endpoint: string, signal: AbortSignal | undefined): Promise<Socket> {
-  return await new Promise<Socket>((resolve, reject) => {
-    const socket = createConnection(endpoint);
-    const timer = setTimeout(() => {
-      cleanup();
-      socket.destroy();
-      reject(new Error('timeout'));
-    }, BOOTSTRAP_TIMEOUT_MS);
-    timer.unref();
-
-    const onConnect = (): void => {
-      cleanup();
-      resolve(socket);
-    };
-    const onError = (): void => {
-      cleanup();
-      socket.destroy();
-      reject(new Error('connection-failed'));
-    };
-    const onAbort = (): void => {
-      cleanup();
-      socket.destroy();
-      reject(new Error('cancelled'));
-    };
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      socket.off('connect', onConnect);
-      socket.off('error', onError);
-      signal?.removeEventListener('abort', onAbort);
-    };
-
-    socket.once('connect', onConnect);
-    socket.once('error', onError);
-    signal?.addEventListener('abort', onAbort, { once: true });
-    if (signal?.aborted === true) onAbort();
-  });
-}
-
 interface DiscoverWorkspaceRuntimeRequest extends ConnectWorkspaceRuntimeRequest {
   readonly runtimeCodeIdentity: RuntimeCodeIdentity;
   /** `retire` (the default) asks a runtime from another build to step aside; `report` only learns of it. */
@@ -386,15 +349,11 @@ async function connectWorkspaceRuntimeInternal(
 
   let socket: Socket;
   try {
-    socket = await connectSocket(location.endpoint, request.signal);
+    socket = await connectRuntimeEndpoint(location, request.signal);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : 'connection-failed';
     return {
       status: 'rejected',
-      diagnostic: {
-        code: 'runtime-unavailable',
-        reason: reason === 'timeout' || reason === 'cancelled' ? reason : 'connection-failed',
-      },
+      diagnostic: { code: 'runtime-unavailable', reason: endpointConnectionFailure(error) },
     };
   }
 

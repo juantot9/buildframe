@@ -141,7 +141,7 @@ class RemoteReviewedHarnessAdapter implements ReviewedHarnessAdapter {
       release: (reason: 'replaced') => {
         // Say why before closing, so the session does not reconnect and take the connection back.
         this.#peer.send({ type: 'harness.adapter.released', reason });
-        this.#peer.destroy();
+        this.#peer.end();
       },
     });
   }
@@ -874,7 +874,7 @@ export async function startLocalRuntimeServer(request: StartLocalRuntimeServerRe
   });
 
   try {
-    await listenPrivateEndpoint(server, location.endpoint);
+    await listenPrivateEndpoint(server, location);
   } catch (error) {
     const code = error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : undefined;
     throw new LocalRuntimeServerError(code === 'EADDRINUSE' ? 'runtime-already-active' : 'runtime-listen-failed');
