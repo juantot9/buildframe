@@ -46,6 +46,21 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
 - Same-user programs are trusted (the 0.1.0 safety bar); the Claude helper
   still refuses every caller without its launch token.
 
+## Durability on Windows (`windows` branch, WF-304)
+
+- A Durable Commit is a SQLite transaction with `synchronous = FULL`; SQLite
+  makes it durable on Windows itself.
+- Publishing a whole file is weaker there: the `CURRENT` pointer, a new or
+  migrated generation, quarantine copies, the identity registry and the
+  Workspace marker. Windows cannot flush a directory, so after a power loss or
+  OS crash NTFS may roll back a rename (or the marker's link) its journal had
+  not written. Contents are flushed first, so what comes back is the previous
+  file, never a torn one; a lost marker means the next start makes a new
+  Workspace identity. A crash of BuildFrame alone loses nothing.
+- These steps live in `packages/workspace/src/durableFiles.ts`. Windows
+  flushes a file only through a writable handle, and renames retry for about
+  1.3 s while another process (antivirus, the indexer) holds a file open.
+
 ## Development environment
 
 Node `26.5.1` (`nvm use`), pnpm `11.10.0`. The canonical checks:

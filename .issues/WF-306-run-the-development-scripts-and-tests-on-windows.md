@@ -15,7 +15,7 @@ created: 2026-11-19
 - `pnpm test`, `pnpm test:fast` and `pnpm verify` stop at once on Windows:
   pnpm runs scripts through `cmd.exe`, which rejects
   `NODE_OPTIONS=--experimental-ffi vitest …` (`package.json` scripts).
-- About 45 scenario tests in `apps/buildframe/test/scenarios/reviewingApplication.test.ts`
+- About 45 scenario tests (40 after WF-308) in `apps/buildframe/test/scenarios/reviewingApplication.test.ts`
   fail during teardown with `EBUSY: resource busy or locked, rmdir
   …\checkout`. Windows will not remove a directory while a process has it as
   its working directory or holds a handle in it (file watchers, a child
@@ -43,7 +43,8 @@ created: 2026-11-19
 - Git for Windows installs with `core.autocrlf=true` in its system config, so
   a clone has CRLF working files (`git ls-files --eol`: `i/lf w/crlf`).
   `pnpm format:check` then flags all 304 files, because oxfmt expects LF.
-  The repository has no `.gitattributes`.
+  WF-308 added a `.gitattributes` marking only the byte-exact test
+  fixtures `-text`; the repository-wide rule is still to do.
 
 ## Direction
 

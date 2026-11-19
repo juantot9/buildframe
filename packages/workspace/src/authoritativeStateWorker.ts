@@ -1,18 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  chmodSync,
-  closeSync,
-  copyFileSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  writeSync,
-} from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { parentPort, workerData } from 'node:worker_threads';
@@ -37,6 +24,9 @@ import type {
   StateWorkerRequest,
   StateWorkerResponse,
 } from './authoritativeStateProtocol.js';
+// `.ts`: in development Node loads this worker by type stripping, which does not
+// map `.js` to `.ts`; the build rewrites it (`rewriteRelativeImportExtensions`).
+import { fsyncPath, renameFileSync, syncDirectorySync, writeBytesDurably } from './durableFiles.ts';
 
 const STORE_FORMAT_VERSION = 2;
 const LEGACY_STORE_FORMAT_VERSION = 1;
@@ -209,29 +199,6 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return Buffer.from(left).equals(Buffer.from(right));
 }
 
-function fsyncPath(target: string): void {
-  const descriptor = openSync(target, 'r');
-  try {
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-function writeBytesDurably(target: string, bytes: Uint8Array): void {
-  const descriptor = openSync(target, 'wx', 0o600);
-  try {
-    let offset = 0;
-    while (offset < bytes.byteLength) {
-      const written = writeSync(descriptor, bytes, offset, bytes.byteLength - offset);
-      offset += written;
-    }
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
 function configureWritableDatabase(database: DatabaseSync): void {
   database.exec(`
     PRAGMA foreign_keys = ON;
@@ -365,10 +332,10 @@ function prepareCurrent(stateRoot: string, selected: string): string {
 function installCurrent(stateRoot: string, selected: string, withMigrationCheckpoints: boolean): void {
   const temporaryFile = prepareCurrent(stateRoot, selected);
   if (withMigrationCheckpoints) migrationCheckpoint('current-prepared');
-  renameSync(temporaryFile, currentFilePath(stateRoot));
+  renameFileSync(temporaryFile, currentFilePath(stateRoot));
   chmodSync(currentFilePath(stateRoot), 0o600);
   if (withMigrationCheckpoints) migrationCheckpoint('current-switched');
-  fsyncPath(stateRoot);
+  syncDirectorySync(stateRoot);
 }
 
 function createInitialGeneration(stateRoot: string, workspaceIdentity: string): string {
@@ -386,8 +353,8 @@ function createInitialGeneration(stateRoot: string, workspaceIdentity: string): 
     candidate = undefined;
     chmodSync(candidateFile, 0o600);
     fsyncPath(candidateFile);
-    renameSync(candidateFile, finalFile);
-    fsyncPath(stateRoot);
+    renameFileSync(candidateFile, finalFile);
+    syncDirectorySync(stateRoot);
     installCurrent(stateRoot, selected, false);
     return selected;
   } catch (error) {
@@ -771,7 +738,7 @@ function preserveFailedGeneration(stateRoot: string, selected: string, reason: s
       chmodSync(temporary, 0o600);
       fsyncPath(temporary);
       try {
-        renameSync(temporary, preserved);
+        renameFileSync(temporary, preserved);
       } catch (error) {
         rmSync(temporary, { force: true });
         if (!existsSync(preserved)) throw error;
@@ -798,10 +765,10 @@ function preserveFailedGeneration(stateRoot: string, selected: string, reason: s
       );
       const temporary = `${report}.${randomUUID()}.tmp`;
       writeBytesDurably(temporary, bytes);
-      renameSync(temporary, report);
+      renameFileSync(temporary, report);
     }
     chmodSync(report, 0o600);
-    fsyncPath(quarantineRoot);
+    syncDirectorySync(quarantineRoot);
   } catch {
     throw new WorkerProblem('state-unavailable');
   }
@@ -1000,10 +967,10 @@ function migrateGeneration(
     fsyncPath(candidateFile);
     migrationCheckpoint('candidate-validated');
 
-    renameSync(candidateFile, finalFile);
+    renameFileSync(candidateFile, finalFile);
     chmodSync(finalFile, 0o600);
     migrationCheckpoint('generation-installed');
-    fsyncPath(stateRoot);
+    syncDirectorySync(stateRoot);
     installCurrent(stateRoot, finalName, true);
     return finalName;
   } catch (error) {

@@ -73,6 +73,10 @@ close until WF-288 is closed.
 - [Build the git inspection overlay without symlinks](./WF-307-build-the-git-inspection-overlay-without-symlinks.md):
   junctions and hard links (copy fallback) on Windows; overlay removal unlinks
   every link before removing anything else.
+- [Keep saved State durable under Windows file semantics](./WF-308-keep-saved-state-durable-under-windows-file-semantics.md):
+  directory sync skipped and renames retried on Windows; files flushed through
+  a writable handle; whole-file publishes may roll back after power loss
+  (written in HANDOFF.md).
 
 ## Collision rules
 
