@@ -22,6 +22,10 @@ class MemorySocket extends EventEmitter {
   destroy(): void {
     this.destroyed = true;
   }
+
+  resume(): this {
+    return this;
+  }
 }
 
 function emitFragments(socket: MemorySocket, bytes: Buffer, fragmentBytes: number): void {

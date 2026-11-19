@@ -71,6 +71,17 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
   keep the privacy they inherit from the user's profile. See
   `packages/workspace/src/privateDirectories.ts`.
 
+## Runtime endpoint on Windows (`windows` branch, WF-310)
+
+- The runtime listens on a named pipe, `\\.\pipe\buildframe-<digest>`, and
+  publishes a fresh random secret beside it in the private runtime directory
+  (`w-<workspace>.key`) once the listen succeeds.
+- Pipes have no owner-private mode and their names are machine-global, so
+  every connection opens with a challenge–response on that secret
+  (`packages/local-runtime/src/runtimeHandshake.ts`) before the first frame.
+  Neither side sends a frame to a peer that has not proven it. Frames and
+  protocol versions are unchanged; macOS and Linux do not run the handshake.
+
 ## Development environment
 
 Node `26.5.1` (`nvm use`), pnpm `11.10.0`. The canonical checks:

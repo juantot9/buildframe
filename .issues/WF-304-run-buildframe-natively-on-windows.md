@@ -56,8 +56,8 @@ Can start now:
 
 Blocked:
 
-- [Connect to the runtime over a named pipe](./WF-310-connect-to-the-runtime-over-a-named-pipe.md) — blocked by WF-309
-- [Can each agent connect from Windows?](./WF-313-can-each-agent-connect-from-windows.md) — blocked by WF-310, WF-312
+- [Connect to the runtime over a named pipe](./WF-310-connect-to-the-runtime-over-a-named-pipe.md) — was blocked by WF-309; closed
+- [Can each agent connect from Windows?](./WF-313-can-each-agent-connect-from-windows.md) — blocked by WF-312 (WF-310 closed)
 - [Lift the native-Windows refusal and prove Windows end to end](./WF-315-lift-the-native-windows-refusal-and-prove-windows-end-to-end.md) — blocked by every other child
 
 Related, not a child:
@@ -81,6 +81,10 @@ close until WF-288 is closed.
   `node:ffi` sets and checks a protected access list where the process has it
   (app, runtime); agent hosts keep the profile's inherited privacy; State and
   runtime in `%LOCALAPPDATA%\BuildFrame`, configuration in `%APPDATA%`.
+- [Connect to the runtime over a named pipe](./WF-310-connect-to-the-runtime-over-a-named-pipe.md):
+  a named pipe per runtime directory and Workspace; a fresh secret published
+  beside it after the listen; an HMAC challenge–response on that secret
+  opens every connection, so no frame reaches a peer that has not proven it.
 
 ## Collision rules
 

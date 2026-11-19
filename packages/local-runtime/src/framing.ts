@@ -26,6 +26,8 @@ export class FramedSocket {
     socket.on('data', (chunk: Buffer) => this.#accept(chunk));
     socket.once('error', () => this.#finish('disconnected'));
     socket.once('close', () => this.#finish('disconnected'));
+    // A Windows runtime handshake leaves the socket paused for the framing.
+    socket.resume();
   }
 
   send(frame: object): boolean {
@@ -68,6 +70,17 @@ export class FramedSocket {
     this.#closed = true;
     this.#socket.end();
     this.#handlers.onClose(code === 'frame-too-large' ? 'frame-too-large' : 'malformed-frame');
+  }
+
+  /**
+   * Closes once everything sent has been written. A Windows pipe writes
+   * asynchronously, so `destroy` right after `send` can drop the frame.
+   */
+  end(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#socket.end();
+    this.#handlers.onClose('disconnected');
   }
 
   destroy(code: FramedSocketCloseCode = 'disconnected'): void {

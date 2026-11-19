@@ -1,4 +1,4 @@
-import { createConnection, type Socket } from 'node:net';
+import type { Socket } from 'node:net';
 
 import type { WorkspaceIdentity } from '@buildframe/workspace';
 import type {
@@ -18,6 +18,7 @@ import {
   type RuntimeGeneration,
   type WorkspaceRuntimeBootstrapDiagnostic,
 } from './contracts.js';
+import { connectRuntimeEndpoint, endpointConnectionFailure } from './endpointConnection.js';
 import { FramedSocket, type FramedSocketCloseCode } from './framing.js';
 import {
   BOOTSTRAP_TIMEOUT_MS,
@@ -113,34 +114,6 @@ function mapBootstrapRejection(frame: BootstrapRejectedFrame): WorkspaceRuntimeB
     return { code: 'runtime-role-rejected', role: 'harness-adapter' };
   }
   return { code: 'invalid-runtime-bootstrap' };
-}
-
-async function connectSocket(endpoint: string, signal: AbortSignal | undefined): Promise<Socket> {
-  return await new Promise<Socket>((resolve, reject) => {
-    const socket = createConnection(endpoint);
-    const timer = setTimeout(() => finish(new Error('timeout')), BOOTSTRAP_TIMEOUT_MS);
-    timer.unref();
-    const onConnect = (): void => finish(undefined, socket);
-    const onError = (): void => finish(new Error('connection-failed'));
-    const onAbort = (): void => finish(new Error('cancelled'));
-    const finish = (error: Error | undefined, connected?: Socket): void => {
-      clearTimeout(timer);
-      socket.off('connect', onConnect);
-      socket.off('error', onError);
-      signal?.removeEventListener('abort', onAbort);
-      if (error !== undefined || connected === undefined) {
-        socket.destroy();
-        reject(error ?? new Error('connection-failed'));
-      } else {
-        resolve(connected);
-      }
-    };
-
-    socket.once('connect', onConnect);
-    socket.once('error', onError);
-    signal?.addEventListener('abort', onAbort, { once: true });
-    if (signal?.aborted === true) onAbort();
-  });
 }
 
 class RemoteHarnessAdapterSession implements HarnessAdapterRuntimeConnected {
@@ -313,15 +286,11 @@ export async function connectHarnessAdapterRuntime(
 
   let socket: Socket;
   try {
-    socket = await connectSocket(location.endpoint, request.signal);
+    socket = await connectRuntimeEndpoint(location, request.signal);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : 'connection-failed';
     return {
       status: 'rejected',
-      diagnostic: {
-        code: 'runtime-unavailable',
-        reason: reason === 'timeout' || reason === 'cancelled' ? reason : 'connection-failed',
-      },
+      diagnostic: { code: 'runtime-unavailable', reason: endpointConnectionFailure(error) },
     };
   }
 

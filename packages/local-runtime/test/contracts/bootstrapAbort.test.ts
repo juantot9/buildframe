@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import process from 'node:process';
 
@@ -8,7 +8,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { connectWorkspaceRuntime } from '../../src/client.js';
 import { connectHarnessAdapterRuntime } from '../../src/harnessAdapter.js';
-import { runtimeLocationForWorkspace } from '../../src/runtimeLocation.js';
+import {
+  listenPrivateEndpoint,
+  preparePrivateRuntimeDirectory,
+  runtimeLocationForWorkspace,
+  secureBoundEndpoint,
+} from '../../src/runtimeLocation.js';
 
 const WORKSPACE_IDENTITY = 'wsp_00000000-0000-4000-8000-000000000081' as WorkspaceIdentity;
 const RUNTIME_GENERATION = 'rtg_00000000-0000-4000-8000-000000000082';
@@ -22,8 +27,7 @@ interface DelayedBootstrapPeer {
 
 async function startDelayedBootstrapPeer(): Promise<DelayedBootstrapPeer> {
   const location = runtimeLocationForWorkspace(WORKSPACE_IDENTITY);
-  await mkdir(location.directory, { recursive: true, mode: 0o700 });
-  await chmod(location.directory, 0o700);
+  await preparePrivateRuntimeDirectory(location);
 
   let peer: Socket | undefined;
   let resolveBootstrap!: () => void;
@@ -43,12 +47,11 @@ async function startDelayedBootstrapPeer(): Promise<DelayedBootstrapPeer> {
       if (bytes.includes('\n')) resolveBootstrap();
     });
     socket.once('close', resolveClosed);
+    // On Windows the socket arrives paused after the endpoint handshake.
+    socket.resume();
   });
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(location.endpoint, resolve);
-  });
-  await chmod(location.endpoint, 0o600);
+  await listenPrivateEndpoint(server, location);
+  await secureBoundEndpoint(location);
 
   return {
     bootstrapReceived,

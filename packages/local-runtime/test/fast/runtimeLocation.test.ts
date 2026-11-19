@@ -9,12 +9,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { currentUserSid, writeProtectedAccess } from '../../../workspace/src/windowsSecurity.js';
 import {
-  prepareWindowsRuntimeDirectory,
   preparePrivateRuntimeDirectory,
   validatePrivateRuntimeEndpoint,
-  validateWindowsRuntimeDirectory,
   type RuntimeLocation,
 } from '../../src/runtimeLocation.js';
+import { prepareWindowsRuntimeDirectory, validateWindowsRuntimeDirectory } from '../../src/windowsRuntimeEndpoint.js';
 
 let scratch: string;
 
