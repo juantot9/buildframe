@@ -1,10 +1,7 @@
-import { execFile } from 'node:child_process';
 import {
-  access,
   appendFile,
   cp,
   mkdir,
-  mkdtemp,
   open,
   readFile,
   realpath,
@@ -16,226 +13,26 @@ import {
   utimes,
   writeFile,
 } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveGitExecutable } from '../../src/gitProcess.js';
-import { bootstrapWorkspace, type Workspace, type WorkspaceIdentityView } from '../../src/index.js';
+import { bootstrapWorkspace, type WorkspaceIdentityView } from '../../src/index.js';
+import {
+  commandMarker,
+  createFixture,
+  createRepository,
+  pathExists,
+  permissions,
+  readyWorkspace,
+  restoreIdentityFixtures,
+  runGit,
+} from './workspaceIdentityScenarios.js';
 
-const execFileAsync = promisify(execFile);
-const fixtures: string[] = [];
-const originalXdgStateHome = process.env.XDG_STATE_HOME;
-const originalHome = process.env.HOME;
-const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
-
-async function runGit(cwd: string, ...arguments_: string[]): Promise<string> {
-  const result = await execFileAsync(await resolveGitExecutable(), ['-C', cwd, ...arguments_], {
-    encoding: 'utf8',
-    env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
-  });
-  return result.stdout.trimEnd();
-}
-
-async function createFixture(): Promise<{
-  readonly root: string;
-  readonly stateHome: string;
-}> {
-  const root = await mkdtemp(path.join(tmpdir(), 'buildframe-workspace-p04-'));
-  fixtures.push(root);
-  const stateHome = path.join(root, 'user-state');
-  process.env.XDG_STATE_HOME = stateHome;
-  return { root, stateHome };
-}
-
-async function createRepository(repository: string): Promise<void> {
-  await mkdir(repository, { recursive: true });
-  await runGit(repository, 'init', '--initial-branch=main');
-  await runGit(repository, 'config', 'user.name', 'BuildFrame Test');
-  await runGit(repository, 'config', 'user.email', 'neoflow@example.invalid');
-  await writeFile(path.join(repository, 'README.md'), 'workspace identity\n');
-  await runGit(repository, 'add', 'README.md');
-  await runGit(repository, 'commit', '-m', 'initial');
-}
-
-async function readyWorkspace(startPath: string): Promise<{
-  readonly workspace: Workspace;
-  readonly view: WorkspaceIdentityView;
-}> {
-  const result = await bootstrapWorkspace({ startPath });
-  if (result.status !== 'ready') {
-    throw new Error(`Workspace rejected: ${JSON.stringify(result.diagnostic)}`);
-  }
-  expect(result.status).toBe('ready');
-
-  const view = await result.workspace.read({ kind: 'workspace.identity' });
-  return { workspace: result.workspace, view };
-}
-
-async function pathExists(target: string): Promise<boolean> {
-  try {
-    await access(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function commandMarker(
-  root: string,
-  name: string,
-): Promise<{ readonly command: string; readonly marker: string }> {
-  const marker = path.join(root, `${name}.marker`);
-  const command = path.join(root, `${name}.sh`);
-  await writeFile(command, `#!/bin/sh\nprintf executed >> ${JSON.stringify(marker)}\nexit 0\n`, { mode: 0o700 });
-  return { command, marker };
-}
-
-function permissions(mode: number): number {
-  return mode & 0o777;
-}
-
-afterEach(async () => {
-  vi.restoreAllMocks();
-  vi.unstubAllEnvs();
-  if (originalXdgStateHome === undefined) {
-    delete process.env.XDG_STATE_HOME;
-  } else {
-    process.env.XDG_STATE_HOME = originalXdgStateHome;
-  }
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
-  if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
-  await Promise.all(fixtures.splice(0).map(fixture => rm(fixture, { recursive: true, force: true })));
-});
+afterEach(restoreIdentityFixtures);
 
 describe('Workspace Identity scenarios', () => {
-  it('retires hung identity Git inspection at the package-owned deadline', async () => {
-    const { root } = await createFixture();
-    const repository = path.join(root, 'repository');
-    await createRepository(repository);
-    const realGit = await resolveGitExecutable();
-    const executableDirectory = path.join(root, 'hung-git');
-    const executable = path.join(executableDirectory, 'git');
-    const pidFile = path.join(root, 'hung-git-pids');
-    await mkdir(executableDirectory);
-    await writeFile(
-      executable,
-      [
-        '#!/bin/sh',
-        'for argument in "$@"; do',
-        '  if [ "$argument" = "rev-parse" ]; then',
-        `    printf '%s\\n' "$$" >> ${JSON.stringify(pidFile)}`,
-        '    exec /bin/sleep 60',
-        '  fi',
-        'done',
-        `exec ${JSON.stringify(realGit)} "$@"`,
-        '',
-      ].join('\n'),
-      { mode: 0o700 },
-    );
-
-    const previousPath = process.env.PATH;
-    process.env.PATH = executableDirectory;
-    vi.resetModules();
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    let pending: Promise<Awaited<ReturnType<typeof bootstrapWorkspace>>> | undefined;
-    let outcome: Awaited<ReturnType<typeof bootstrapWorkspace>> | undefined;
-    let rejected: unknown;
-    let pids: number[] = [];
-    const pauseForProcesses = async (): Promise<void> => {
-      await execFileAsync('/bin/sleep', ['0.05']);
-    };
-    const processIsRunning = (pid: number): boolean => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch (error) {
-        return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-      }
-    };
-    const killHungProcesses = (): void => {
-      for (const pid of pids) {
-        try {
-          process.kill(pid, 'SIGKILL');
-        } catch {
-          // A process that already exited needs no test cleanup.
-        }
-      }
-    };
-
-    try {
-      const isolated = await import('../../src/index.js');
-      pending = isolated.bootstrapWorkspace({ startPath: repository });
-      void pending.then(
-        result => {
-          outcome = result;
-        },
-        (error: unknown) => {
-          rejected = error;
-        },
-      );
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        await pauseForProcesses();
-        try {
-          pids = (await readFile(pidFile, 'utf8'))
-            .trim()
-            .split('\n')
-            .filter(value => value.length > 0)
-            .map(Number);
-        } catch {
-          // The wrapper has not reached repository-aware inspection yet.
-        }
-        if (pids.length === 3) break;
-      }
-      const allInspectionChildrenStarted = pids.length === 3;
-
-      await vi.advanceTimersByTimeAsync(30_001);
-      for (let attempt = 0; attempt < 20 && outcome === undefined; attempt += 1) {
-        await pauseForProcesses();
-      }
-      const settledByOwner = outcome !== undefined;
-      if (!settledByOwner) {
-        killHungProcesses();
-        for (let attempt = 0; attempt < 20 && outcome === undefined; attempt += 1) {
-          await pauseForProcesses();
-        }
-      }
-
-      expect(allInspectionChildrenStarted).toBe(true);
-      expect(rejected).toBeUndefined();
-      expect(settledByOwner).toBe(true);
-      expect(outcome).toEqual({
-        status: 'rejected',
-        diagnostic: {
-          code: 'git-inspection-failed',
-          requestedPath: repository,
-          reason: 'inspection-failed',
-        },
-      });
-      expect(pids.every(pid => !processIsRunning(pid))).toBe(true);
-    } finally {
-      killHungProcesses();
-      if (pending !== undefined && outcome === undefined) {
-        for (let attempt = 0; attempt < 20 && outcome === undefined; attempt += 1) {
-          await pauseForProcesses();
-        }
-      }
-      vi.useRealTimers();
-      vi.resetModules();
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
-    }
-
-    await expect(bootstrapWorkspace({ startPath: repository })).resolves.toMatchObject({
-      status: 'ready',
-    });
-  });
-
   it('retains identity across subdirectories, aliases, branches, and checkout moves', async () => {
     const { root, stateHome } = await createFixture();
     const repository = path.join(root, 'repository');

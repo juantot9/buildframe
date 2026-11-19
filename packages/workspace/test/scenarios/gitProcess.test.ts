@@ -80,7 +80,10 @@ afterEach(async () => {
   roots.clear();
 });
 
-describe('Workspace Git executable resolver', () => {
+// These cases depend on POSIX execute bits and file symlinks, which Windows
+// does not have (every mode reads `666`; symlinks need Developer Mode). The
+// Windows rule has its own cases below, which run on every platform.
+describe.skipIf(process.platform === 'win32')('Workspace Git executable resolver', () => {
   it('selects one canonical absolute executable without invoking it', async () => {
     const root = await temporaryRoot();
     const bin = path.join(root, 'bin');
@@ -137,6 +140,72 @@ describe('Workspace Git executable resolver', () => {
     await expect(resolveExecutable()).resolves.toBe(await realpath(path.join(firstBin, 'git')));
     searchPath = secondBin;
     expect((await capturedResolutionFailure(resolveExecutable)).reason).toBe('git-resolution-changed');
+  });
+});
+
+describe('Workspace Git executable resolver on Windows', () => {
+  // Written executable so the POSIX access check passes when these cases run
+  // on macOS and Linux; Windows ignores the mode.
+  const executableMode = 0o700;
+
+  it('selects git.exe through a linked directory, canonically, and never a bare git', async () => {
+    const root = await temporaryRoot();
+    const realBin = path.join(root, 'real-bin');
+    const linkedBin = path.join(root, 'linked-bin');
+    await mkdir(realBin);
+    await writeFile(path.join(realBin, 'git'), '', { mode: executableMode });
+    await writeFile(path.join(realBin, 'git.exe'), '', { mode: executableMode });
+    // A junction needs no privilege on Windows; elsewhere the type is ignored.
+    await symlink(realBin, linkedBin, 'junction');
+
+    const resolveExecutable = createGitExecutableResolver(() => linkedBin, 'win32');
+    const expected = await realpath(path.join(realBin, 'git.exe'));
+    await expect(resolveExecutable()).resolves.toBe(expected);
+    await expect(resolveExecutable()).resolves.toBe(expected);
+  });
+
+  it('never selects git.cmd or git.bat, which would run through cmd.exe', async () => {
+    const root = await temporaryRoot();
+    const bin = path.join(root, 'bin');
+    await mkdir(bin);
+    await writeFile(path.join(bin, 'git.cmd'), '@echo off\r\n', { mode: executableMode });
+    await writeFile(path.join(bin, 'git.bat'), '@echo off\r\n', { mode: executableMode });
+    await writeFile(path.join(bin, 'git'), '', { mode: executableMode });
+    expect((await capturedResolutionFailure(createGitExecutableResolver(() => bin, 'win32'))).reason).toBe(
+      'git-missing',
+    );
+  });
+
+  it('reports a directory named git.exe as not a file', async () => {
+    const root = await temporaryRoot();
+    const bin = path.join(root, 'bin');
+    await mkdir(path.join(bin, 'git.exe'), { recursive: true });
+    expect((await capturedResolutionFailure(createGitExecutableResolver(() => bin, 'win32'))).reason).toBe(
+      'git-not-file',
+    );
+  });
+
+  it('fails explicitly when the search resolution changes after selection', async () => {
+    const root = await temporaryRoot();
+    const firstBin = path.join(root, 'first-bin');
+    const secondBin = path.join(root, 'second-bin');
+    await Promise.all([mkdir(firstBin), mkdir(secondBin)]);
+    await Promise.all([
+      writeFile(path.join(firstBin, 'git.exe'), '', { mode: executableMode }),
+      writeFile(path.join(secondBin, 'git.exe'), '', { mode: executableMode }),
+    ]);
+
+    let searchPath = firstBin;
+    const resolveExecutable = createGitExecutableResolver(() => searchPath, 'win32');
+    await expect(resolveExecutable()).resolves.toBe(await realpath(path.join(firstBin, 'git.exe')));
+    searchPath = secondBin;
+    expect((await capturedResolutionFailure(resolveExecutable)).reason).toBe('git-resolution-changed');
+  });
+
+  it.runIf(process.platform === 'win32')('finds the installed Git for Windows without execute bits', async () => {
+    const executable = await createGitExecutableResolver()();
+    expect(path.basename(executable).toLowerCase()).toBe('git.exe');
+    expect(path.isAbsolute(executable)).toBe(true);
   });
 });
 

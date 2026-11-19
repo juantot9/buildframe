@@ -65,6 +65,12 @@ Related, not a child:
 is rare on macOS and Linux but the normal case on Windows. WF-315 does not
 close until WF-288 is closed.
 
+## Decisions so far
+
+- [Find git.exe on Windows](./WF-305-find-git-exe-on-windows.md): `git.exe`
+  only, no mode-bit check on Windows, in a new `gitExecutable.ts`; the
+  suspected `PATH`/`Path` problem was a test that skipped its own cleanup.
+
 ## Collision rules
 
 - `gitProcess.ts`, `workspaceIdentity.ts`, `authoritativeStateWorker.ts` and

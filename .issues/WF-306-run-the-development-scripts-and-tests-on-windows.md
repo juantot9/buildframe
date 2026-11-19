@@ -22,7 +22,14 @@ created: 2026-11-19
   process still running).
 - Tests that build temporary symlinks fail with EPERM without Developer Mode
   (`runtimeLocation.test.ts`, `repositoryContent.test.ts`,
-  `gitProcess.test.ts`, `legacyReviewSource.test.ts`).
+  `legacyReviewSource.test.ts`, and the checkout-alias case in
+  `workspaceIdentity.test.ts`). `gitProcess.test.ts` was handled in
+  [Find git.exe on Windows](./WF-305-find-git-exe-on-windows.md).
+- Tests whose stand-in Git is a shell script cannot run on Windows. WF-305
+  skips "retires hung identity Git inspection at the package-owned deadline"
+  there, so the hung-Git deadline has no Windows coverage yet; a stand-in
+  that is a real `git.exe` (e.g. a small compiled or Node-based launcher)
+  would restore it.
 - Some tests assert POSIX paths (`expected 'C:\configured\legacy-state' to be
   '/configured/legacy-state'`) or spawn `/usr/bin/git`.
 - CI runs only `macos-latest` and `ubuntu-latest`
