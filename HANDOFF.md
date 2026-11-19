@@ -81,6 +81,10 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
   (`packages/local-runtime/src/runtimeHandshake.ts`) before the first frame.
   Neither side sends a frame to a peer that has not proven it. Frames and
   protocol versions are unchanged; macOS and Linux do not run the handshake.
+- Lock holders are identified on Windows by process start time
+  (`packages/workspace/src/processIdentity.ts`, WF-311); without `node:ffi`
+  a running holder is never taken for gone. Nothing signals the runtime; on
+  Windows the re-exec parent leaves Ctrl+C to its child.
 
 ## Development environment
 
