@@ -1,9 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { resolveGitExecutable } from './gitExecutable.js';
+import { linkOverlayEntry, removeInspectionOverlay } from './gitInspectionLinks.js';
+import { INSPECTION_IRRELEVANT_CORE_KEYS } from './inspectionIrrelevantCoreKeys.js';
 
 export {
   createGitExecutableResolver,
@@ -322,43 +324,6 @@ function safeCrlf(value: string | null): boolean | 'warn' {
   return gitBoolean(value);
 }
 
-/**
- * Checkout-local `core.*` keys that cannot change what an inspection reports.
- * They are dropped with every other non-structural key, so admitting them only
- * stops BuildFrame refusing common repositories: husky writes `core.hooksPath`,
- * and many people set an editor or pager per repository. Keys that change how
- * files are read, ignored or converted stay refused.
- */
-const INSPECTION_IRRELEVANT_CORE_KEYS: ReadonlySet<string> = new Set([
-  'core.hookspath',
-  'core.editor',
-  'core.pager',
-  'core.askpass',
-  'core.sshcommand',
-  'core.gitproxy',
-  'core.whitespace',
-  'core.commentchar',
-  'core.commentstring',
-  'core.abbrev',
-  'core.notesref',
-  'core.warnambiguousrefs',
-  'core.sharedrepository',
-  'core.createobject',
-  'core.compression',
-  'core.loosecompression',
-  'core.bigfilethreshold',
-  'core.deltabasecachelimit',
-  'core.packedgitlimit',
-  'core.packedgitwindowsize',
-  'core.preloadindex',
-  'core.untrackedcache',
-  'core.multipackindex',
-  'core.commitgraph',
-  'core.fsync',
-  'core.fsyncmethod',
-  'core.fsyncobjectfiles',
-]);
-
 function structuralConfiguration(
   entries: readonly CheckoutConfigEntry[],
   allowConfiguredWorkTree: boolean,
@@ -568,9 +533,9 @@ function applySparseWorktreeConfiguration(
   }
 }
 
-async function symlinkRequired(target: string, destination: string, kind: 'file' | 'dir'): Promise<void> {
+async function linkRequired(target: string, destination: string, kind: 'file' | 'dir'): Promise<void> {
   try {
-    await symlink(target, destination, kind);
+    await linkOverlayEntry(target, destination, kind);
   } catch (cause) {
     throw new GitInspectionError('inspection-overlay-failed', { cause });
   }
@@ -619,9 +584,9 @@ async function buildInspectionOverlay(
         throw new GitInspectionError('inspection-overlay-failed', { cause });
       });
       if (sourceStatus.isDirectory()) {
-        await symlinkRequired(source, path.join(shadowCommonDirectory, entry), 'dir');
+        await linkRequired(source, path.join(shadowCommonDirectory, entry), 'dir');
       } else if (sourceStatus.isFile() || sourceStatus.isSymbolicLink()) {
-        await symlinkRequired(source, path.join(shadowCommonDirectory, entry), 'file');
+        await linkRequired(source, path.join(shadowCommonDirectory, entry), 'file');
       }
     }
 
@@ -636,7 +601,7 @@ async function buildInspectionOverlay(
       if (!excludeStatus.isFile() && !excludeStatus.isSymbolicLink()) {
         throw new GitInspectionError('inspection-overlay-failed');
       }
-      await symlinkRequired(exclude, path.join(informationDirectory, 'exclude'), 'file');
+      await linkRequired(exclude, path.join(informationDirectory, 'exclude'), 'file');
     }
 
     const configurationLines: string[] = [
@@ -704,7 +669,7 @@ async function buildInspectionOverlay(
 
     return { root: temporaryRoot, common: shadowCommonDirectory };
   } catch (error) {
-    await rm(temporaryRoot, { recursive: true, force: true }).catch(() => undefined);
+    await removeInspectionOverlay(temporaryRoot).catch(() => undefined);
     throw error;
   }
 }
@@ -785,7 +750,7 @@ export async function prepareGitInspectionContext(
   try {
     await rejectUnsupportedOperatorConditions(executable, canonicalCheckout, environment);
   } catch (error) {
-    await rm(overlay.root, { recursive: true, force: true }).catch(() => undefined);
+    await removeInspectionOverlay(overlay.root).catch(() => undefined);
     throw error;
   }
 
@@ -798,7 +763,7 @@ export async function prepareGitInspectionContext(
     dispose: async (): Promise<void> => {
       if (disposed) return;
       disposed = true;
-      await rm(overlay.root, { recursive: true, force: true });
+      await removeInspectionOverlay(overlay.root);
     },
   };
 }

@@ -30,6 +30,12 @@ created: 2026-11-19
   there, so the hung-Git deadline has no Windows coverage yet; a stand-in
   that is a real `git.exe` (e.g. a small compiled or Node-based launcher)
   would restore it.
+- Two evidence tests write a `.gitconfig` with an unescaped Windows path,
+  and Git refuses it (`fatal: bad config line 2`):
+  `workspaceEvidenceCurrentChanges.test.ts` ("runs an operator-owned global
+  clean filter …") and `workspaceEvidencePerSideDegraded.test.ts` ("captures
+  raw working bytes …"). Write config paths with forward slashes or escaped
+  backslashes. Found 2026-11-19 in WF-307.
 - Some tests assert POSIX paths (`expected 'C:\configured\legacy-state' to be
   '/configured/legacy-state'`) or spawn `/usr/bin/git`.
 - CI runs only `macos-latest` and `ubuntu-latest`
