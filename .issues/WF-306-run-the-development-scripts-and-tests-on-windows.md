@@ -27,12 +27,19 @@ created: 2026-11-19
   '/configured/legacy-state'`) or spawn `/usr/bin/git`.
 - CI runs only `macos-latest` and `ubuntu-latest`
   (`.github/workflows/verify.yml:37`).
+- Git for Windows installs with `core.autocrlf=true` in its system config, so
+  a clone has CRLF working files (`git ls-files --eol`: `i/lf w/crlf`).
+  `pnpm format:check` then flags all 304 files, because oxfmt expects LF.
+  The repository has no `.gitattributes`.
 
 ## Direction
 
 - Make the scripts run under `cmd.exe` as well. `shell-emulator=true` in
   `.npmrc` is one line and keeps the scripts readable; check it with the
   pre-commit hook and `pnpm verify` on all three platforms.
+- Add a `.gitattributes` with `* text=auto eol=lf` so every checkout has LF
+  files whatever `core.autocrlf` says; existing Windows clones renormalise
+  once (`git rm --cached -r . && git reset --hard`, or a fresh clone).
 - Fix teardown order so watchers and children close before temporary
   directories are removed; retry removal briefly on `EBUSY`/`EPERM` in test
   helpers only.
@@ -45,6 +52,8 @@ created: 2026-11-19
 
 ## Verification
 
+- `pnpm format:check` passes on a fresh Windows clone with default Git
+  settings.
 - `pnpm test:fast` and `pnpm test` start on Windows from PowerShell and Git
   Bash.
 - No test leaves directories in `%TEMP%`.
