@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import {
@@ -19,7 +18,6 @@ import {
 import { release, uptime } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { promisify } from 'node:util';
 
 import {
   DEFAULT_GIT_PROCESS_TIMEOUT_MILLISECONDS,
@@ -30,13 +28,13 @@ import {
 } from './gitProcess.js';
 import { renameFile, syncDirectory } from './durableFiles.js';
 import { tightenWindowsDirectory, userStateDirectoryFor } from './privateDirectories.js';
+import { holderIsGone, inspectProcess } from './processIdentity.js';
 import type {
   WorkspaceAuthorityUnavailableDiagnostic,
   WorkspaceBootstrapDiagnostic,
   WorkspaceIdentity,
 } from './workspace.js';
 
-const execFileAsync = promisify(execFile);
 const MARKER_FILE_NAME = 'neoflow-workspace-identity.json';
 const MARKER_FORMAT_VERSION = 1;
 const REGISTRY_FILE_NAME = 'workspace-registry.json';
@@ -45,7 +43,6 @@ const REGISTRY_LOCK_FILE_NAME = 'workspace-registry.lock';
 const REGISTRY_LOCK_ATTEMPTS = 100;
 const REGISTRY_LOCK_DELAY_MS = 20;
 const EMPTY_REGISTRY_LOCK_STALE_MS = 60_000;
-const PROCESS_IDENTITY_TIMEOUT_MS = 30_000;
 const LOCK_OWNER_FORMAT_VERSION = 1;
 const LOCK_OWNER_FILE_PATTERN = /^owner-([0-9a-f-]{36})\.json$/u;
 const GIT_DIRECTORY_IDENTITY_PATTERN = /^fs:[0-9]+:[0-9]+:[0-9]+$/u;
@@ -467,85 +464,6 @@ async function wait(delayMilliseconds: number): Promise<void> {
   await new Promise<void>(resolve => {
     setTimeout(resolve, delayMilliseconds);
   });
-}
-
-function holderIsGone(holder: number): boolean {
-  try {
-    process.kill(holder, 0);
-    return false;
-  } catch (error) {
-    // A holder owned by another user answers `EPERM`, which still proves it is
-    // running. Only `ESRCH` proves the recorded process is gone.
-    return isErrno(error, 'ESRCH');
-  }
-}
-
-interface RunningProcess {
-  readonly status: 'running';
-  readonly identity: string | undefined;
-}
-
-interface GoneProcess {
-  readonly status: 'gone';
-}
-
-type ProcessInspection = RunningProcess | GoneProcess;
-
-/** Identifies a process instance, not merely its reusable process identifier. */
-async function inspectProcess(pid: number): Promise<ProcessInspection> {
-  if (holderIsGone(pid)) return { status: 'gone' };
-
-  if (process.platform === 'linux') {
-    try {
-      const [bootIdentity, processStat] = await Promise.all([
-        readFile('/proc/sys/kernel/random/boot_id', 'utf8'),
-        readFile(`/proc/${pid}/stat`, 'utf8'),
-      ]);
-      const commandEnd = processStat.lastIndexOf(')');
-      const fields =
-        commandEnd >= 0
-          ? processStat
-              .slice(commandEnd + 1)
-              .trim()
-              .split(/\s+/u)
-          : [];
-      // The slice starts at proc(5) field 3; process start time is field 22.
-      const startTime = fields[19];
-      if (startTime && /^[0-9]+$/u.test(startTime)) {
-        return {
-          status: 'running',
-          identity: `linux:${bootIdentity.trim()}:${startTime}`,
-        };
-      }
-    } catch {
-      if (holderIsGone(pid)) return { status: 'gone' };
-    }
-    return { status: 'running', identity: undefined };
-  }
-
-  if (process.platform === 'darwin') {
-    try {
-      const result = await execFileAsync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
-        encoding: 'utf8',
-        env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
-        maxBuffer: 16 * 1024,
-        timeout: PROCESS_IDENTITY_TIMEOUT_MS,
-        killSignal: 'SIGKILL',
-        windowsHide: true,
-      });
-      const startedAt = result.stdout.trim();
-      if (startedAt.length > 0) {
-        return {
-          status: 'running',
-          identity: `darwin:${startedAt}`,
-        };
-      }
-    } catch {
-      if (holderIsGone(pid)) return { status: 'gone' };
-    }
-  }
-
-  return { status: 'running', identity: undefined };
 }
 
 function parseLockOwner(content: string, expectedNonce: string): LockOwner | undefined {

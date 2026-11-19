@@ -85,6 +85,10 @@ close until WF-288 is closed.
   a named pipe per runtime directory and Workspace; a fresh secret published
   beside it after the listen; an HMAC challenge–response on that secret
   opens every connection, so no frame reaches a peer that has not proven it.
+- [Identify processes and stop the runtime on Windows](./WF-311-identify-processes-and-stop-the-runtime-on-windows.md):
+  process start time through `node:ffi` (unknown, so never gone, without it);
+  the runtime already stops only through its protocol; the re-exec parent no
+  longer kills its child on Ctrl+C on Windows.
 
 ## Collision rules
 

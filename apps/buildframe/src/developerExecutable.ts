@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
+import { signalForChild } from './consoleSignals.js';
 import { developerUsage, parseDeveloperArguments, type DeveloperArguments } from './developerArguments.js';
 import { nodeSupport } from './nodeSupport.js';
 import { startupFailureSentence } from './reviewingReasons.js';
@@ -26,8 +27,9 @@ async function reexecuteWithFfi(): Promise<void> {
     ],
     { stdio: 'inherit', env: process.env },
   );
-  const forward = (signal: NodeJS.Signals): void => {
-    if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+  const forward = (received: 'SIGINT' | 'SIGTERM'): void => {
+    const signal = signalForChild(received);
+    if (signal !== undefined && child.exitCode === null && child.signalCode === null) child.kill(signal);
   };
   const interrupt = (): void => forward('SIGINT');
   const terminate = (): void => forward('SIGTERM');
