@@ -41,6 +41,14 @@
       "types": "./dist/sha256.d.ts",
       "import": "./dist/sha256.js"
     },
+    "./private-directories": {
+      "development": {
+        "types": "./src/privateDirectories.ts",
+        "import": "./src/privateDirectories.ts"
+      },
+      "types": "./dist/privateDirectories.d.ts",
+      "import": "./dist/privateDirectories.js"
+    },
     "./harness-interaction": {
       "development": {
         "types": "./src/harness-interaction/index.ts",

@@ -61,6 +61,16 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
   flushes a file only through a writable handle, and renames retry for about
   1.3 s while another process (antivirus, the indexer) holds a file open.
 
+## Privacy on Windows (`windows` branch, WF-309)
+
+- State and the registry live in `%LOCALAPPDATA%\BuildFrame`, configuration in
+  `%APPDATA%\BuildFrame`, the runtime in `%LOCALAPPDATA%\BuildFrame\runtime`.
+- The app and the runtime (started with `--experimental-ffi`) set and check a
+  protected access list (the user, SYSTEM, Administrators) through `node:ffi`.
+  Agent hosts that load a connector have no `node:ffi`; there the directories
+  keep the privacy they inherit from the user's profile. See
+  `packages/workspace/src/privateDirectories.ts`.
+
 ## Development environment
 
 Node `26.5.1` (`nvm use`), pnpm `11.10.0`. The canonical checks:

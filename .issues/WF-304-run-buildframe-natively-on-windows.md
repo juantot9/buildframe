@@ -77,6 +77,10 @@ close until WF-288 is closed.
   directory sync skipped and renames retried on Windows; files flushed through
   a writable handle; whole-file publishes may roll back after power loss
   (written in HANDOFF.md).
+- [Keep BuildFrame's files private to the user on Windows](./WF-309-keep-buildframes-files-private-to-the-user-on-windows.md):
+  `node:ffi` sets and checks a protected access list where the process has it
+  (app, runtime); agent hosts keep the profile's inherited privacy; State and
+  runtime in `%LOCALAPPDATA%\BuildFrame`, configuration in `%APPDATA%`.
 
 ## Collision rules
 

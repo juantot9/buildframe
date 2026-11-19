@@ -37,13 +37,21 @@ import {
   runtimeLocationForWorkspace,
 } from './runtimeLocation.js';
 import { runtimeCodeIdentityForEntrypoint } from './runtimeCodeIdentity.js';
+import {
+  MAX_CONFIGURED_TIMEOUT_MS,
+  parseStartMessage,
+  parseStatusMessage,
+  RUNTIME_PROCESS_MESSAGE_VERSION,
+  type RuntimeProcessFailureReason,
+  type RuntimeProcessStartMessage,
+  type RuntimeProcessStatusMessage,
+  type RuntimeStartRejectedDiagnostic,
+} from './runtimeProcessMessages.js';
 
-const RUNTIME_PROCESS_MESSAGE_VERSION = 1;
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_IDLE_GRACE_MS = 30_000;
 const START_MESSAGE_TIMEOUT_MS = 5_000;
 const START_POLL_MS = 20;
-const MAX_CONFIGURED_TIMEOUT_MS = 3_600_000;
 
 export interface EnsureWorkspaceRuntimeRequest {
   /** A directory at or below the Git working-tree root. */
@@ -58,21 +66,6 @@ export interface EnsureWorkspaceRuntimeRequest {
   readonly startupTimeoutMilliseconds?: number;
 }
 
-export interface RuntimeStartRejectedDiagnostic {
-  readonly code: 'runtime-start-rejected';
-  readonly reason:
-    | 'spawn-failed'
-    | 'code-identity-unavailable'
-    | 'startup-timeout'
-    | 'runtime-exited'
-    | 'writer-unavailable'
-    | 'state-read-only-newer'
-    | 'workspace-unavailable'
-    | 'endpoint-active'
-    | 'endpoint-insecure'
-    | 'listen-failed';
-}
-
 export type EnsureWorkspaceRuntimeDiagnostic =
   | WorkspaceBootstrapDiagnostic
   | WorkspaceRuntimeBootstrapDiagnostic
@@ -84,31 +77,6 @@ export interface EnsureWorkspaceRuntimeRejected {
 }
 
 export type EnsureWorkspaceRuntimeResult = WorkspaceRuntimeConnected | EnsureWorkspaceRuntimeRejected;
-
-type RuntimeProcessFailureReason = Exclude<
-  RuntimeStartRejectedDiagnostic['reason'],
-  'spawn-failed' | 'startup-timeout' | 'runtime-exited'
->;
-
-interface RuntimeProcessStartMessage {
-  readonly type: 'runtime.start';
-  readonly version: typeof RUNTIME_PROCESS_MESSAGE_VERSION;
-  readonly startPath: string;
-  readonly idleGraceMilliseconds: number;
-}
-
-interface RuntimeProcessReadyMessage {
-  readonly type: 'runtime.ready';
-  readonly version: typeof RUNTIME_PROCESS_MESSAGE_VERSION;
-}
-
-interface RuntimeProcessFailedMessage {
-  readonly type: 'runtime.failed';
-  readonly version: typeof RUNTIME_PROCESS_MESSAGE_VERSION;
-  readonly reason: RuntimeProcessFailureReason;
-}
-
-type RuntimeProcessStatusMessage = RuntimeProcessReadyMessage | RuntimeProcessFailedMessage;
 
 interface SpawnedRuntime {
   readonly child: ChildProcess;
@@ -123,65 +91,6 @@ function configuredMilliseconds(value: number | undefined, fallback: number, all
     throw new TypeError('Runtime lifecycle timeout is outside its bound');
   }
   return configured;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const allowed = new Set(keys);
-  return keys.every(key => Object.hasOwn(value, key)) && Object.keys(value).every(key => allowed.has(key));
-}
-
-function isFailureReason(value: unknown): value is RuntimeProcessFailureReason {
-  return (
-    typeof value === 'string' &&
-    [
-      'writer-unavailable',
-      'code-identity-unavailable',
-      'state-read-only-newer',
-      'workspace-unavailable',
-      'endpoint-active',
-      'endpoint-insecure',
-      'listen-failed',
-    ].includes(value)
-  );
-}
-
-function parseStatusMessage(value: unknown): RuntimeProcessStatusMessage | undefined {
-  if (!isRecord(value) || value.version !== RUNTIME_PROCESS_MESSAGE_VERSION) {
-    return undefined;
-  }
-  if (value.type === 'runtime.ready' && hasOnlyKeys(value, ['type', 'version'])) {
-    return value as unknown as RuntimeProcessReadyMessage;
-  }
-  if (
-    value.type === 'runtime.failed' &&
-    hasOnlyKeys(value, ['type', 'version', 'reason']) &&
-    isFailureReason(value.reason)
-  ) {
-    return value as unknown as RuntimeProcessFailedMessage;
-  }
-  return undefined;
-}
-
-function parseStartMessage(value: unknown): RuntimeProcessStartMessage | undefined {
-  if (
-    !isRecord(value) ||
-    !hasOnlyKeys(value, ['type', 'version', 'startPath', 'idleGraceMilliseconds']) ||
-    value.type !== 'runtime.start' ||
-    value.version !== RUNTIME_PROCESS_MESSAGE_VERSION ||
-    typeof value.startPath !== 'string' ||
-    value.startPath.length === 0 ||
-    value.startPath.length > 16_384 ||
-    !Number.isSafeInteger(value.idleGraceMilliseconds) ||
-    (value.idleGraceMilliseconds as number) < 0 ||
-    (value.idleGraceMilliseconds as number) > MAX_CONFIGURED_TIMEOUT_MS
-  ) {
-    return undefined;
-  }
-  return value as unknown as RuntimeProcessStartMessage;
 }
 
 function detachChild(child: ChildProcess): void {
@@ -201,7 +110,10 @@ function spawnRuntime(runtimeEntrypoint: URL, startPath: string, idleGraceMillis
     throw new TypeError('Runtime entrypoint must be a local file URL');
   }
 
-  const child = spawn(process.execPath, [fileURLToPath(runtimeEntrypoint)], {
+  // On Windows the runtime keeps its files private through node:ffi, which Node
+  // loads only with this flag (privateDirectories.ts in the workspace package).
+  const ffi = process.platform === 'win32' ? ['--experimental-ffi'] : [];
+  const child = spawn(process.execPath, [...ffi, fileURLToPath(runtimeEntrypoint)], {
     detached: true,
     env: process.env,
     serialization: 'json',

@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+
+import { tightenWindowsDirectory } from '@buildframe/workspace/private-directories';
+
+import { defaultUserConfigurationPath, messageTemplatePath } from './userConfigurationPaths.js';
+
+export { defaultUserConfigurationPath, messageTemplatePath };
 
 const CONFIGURATION_VERSION = 1;
 const LEFT_PANE_MINIMUM = 16;
@@ -389,20 +394,6 @@ function parseSupportedDocument(text: string):
   return { status: 'supported', document: parsed };
 }
 
-export function defaultUserConfigurationPath(
-  environment: NodeJS.ProcessEnv = process.env,
-  homeDirectory: string = os.homedir(),
-): string {
-  const xdg = environment.XDG_CONFIG_HOME;
-  const base = xdg !== undefined && path.isAbsolute(xdg) ? xdg : path.join(homeDirectory, '.config');
-  return path.join(base, 'buildframe', 'config.json');
-}
-
-/** The user-level outgoing Message template beside the configuration file. */
-export function messageTemplatePath(configurationPath: string = defaultUserConfigurationPath()): string {
-  return path.join(path.dirname(configurationPath), 'message-template.md');
-}
-
 async function readIfPresent(
   configurationPath: string,
 ): Promise<{ readonly status: 'missing' } | { readonly status: 'present'; readonly text: string }> {
@@ -564,6 +555,7 @@ class FileUserConfiguration implements UserConfiguration {
       };
       const directory = path.dirname(this.#path);
       await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      tightenWindowsDirectory(directory);
       const temporary = path.join(directory, `.${path.basename(this.#path)}.${process.pid}.${randomUUID()}.tmp`);
       try {
         await fs.writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, {
