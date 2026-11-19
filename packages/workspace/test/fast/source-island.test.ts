@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import * as legacyReviewImport from '@buildframe/workspace/legacy-review-import';
+import * as privateDirectories from '@buildframe/workspace/private-directories';
 import * as projection from '@buildframe/workspace/projection';
 import * as reviewing from '@buildframe/workspace/reviewing';
 import * as workspaceEvidence from '@buildframe/workspace/workspace-evidence';
@@ -29,5 +30,20 @@ describe('Workspace Interface', () => {
     expect(Object.keys(reviewing)).toEqual([]);
     expect(Object.keys(legacyReviewImport)).toEqual([]);
     expect(Object.keys(workspaceEvidence)).toEqual([]);
+  });
+
+  it('keeps the private-directories subpath to file locations and Windows privacy', () => {
+    expect(Object.keys(privateDirectories).sort()).toEqual([
+      'DirectoryNotPrivate',
+      'WindowsSecurityFailure',
+      'WindowsSecurityUnavailable',
+      'accessIsPrivate',
+      'protectWindowsDirectory',
+      'tightenWindowsDirectory',
+      'userConfigurationDirectoryFor',
+      'userStateDirectoryFor',
+      'windowsDirectoryPrivacy',
+      'windowsRuntimeDirectoryFor',
+    ]);
   });
 });

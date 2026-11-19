@@ -16,7 +16,7 @@ import {
   stat,
   unlink,
 } from 'node:fs/promises';
-import { homedir, release, uptime } from 'node:os';
+import { release, uptime } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
@@ -29,6 +29,7 @@ import {
   type GitInspectionContext,
 } from './gitProcess.js';
 import { renameFile, syncDirectory } from './durableFiles.js';
+import { tightenWindowsDirectory, userStateDirectoryFor } from './privateDirectories.js';
 import type {
   WorkspaceAuthorityUnavailableDiagnostic,
   WorkspaceBootstrapDiagnostic,
@@ -38,7 +39,6 @@ import type {
 const execFileAsync = promisify(execFile);
 const MARKER_FILE_NAME = 'neoflow-workspace-identity.json';
 const MARKER_FORMAT_VERSION = 1;
-const REGISTRY_DIRECTORY_NAME = 'buildframe';
 const REGISTRY_FILE_NAME = 'workspace-registry.json';
 const REGISTRY_FORMAT_VERSION = 1;
 const REGISTRY_LOCK_FILE_NAME = 'workspace-registry.lock';
@@ -458,21 +458,9 @@ async function inspectGitWorktree(requestedPath: string): Promise<GitWorktree> {
 
 /** Shared only inside the Workspace owner; callers never receive this path. */
 export function userStateDirectory(requestedPath: string): string {
-  const xdgStateHome = process.env.XDG_STATE_HOME;
-  if (xdgStateHome && path.isAbsolute(xdgStateHome)) {
-    return path.join(xdgStateHome, REGISTRY_DIRECTORY_NAME);
-  }
-
-  const home = homedir();
-  if (!home || !path.isAbsolute(home)) {
-    throw authorityUnavailable(requestedPath, 'resolve-user-state');
-  }
-
-  if (process.platform === 'darwin') {
-    return path.join(home, 'Library', 'Application Support', 'BuildFrame');
-  }
-
-  return path.join(home, '.local', 'state', REGISTRY_DIRECTORY_NAME);
+  const directory = userStateDirectoryFor();
+  if (directory === undefined) throw authorityUnavailable(requestedPath, 'resolve-user-state');
+  return directory;
 }
 
 async function wait(delayMilliseconds: number): Promise<void> {
@@ -791,6 +779,7 @@ async function withRegistryLock<T>(stateDirectory: string, requestedPath: string
   try {
     await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
     await chmod(stateDirectory, 0o700);
+    tightenWindowsDirectory(stateDirectory);
   } catch {
     throw authorityUnavailable(requestedPath, 'lock-registry');
   }

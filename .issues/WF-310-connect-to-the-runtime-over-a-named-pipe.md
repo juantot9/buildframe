@@ -44,6 +44,21 @@ BuildFrame?
 - Precedent: the Claude helper already authenticates a local connection with
   a port and a token (`packages/claude-adapter/plugin/hooks/register.js:14`).
 
+## From WF-309 (2026-11-19)
+
+- The runtime directory is `windowsRuntimeDirectoryFor()`
+  (`%LOCALAPPDATA%\BuildFrame\runtime`; whether `XDG_RUNTIME_DIR` overrides it
+  on Windows is for this ticket to decide);
+  `prepareWindowsRuntimeDirectory` and `validateWindowsRuntimeDirectory` in
+  `runtimeLocation.ts` make and check it. `runtimeLocationForWorkspace` and
+  `validatePrivateRuntimeEndpoint` still refuse Windows; wiring them is this
+  ticket.
+- The runtime starts with `--experimental-ffi` on Windows, so it can read and
+  protect access lists. **Connectors cannot**: agent hosts have no `node:ffi`,
+  and `validateWindowsRuntimeDirectory` returns `unverifiable` there. The
+  secret file therefore relies on the directory sitting in the user's profile,
+  and the challenge–response must authenticate both sides on its own.
+
 ## Direction
 
 - Endpoint `\\.\pipe\buildframe-<user SID digest>-<workspace digest>`.

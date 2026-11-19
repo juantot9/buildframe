@@ -7,9 +7,9 @@ export {
   type EnsureWorkspaceRuntimeRejected,
   type EnsureWorkspaceRuntimeRequest,
   type EnsureWorkspaceRuntimeResult,
-  type RuntimeStartRejectedDiagnostic,
   type RunWorkspaceRuntimeProcessRequest,
 } from './lifecycle.js';
+export type { RuntimeStartRejectedDiagnostic } from './runtimeProcessMessages.js';
 export {
   LocalRuntimeServerError,
   startLocalRuntimeServer,

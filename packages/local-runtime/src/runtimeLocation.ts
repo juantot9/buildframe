@@ -6,6 +6,7 @@ import process from 'node:process';
 import { isMainThread } from 'node:worker_threads';
 
 import type { WorkspaceIdentity } from '@buildframe/workspace';
+import { protectWindowsDirectory, windowsDirectoryPrivacy } from '@buildframe/workspace/private-directories';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_SOCKET_MODE = 0o600;
@@ -44,6 +45,7 @@ interface OwnedEndpoint {
   readonly inode: bigint;
 }
 
+/** Windows has no user id; its runtime location comes with the named-pipe endpoint (WF-310). */
 function currentUserId(): number {
   if ((process.platform !== 'darwin' && process.platform !== 'linux') || process.getuid === undefined) {
     throw new RuntimeLocationProblem('unsupported-platform');
@@ -119,7 +121,54 @@ async function preparePrivateDirectory(directory: string, userId: number): Promi
   }
 }
 
+/**
+ * Windows: creates the runtime directory under the user's profile, refuses a
+ * link in its place, and gives it the user's protected access list. Only the
+ * runtime prepares it, and the runtime always has `node:ffi`, so this fails
+ * closed without it.
+ */
+export async function prepareWindowsRuntimeDirectory(directory: string): Promise<void> {
+  try {
+    await mkdir(directory, { recursive: true });
+    const status = await lstat(directory);
+    if (!status.isDirectory() || status.isSymbolicLink()) throw new Error('not a plain directory');
+    protectWindowsDirectory(directory);
+  } catch {
+    throw new RuntimeLocationProblem('runtime-directory-insecure');
+  }
+}
+
+/**
+ * Windows: refuses a missing, linked or no-longer-private runtime directory.
+ * An agent host that loads a connector has no `node:ffi` and cannot read the
+ * access list; it gets `unverifiable` and relies on the directory sitting in
+ * the user's profile and on the endpoint's own authentication (WF-310).
+ */
+export async function validateWindowsRuntimeDirectory(directory: string): Promise<'private' | 'unverifiable'> {
+  let status;
+  try {
+    status = await lstat(directory);
+  } catch {
+    throw new RuntimeLocationProblem('runtime-endpoint-missing');
+  }
+  if (!status.isDirectory() || status.isSymbolicLink()) {
+    throw new RuntimeLocationProblem('runtime-directory-insecure');
+  }
+  let privacy;
+  try {
+    privacy = windowsDirectoryPrivacy(directory);
+  } catch {
+    throw new RuntimeLocationProblem('runtime-directory-insecure');
+  }
+  if (privacy === 'not-private') throw new RuntimeLocationProblem('runtime-directory-insecure');
+  return privacy;
+}
+
 export async function preparePrivateRuntimeDirectory(location: RuntimeLocation): Promise<void> {
+  if (process.platform === 'win32') {
+    await prepareWindowsRuntimeDirectory(location.directory);
+    return;
+  }
   const userId = currentUserId();
   if (location.ownedBase !== undefined) {
     await preparePrivateDirectory(location.ownedBase, userId);

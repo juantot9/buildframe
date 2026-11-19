@@ -7,9 +7,12 @@ import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { currentUserSid, writeProtectedAccess } from '../../../workspace/src/windowsSecurity.js';
 import {
+  prepareWindowsRuntimeDirectory,
   preparePrivateRuntimeDirectory,
   validatePrivateRuntimeEndpoint,
+  validateWindowsRuntimeDirectory,
   type RuntimeLocation,
 } from '../../src/runtimeLocation.js';
 
@@ -28,7 +31,9 @@ function fallbackLocation(base: string): RuntimeLocation {
   return { directory, endpoint: path.join(directory, 'w-test.sock'), ownedBase: base };
 }
 
-describe('the shared fallback runtime base', () => {
+// These cases are POSIX: owner ids, modes, symlinks and a Unix socket. The
+// Windows runtime directory has its own cases below.
+describe.skipIf(process.platform === 'win32')('the shared fallback runtime base', () => {
   it('is created owner-private along with the runtime directory', async () => {
     const location = fallbackLocation(path.join(scratch, 'buildframe-501'));
 
@@ -73,7 +78,7 @@ describe('the shared fallback runtime base', () => {
   });
 });
 
-describe('the runtime endpoint', () => {
+describe.skipIf(process.platform === 'win32')('the runtime endpoint', () => {
   it('is owner-private from the moment it exists, so a connector never sees it insecure', async () => {
     const { stdout } = await promisify(execFile)(
       process.execPath,
@@ -85,5 +90,57 @@ describe('the runtime endpoint', () => {
       { cwd: fileURLToPath(new URL('../../../../', import.meta.url)), encoding: 'utf8', timeout: 30_000 },
     );
     expect(JSON.parse(stdout)).toEqual({ mode: 0o600, validation: 'valid', umaskAfter: 0o022 });
+  });
+});
+
+describe.runIf(process.platform === 'win32')('the Windows runtime directory', () => {
+  const widenToUsers = (directory: string): void => {
+    const user = currentUserSid();
+    writeProtectedAccess(directory, `D:P(A;OICI;FA;;;${user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)`);
+  };
+
+  it('is created private to the user', async () => {
+    const directory = path.join(scratch, 'BuildFrame', 'runtime');
+
+    await prepareWindowsRuntimeDirectory(directory);
+
+    await expect(validateWindowsRuntimeDirectory(directory)).resolves.toBe('private');
+  });
+
+  it('is tightened when it already exists readable by other users', async () => {
+    const directory = path.join(scratch, 'BuildFrame', 'runtime');
+    await mkdir(directory, { recursive: true });
+    widenToUsers(directory);
+
+    await prepareWindowsRuntimeDirectory(directory);
+
+    await expect(validateWindowsRuntimeDirectory(directory)).resolves.toBe('private');
+  });
+
+  it('is refused when a junction stands in its place', async () => {
+    const elsewhere = path.join(scratch, 'elsewhere');
+    await mkdir(elsewhere);
+    const directory = path.join(scratch, 'runtime');
+    await symlink(elsewhere, directory, 'junction');
+
+    await expect(prepareWindowsRuntimeDirectory(directory)).rejects.toMatchObject({
+      code: 'runtime-directory-insecure',
+    });
+    await expect(validateWindowsRuntimeDirectory(directory)).rejects.toMatchObject({
+      code: 'runtime-directory-insecure',
+    });
+  });
+
+  it('is refused by clients once it is no longer private, and missing when absent', async () => {
+    const directory = path.join(scratch, 'BuildFrame', 'runtime');
+    await expect(validateWindowsRuntimeDirectory(directory)).rejects.toMatchObject({
+      code: 'runtime-endpoint-missing',
+    });
+    await prepareWindowsRuntimeDirectory(directory);
+    widenToUsers(directory);
+
+    await expect(validateWindowsRuntimeDirectory(directory)).rejects.toMatchObject({
+      code: 'runtime-directory-insecure',
+    });
   });
 });
