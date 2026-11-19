@@ -70,6 +70,9 @@ close until WF-288 is closed.
 - [Find git.exe on Windows](./WF-305-find-git-exe-on-windows.md): `git.exe`
   only, no mode-bit check on Windows, in a new `gitExecutable.ts`; the
   suspected `PATH`/`Path` problem was a test that skipped its own cleanup.
+- [Build the git inspection overlay without symlinks](./WF-307-build-the-git-inspection-overlay-without-symlinks.md):
+  junctions and hard links (copy fallback) on Windows; overlay removal unlinks
+  every link before removing anything else.
 
 ## Collision rules
 
