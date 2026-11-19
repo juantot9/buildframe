@@ -1,11 +1,11 @@
 ---
 id: WF-305
 title: "Find git.exe on Windows"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-304
-assignee: null
+assignee: juanan
 blocked_by: []
 created: 2026-11-19
 ---
@@ -46,3 +46,48 @@ Windows every file reads as mode `666`
 - The tests that create symlinks to fake executables skip on Windows without
   Developer Mode, or use a copy, and say which.
 - macOS and Linux results unchanged.
+
+## Resolution and evidence (2026-11-19)
+
+- Executable resolution moved out of `gitProcess.ts` into a new
+  `packages/workspace/src/gitExecutable.ts`; `gitProcess.ts` re-exports the
+  same names, so no importer changed, and it shrank from about 7,700 to
+  6,800 tokens. The moved code is unchanged except for one rule: on Windows
+  the candidate is `git.exe` and mode bits are not checked; elsewhere it is
+  `git` with the execute-bit check, as before. `access(X_OK)`, the
+  before/after `realpath` comparison and `git-resolution-changed` apply on
+  every platform.
+- `createGitExecutableResolver` takes an optional platform, so the Windows
+  rule is tested on macOS and Linux CI too: `git.exe` selected through a
+  linked directory and never a bare `git`, `git.cmd`/`git.bat` never selected
+  (`git-missing`), a directory named `git.exe` (`git-not-file`), and a
+  changed search path. One Windows-only case resolves the installed Git for
+  Windows. The three POSIX cases (execute bits, file symlinks) skip on
+  Windows with the reason stated.
+- **The `PATH`/`Path` direction above was wrong.** The 19
+  `git-resolution-changed` failures came from one test: "retires hung
+  identity Git inspection at the package-owned deadline" sets `PATH` to a
+  directory holding a shell-script Git and pauses with `/bin/sleep`. On
+  Windows the pause throws inside its `finally` before `PATH` is restored, so
+  every later test ran with the stand-in `PATH`, and the resolver correctly
+  reported a changed search path. That test now skips on Windows. To skip it
+  without growing the frozen `workspaceIdentity.test.ts`, it moved verbatim
+  to `workspaceIdentityHungGit.test.ts`, and the file's shared setup moved
+  verbatim to `workspaceIdentityScenarios.ts` (the frozen file went from about
+  8,900 to 7,200 tokens). The lost Windows coverage is recorded in
+  [Run the development scripts and tests on Windows](./WF-306-run-the-development-scripts-and-tests-on-windows.md).
+- With the other bootstrap blockers patched locally (refusal, overlay,
+  directory `fsync`; not committed), `workspaceIdentity.test.ts` passes 17 of
+  21 on Windows, including the fsmonitor, include, hook and clean-filter
+  cases (nothing from checkout config runs). The rest: a symlink alias (WF-306),
+  a lock left by a reused process id (recorded in
+  [Identify processes and stop the runtime on Windows](./WF-311-identify-processes-and-stop-the-runtime-on-windows.md)),
+  and the native-Windows refusal test itself (WF-315).
+- Full suite on Windows, nothing patched: 607 tests, 268 pass (259 before),
+  4 skipped; no `git-missing` failure remains. Most of the rest stop at the
+  native-Windows refusal, as intended until WF-315.
+- Checks run on Windows: workspace typecheck, `tsconfig.tests.json`
+  typecheck, oxlint, oxfmt, dependency firewall, the fast suite (the same 10
+  failures as before, all runtime location and symlink tests owned by other
+  children). Not run here: macOS and Linux; CI runs only on `main`, so
+  confirm with a manual `Verify` run on the `windows` branch.

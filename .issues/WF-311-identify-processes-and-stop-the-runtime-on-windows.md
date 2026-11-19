@@ -17,6 +17,12 @@ created: 2026-11-19
   (`packages/workspace/src/workspaceIdentity.ts:507`) reads `/proc` on Linux
   (`:513-514`) and runs `/bin/ps` on macOS (`:540`). On Windows it returns
   `running` with no identity. Process ids are reused quickly on Windows.
+- Observed 2026-11-19 (WF-305, bootstrap patches applied locally):
+  "keeps an old live lock private and clears a lock from another process
+  instance" (`workspaceIdentity.test.ts:438`) fails on Windows with
+  `workspace-registry-busy`. The test records this process's id with a prior
+  instance's identity; with no identity on Windows, the lock is never
+  recognised as left behind, so a reused id keeps the registry locked.
 - `process.kill(pid, 0)` works on Windows and answers ESRCH for a gone process
   (`holderIsGone`, `:484`), so liveness is fine.
 - Shutdown relies on signals: the runtime listens for SIGTERM and SIGINT
