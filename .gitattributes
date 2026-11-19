@@ -1,0 +1,4 @@
+# Test fixtures are byte-exact (State generations, CURRENT pointers, manifests
+# with digests, legacy review sources): never convert their line endings, even
+# where Git for Windows sets core.autocrlf=true.
+packages/workspace/test/fixtures/** -text

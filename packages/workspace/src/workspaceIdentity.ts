@@ -11,7 +11,6 @@ import {
   readFile,
   readdir,
   realpath,
-  rename,
   rm,
   rmdir,
   stat,
@@ -29,6 +28,7 @@ import {
   runGitProcess,
   type GitInspectionContext,
 } from './gitProcess.js';
+import { renameFile, syncDirectory } from './durableFiles.js';
 import type {
   WorkspaceAuthorityUnavailableDiagnostic,
   WorkspaceBootstrapDiagnostic,
@@ -972,15 +972,6 @@ async function readRegistry(registryFile: string, requestedPath: string): Promis
   }
 }
 
-async function syncDirectory(directory: string): Promise<void> {
-  const handle = await open(directory, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
-
 async function writeRegistry(registryFile: string, registry: Registry, requestedPath: string): Promise<void> {
   const registryDirectory = path.dirname(registryFile);
   const temporaryFile = path.join(registryDirectory, `.${REGISTRY_FILE_NAME}.${randomUUID()}.tmp`);
@@ -1002,7 +993,7 @@ async function writeRegistry(registryFile: string, registry: Registry, requested
     await temporaryHandle.sync();
     await temporaryHandle.close();
     temporaryHandle = undefined;
-    await rename(temporaryFile, registryFile);
+    await renameFile(temporaryFile, registryFile);
     await chmod(registryFile, 0o600);
     // The registry names Workspace identity authority. Do not report readiness
     // until the directory entry replacing it is durable as well as its bytes.
