@@ -57,7 +57,7 @@ Can start now:
 Blocked:
 
 - [Connect to the runtime over a named pipe](./WF-310-connect-to-the-runtime-over-a-named-pipe.md) — was blocked by WF-309; closed
-- [Can each agent connect from Windows?](./WF-313-can-each-agent-connect-from-windows.md) — blocked by WF-312 (WF-310 closed)
+- [Can each agent connect from Windows?](./WF-313-can-each-agent-connect-from-windows.md) — unblocked (WF-310 and WF-312 closed)
 - [Lift the native-Windows refusal and prove Windows end to end](./WF-315-lift-the-native-windows-refusal-and-prove-windows-end-to-end.md) — blocked by every other child
 
 Related, not a child:
@@ -89,6 +89,11 @@ close until WF-288 is closed.
   process start time through `node:ffi` (unknown, so never gone, without it);
   the runtime already stops only through its protocol; the re-exec parent no
   longer kills its child on Ctrl+C on Windows.
+- [Package BuildFrame and start the Claude helper on Windows](./WF-312-package-buildframe-and-start-the-claude-helper-on-windows.md):
+  release assembly runs on Windows (`--windows` adds `win32` for testing);
+  TOML highlighting moved to `@tree-sitter-grammars/tree-sitter-toml` so no
+  install compiles; the Claude plugin finds the installed helper behind its
+  shim and runs it with Node, no shell.
 
 ## Collision rules
 

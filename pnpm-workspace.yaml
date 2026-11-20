@@ -4,6 +4,7 @@ packages:
 
 allowBuilds:
   '@google/genai': false
+  '@tree-sitter-grammars/tree-sitter-toml': false
   '@tree-sitter-grammars/tree-sitter-yaml': false
   esbuild: true
   protobufjs: false
@@ -17,7 +18,6 @@ allowBuilds:
   tree-sitter-json: false
   tree-sitter-python: false
   tree-sitter-rust: false
-  tree-sitter-toml: false
 
 minimumReleaseAge: 1440
 

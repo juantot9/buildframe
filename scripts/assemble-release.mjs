@@ -3,22 +3,34 @@
 //
 //   pnpm release:assemble            build, bundle, check
 //   pnpm release:manifest            only rewrite support/manifest.json
+//   node scripts/assemble-release.mjs --windows
+//                                    also let the CLI install on Windows, for
+//                                    testing until Windows ships (WF-315)
 //
 // The private workspace packages are bundled in; native and WASM dependencies
 // (OpenTUI, tree-sitter grammars) stay ordinary npm dependencies, and Pi's own
 // packages stay host-provided peers. The OpenCode plugin imports nothing from
 // OpenCode, which refuses plugins that ship its modules.
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { exec, execFile } from 'node:child_process';
 import { chmod, cp, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import { build } from 'esbuild';
 
 const execFileAsync = promisify(execFile);
+const execAsync = promisify(exec);
+// npm and pnpm are `.cmd` scripts on Windows, which run only through a shell.
+// The arguments here are fixed words, never user input.
+const runTool = async (tool, args, options = {}) =>
+  process.platform === 'win32'
+    ? await execAsync([tool, ...args].join(' '), options)
+    : await execFileAsync(tool, args, options);
+const importFile = async file => await import(pathToFileURL(file).href);
+const windows = process.argv.includes('--windows');
 const root = fileURLToPath(new URL('..', import.meta.url));
 const at = (...parts) => path.join(root, ...parts);
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
@@ -34,7 +46,7 @@ const { supportManifest, RELEASE_COORDINATES } = await import(
 const manifest = supportManifest(version);
 await writeFile(at('support/manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 // Keep the checked-in file in the repository's own format.
-await execFileAsync('pnpm', ['exec', 'oxfmt', 'support/manifest.json'], { cwd: root });
+await runTool('pnpm', ['exec', 'oxfmt', 'support/manifest.json'], { cwd: root });
 if (process.argv.includes('--manifest-only')) {
   console.log(`support/manifest.json written for ${version}`);
   process.exit(0);
@@ -105,7 +117,7 @@ await writeFile(
       },
       files: ['dist', 'support-manifest.json'],
       engines: { node: app.engines.node },
-      os: ['darwin', 'linux'],
+      os: windows ? ['darwin', 'linux', 'win32'] : ['darwin', 'linux'],
       dependencies: nativeDependencies,
       ...publicMetadata,
       keywords: ['code-review', 'tui', 'coding-agent', 'pi', 'claude-code'],
@@ -221,9 +233,7 @@ await writeFile(
 
 // --- Checks -------------------------------------------------------------------
 async function packedFiles(directory) {
-  const { stdout } = await execFileAsync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
-    cwd: directory,
-  });
+  const { stdout } = await runTool('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: directory });
   return JSON.parse(stdout)[0]
     .files.map(file => file.path)
     .sort();
@@ -282,7 +292,8 @@ const scratch = await mkdtemp(path.join(tmpdir(), 'buildframe-release-'));
 try {
   const installedCli = path.join(scratch, 'cli');
   await cp(cli, installedCli, { recursive: true });
-  await symlink(at('apps/buildframe/node_modules'), path.join(installedCli, 'node_modules'), 'dir');
+  // A junction on Windows, which needs no Developer Mode; a symlink elsewhere.
+  await symlink(at('apps/buildframe/node_modules'), path.join(installedCli, 'node_modules'), 'junction');
   const help = await execFileAsync(process.execPath, [path.join(installedCli, 'dist/buildframe.js'), '--help']);
   assert.match(help.stdout, /Usage: buildframe /u);
   const bins = (await readJson(path.join(cli, 'package.json'))).bin;
@@ -304,17 +315,17 @@ try {
 
   const installedPi = path.join(scratch, 'pi');
   await cp(pi, installedPi, { recursive: true });
-  await symlink(at('packages/pi-adapter/node_modules'), path.join(installedPi, 'node_modules'), 'dir');
-  const extension = await import(path.join(installedPi, 'dist/index.js'));
+  await symlink(at('packages/pi-adapter/node_modules'), path.join(installedPi, 'node_modules'), 'junction');
+  const extension = await importFile(path.join(installedPi, 'dist/index.js'));
   assert.equal(typeof extension.default, 'function', '@buildframe/pi exports its extension');
 
   // OpenCode resolves nothing for the plugin: both parts must load from the package alone.
   const installedOpenCode = path.join(scratch, 'opencode');
   await cp(opencode, installedOpenCode, { recursive: true });
-  const server = (await import(path.join(installedOpenCode, 'dist/index.js'))).default;
+  const server = (await importFile(path.join(installedOpenCode, 'dist/index.js'))).default;
   assert.equal(server.id, 'buildframe', '@buildframe/opencode exports its server part');
   assert.equal(typeof server.setup, 'function', '@buildframe/opencode exports its server part');
-  const tui = (await import(path.join(installedOpenCode, 'dist/tui.js'))).default;
+  const tui = (await importFile(path.join(installedOpenCode, 'dist/tui.js'))).default;
   assert.equal(typeof tui.setup, 'function', '@buildframe/opencode exports its TUI part');
 } finally {
   await rm(scratch, { recursive: true, force: true });
