@@ -52,3 +52,7 @@ ticket for each binding or behaviour that needs a change.
   `reviewingApplication.test.ts` "says whether the agent changed code while
   answering" fails every run. At a past step the key can never act, so the
   Esc notice should win (`apps/buildframe/src/reviewingActions.ts`).
+  Fixed (2026-11-20): the past-step guards now come before the loading guard;
+  `test/fast/reviewingActionOrder.test.ts` pins the order. With the refusal
+  patched out locally, the scenario passed 3 of 3 runs (it failed every run
+  before).
