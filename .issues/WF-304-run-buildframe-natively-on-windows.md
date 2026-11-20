@@ -58,7 +58,7 @@ Blocked:
 
 - [Connect to the runtime over a named pipe](./WF-310-connect-to-the-runtime-over-a-named-pipe.md) — was blocked by WF-309; closed
 - [Can each agent connect from Windows?](./WF-313-can-each-agent-connect-from-windows.md) — closed
-- [Lift the native-Windows refusal and prove Windows end to end](./WF-315-lift-the-native-windows-refusal-and-prove-windows-end-to-end.md) — blocked by every other child
+- [Lift the native-Windows refusal and prove Windows end to end](./WF-315-lift-the-native-windows-refusal-and-prove-windows-end-to-end.md) — every other child is closed (2026-11-20)
 
 Related, not a child:
 [A one-line edit in a CRLF-checked-out file shows the whole file rewritten](./WF-288-crlf-files-diff-as-rewritten.md)
@@ -103,6 +103,12 @@ the way Git does, from its attributes and the effective `core.autocrlf`.
   pnpm's shell emulator runs every script from PowerShell; LF checkouts via
   `* text=auto eol=lf`; tests skip by stated reason where Windows lacks
   symlinks or POSIX files; a non-blocking `windows-latest` CI job.
+- [Check the TUI in Windows terminals](./WF-314-check-the-tui-in-windows-terminals.md):
+  Reviewing holds up in conhost, WezTerm and herdr from PowerShell (Git Bash
+  out of scope; Windows Terminal and VS Code not installed). Git now starts
+  hidden, since every run of the console-less runtime flashed a window. Filed
+  WF-319 and WF-320 (conhost: input cursor glyph, no paste) and WF-316 to
+  WF-318 (shared layout and wheel bugs).
 
 ## Collision rules
 
