@@ -18,7 +18,8 @@ changed, ask precise questions anchored to exact lines, and keep a trustworthy
 record of what was asked, what was answered, and what changed in between.
 
 The first public release is a quiet, Reviewing-only `0.1.0` preview for
-developers on macOS and Linux (see `.issues/WF-287`). Design for the solo
+developers on macOS, Linux and Windows (see `.issues/WF-287` and
+`.issues/WF-304`). Design for the solo
 developer first.
 
 ## Product Purpose
@@ -84,7 +85,7 @@ Every consequential step is committed locally before it takes effect.
   its quoted source for secrets and never asks before sending it.
 - Release scope is settled in `.issues/WF-287`. A Pi or Claude Code session
   connects once with `/buildframe`, then receives every Send directly. Install is
-  `npm i -g @buildframe/cli` (or pnpm), on macOS and Linux with Node 26.
+  `npm i -g @buildframe/cli` (or pnpm), on macOS, Linux and Windows with Node 26.
   `support/manifest.json` is generated from the app's support facts.
 
 ## Brand Commitments

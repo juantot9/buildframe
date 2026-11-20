@@ -3,9 +3,6 @@
 //
 //   pnpm release:assemble            build, bundle, check
 //   pnpm release:manifest            only rewrite support/manifest.json
-//   node scripts/assemble-release.mjs --windows
-//                                    also let the CLI install on Windows, for
-//                                    testing until Windows ships (WF-315)
 //
 // The private workspace packages are bundled in; native and WASM dependencies
 // (OpenTUI, tree-sitter grammars) stay ordinary npm dependencies, and Pi's own
@@ -30,7 +27,6 @@ const runTool = async (tool, args, options = {}) =>
     ? await execAsync([tool, ...args].join(' '), options)
     : await execFileAsync(tool, args, options);
 const importFile = async file => await import(pathToFileURL(file).href);
-const windows = process.argv.includes('--windows');
 const root = fileURLToPath(new URL('..', import.meta.url));
 const at = (...parts) => path.join(root, ...parts);
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
@@ -117,7 +113,7 @@ await writeFile(
       },
       files: ['dist', 'support-manifest.json'],
       engines: { node: app.engines.node },
-      os: windows ? ['darwin', 'linux', 'win32'] : ['darwin', 'linux'],
+      os: ['darwin', 'linux', 'win32'],
       dependencies: nativeDependencies,
       ...publicMetadata,
       keywords: ['code-review', 'tui', 'coding-agent', 'pi', 'claude-code'],
@@ -202,7 +198,7 @@ for (const directory of [cli, pi, opencode]) {
   await cp(at('LICENSE'), path.join(directory, 'LICENSE'));
 }
 const requirements =
-  `Needs macOS or Linux, Node ${app.engines.node} and Git. ` +
+  `Needs macOS, Linux or Windows, Node ${app.engines.node} and Git. ` +
   `${version} is a preview: see the [full guide](${repositoryUrl}#readme) ` +
   `and report problems at ${repositoryUrl}/issues.\n`;
 await writeFile(

@@ -73,6 +73,28 @@ to be closed.
   package-owned deadline") still skips on Windows: its stand-in Git is a
   shell script. A stand-in that is a real `git.exe` would restore it.
 
+## Progress (2026-11-21)
+
+- Refusal lifted: `platformDiagnostic` accepts `win32` beside `darwin`;
+  WSL1 and unknown systems are still refused, and the `native-windows`
+  reason is gone. The runtime location already served Windows (WF-310).
+- The CLI package's `os` always includes `win32` (the `--windows` flag is
+  gone), and its README says "Needs macOS, Linux or Windows".
+- Windows in the support manifest (`environments`, and two known
+  limitations: x64 only and no WSL1/WSL2 claim; a save may roll back after
+  a power loss), the README (requirements, data and configuration folders,
+  the power-loss note), `PRODUCT.md`, `SECURITY.md`, `CHANGELOG.md` and
+  `HANDOFF.md`. `buildframe doctor` needed no change and runs on Windows.
+- CI: `verify-windows` runs the full `pnpm verify` at both ends of the Node
+  range, with no `continue-on-error`. Branch protection must list its two
+  checks for them to gate a merge.
+- On the reference machine, `pnpm verify` passes: 683 tests pass, 26 skip
+  by stated reason (symlinks, POSIX files, the hung-Git stand-in, which is
+  a shell script), and both smokes pass. `pnpm release:assemble` passes.
+
+Still to do: the Verification below on macOS and Linux CI and by hand on
+Windows (clean install, round trips).
+
 ## Verification
 
 - `pnpm verify` passes on Windows, macOS and Linux.

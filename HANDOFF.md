@@ -88,8 +88,8 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
   console, so every program it starts needs `windowsHide: true` (Git does, in
   `runGitProcess`); without it each run flashes a console window that takes
   the keyboard and mouse (WF-314).
-- `node scripts/assemble-release.mjs --windows` builds a CLI package that
-  installs on Windows, for testing (WF-312). The Claude plugin runs the
+- The CLI package installs on Windows (`os` includes `win32` since WF-315;
+  the `--windows` flag from WF-312 is gone). The Claude plugin runs the
   installed helper's entry file with Node, found behind its npm/pnpm shim
   (`packages/claude-adapter/plugin/helper/findHelper.js`).
 - Agents on Windows (WF-313): Claude Code, Pi and OpenCode reach the runtime
@@ -103,9 +103,9 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
 - Development on Windows (WF-306): every `pnpm` script runs from PowerShell
   (`shellEmulator: true` in `pnpm-workspace.yaml`; `clean` is
   `scripts/remove-dist.mjs`). `* text=auto eol=lf` in `.gitattributes` gives
-  LF checkouts; an older Windows clone renormalises once. Many tests still
-  meet the native-Windows refusal until WF-315; the Windows CI job reports
-  without gating. Tests that need symlinks or POSIX files use `itWithSymlinks`
+  LF checkouts; an older Windows clone renormalises once. Since WF-315 there
+  is no native-Windows refusal, and the Windows CI jobs run the full
+  `pnpm verify`. Tests that need symlinks or POSIX files use `itWithSymlinks`
   and `itOnPosix` (`packages/workspace/test/platformCases.ts`). Never set
   `NODE_OPTIONS=--experimental-ffi` in the shell: pnpm's executable refuses
   it.
@@ -136,4 +136,4 @@ See WF-287's children. At this checkpoint the remaining release work is
 running the release gate on the packed tarballs, then publishing those same
 tarballs as `latest` (no `next` channel for 0.1.0).
 Publishing needs the owner's `@buildframe` npm organization. Node support is
-`>=26.4.0 <27.0.0`; CI runs macOS and Linux on 26.4.0 and the newest 26.x.
+`>=26.4.0 <27.0.0`; CI runs macOS, Linux and Windows on 26.4.0 and the newest 26.x.

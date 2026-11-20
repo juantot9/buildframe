@@ -36,7 +36,7 @@ export function supportManifest(productVersion: string): unknown {
     releaseCoordinates: RELEASE_COORDINATES,
     node: { range: DECLARED_NODE_RANGE, tested: PINNED_TESTED_NODE_VERSION },
     packageManagers: ['npm', 'pnpm'],
-    environments: ['macOS', 'Linux'],
+    environments: ['macOS', 'Linux', 'Windows'],
     hosts: {
       pi: { range: PI_SUPPORT.range, verified: PI_SUPPORT.verified },
       claudeCode: { range: CLAUDE_CODE_SUPPORT.range, verified: CLAUDE_CODE_SUPPORT.verified },
@@ -52,7 +52,8 @@ export function supportManifest(productVersion: string): unknown {
       'One agent session is connected per repository; the newest /buildframe wins.',
       'Messages go to the agent exactly as written; BuildFrame never scans them for secrets.',
       'BuildFrame trusts programs running as the same user on the same machine.',
-      'Windows is not supported yet; WSL2 is not claimed.',
+      'Windows is x64 only; WSL1 is refused and WSL2 is not claimed.',
+      'On Windows, a save can roll back to the one before it after a power loss; it is never half-written.',
     ],
   };
 }

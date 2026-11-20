@@ -403,9 +403,9 @@ describe('Workspace Identity scenarios', () => {
     expect(await pathExists(path.join(bareRepository, 'neoflow-workspace-identity.json'))).toBe(false);
   });
 
-  it('rejects native Windows before creating identity authority', async () => {
+  it('rejects an unsupported operating system before creating identity authority', async () => {
     const { root, stateHome } = await createFixture();
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('freebsd');
 
     const result = await bootstrapWorkspace({ startPath: root });
 
@@ -413,8 +413,8 @@ describe('Workspace Identity scenarios', () => {
       status: 'rejected',
       diagnostic: {
         code: 'unsupported-platform',
-        platform: 'win32',
-        reason: 'native-windows',
+        platform: 'freebsd',
+        reason: 'unsupported-operating-system',
       },
     });
     expect(await pathExists(stateHome)).toBe(false);

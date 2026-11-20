@@ -123,7 +123,7 @@ function newWorkspaceIdentity(): WorkspaceIdentity {
 }
 
 function platformDiagnostic(): WorkspaceBootstrapDiagnostic | undefined {
-  if (process.platform === 'darwin') return undefined;
+  if (process.platform === 'darwin' || process.platform === 'win32') return undefined;
 
   if (process.platform === 'linux') {
     const kernelRelease = release().toLowerCase();
@@ -144,7 +144,7 @@ function platformDiagnostic(): WorkspaceBootstrapDiagnostic | undefined {
   return {
     code: 'unsupported-platform',
     platform: process.platform,
-    reason: process.platform === 'win32' ? 'native-windows' : 'unsupported-operating-system',
+    reason: 'unsupported-operating-system',
   };
 }
 
