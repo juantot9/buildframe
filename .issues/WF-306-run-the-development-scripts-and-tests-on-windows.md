@@ -46,6 +46,10 @@ created: 2026-11-19
   WF-308 added a `.gitattributes` marking only the byte-exact test
   fixtures `-text`; the repository-wide rule is still to do.
 
+- (WF-312) `pnpm build` works on Windows only because Git Bash puts `rm` on
+  `PATH`: each package's `clean` script is `rm -rf dist`, and pnpm runs
+  scripts through `cmd.exe`.
+
 ## Direction
 
 - Make the scripts run under `cmd.exe` as well. `shell-emulator=true` in

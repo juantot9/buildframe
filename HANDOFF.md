@@ -85,6 +85,10 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
   (`packages/workspace/src/processIdentity.ts`, WF-311); without `node:ffi`
   a running holder is never taken for gone. Nothing signals the runtime; on
   Windows the re-exec parent leaves Ctrl+C to its child.
+- `node scripts/assemble-release.mjs --windows` builds a CLI package that
+  installs on Windows, for testing (WF-312). The Claude plugin runs the
+  installed helper's entry file with Node, found behind its npm/pnpm shim
+  (`packages/claude-adapter/plugin/helper/findHelper.js`).
 
 ## Development environment
 

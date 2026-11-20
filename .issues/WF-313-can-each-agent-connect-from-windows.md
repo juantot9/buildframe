@@ -6,7 +6,7 @@ labels:
   - wayfinder:research
 parent: WF-304
 assignee: null
-blocked_by: [WF-312]
+blocked_by: []
 created: 2026-11-19
 ---
 
@@ -19,7 +19,7 @@ What, per host, behaves differently from macOS and Linux?
 ## Blocked by
 
 - [Connect to the runtime over a named pipe](./WF-310-connect-to-the-runtime-over-a-named-pipe.md) (closed 2026-11-20)
-- [Package BuildFrame and start the Claude helper on Windows](./WF-312-package-buildframe-and-start-the-claude-helper-on-windows.md)
+- [Package BuildFrame and start the Claude helper on Windows](./WF-312-package-buildframe-and-start-the-claude-helper-on-windows.md) (closed 2026-11-20)
 
 ## What to check per host
 

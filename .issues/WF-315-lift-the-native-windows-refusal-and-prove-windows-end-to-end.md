@@ -42,6 +42,15 @@ to be closed.
   the README, `PRODUCT.md`, `SECURITY.md` and `buildframe doctor`.
 - Make the `windows-latest` CI job required.
 
+## From WF-312 (2026-11-20)
+
+- `node scripts/assemble-release.mjs --windows` already builds a CLI package
+  whose `os` list includes `win32`; shipping means making that the default
+  and dropping the flag, and changing the CLI README's "Needs macOS or Linux".
+- npm 11 with Node 26 prints an `allow-scripts` warning for the grammar
+  packages on install (every platform). Their scripts only pick native
+  bindings BuildFrame never loads; decide whether the README says so.
+
 ## Verification
 
 - `pnpm verify` passes on Windows, macOS and Linux.

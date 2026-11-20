@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 /**
  * The closed Adapter-private protocol between the BuildFrame Claude Mod and its
  * Node helper. Commands flow helper → Mod; facts flow Mod → helper. Facts carry
@@ -118,7 +120,8 @@ export function parseClaudeModAttachRequest(value: unknown): ClaudeModAttachRequ
     value.protocolVersion !== CLAUDE_MOD_PROTOCOL_VERSION ||
     !identity(value.sessionId) ||
     typeof value.cwd !== 'string' ||
-    !value.cwd.startsWith('/') ||
+    // Absolute on this platform: `/…` on macOS and Linux, `C:\…` on Windows.
+    !path.isAbsolute(value.cwd) ||
     value.cwd.length > 4096 ||
     !identity(value.hostVersion)
   ) {

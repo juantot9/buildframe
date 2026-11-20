@@ -25,7 +25,7 @@ const TEST_RUNNER_PACKAGE = 'vitest';
 const CLAUDE_MOD_TEST_KIT = 'claude-code';
 // Query/WASM assets only; confined to the Reviewing application.
 const REVIEWING_PARSER_PACKAGES = [
-  'tree-sitter-wasms',
+  '@tree-sitter-grammars/tree-sitter-toml',
   '@tree-sitter-grammars/tree-sitter-yaml',
   'tree-sitter-python',
   'tree-sitter-go',
@@ -34,7 +34,6 @@ const REVIEWING_PARSER_PACKAGES = [
   'tree-sitter-cpp',
   'tree-sitter-java',
   'tree-sitter-json',
-  'tree-sitter-toml',
   'tree-sitter-bash',
   'tree-sitter-html',
   'tree-sitter-css',

@@ -61,8 +61,8 @@ export function reviewingParserAssets(): FiletypeParserOptions[] {
     })),
     {
       filetype: 'toml',
-      wasm: require.resolve('tree-sitter-wasms/out/tree-sitter-toml.wasm'),
-      queries: { highlights: [query('toml')] },
+      wasm: require.resolve('@tree-sitter-grammars/tree-sitter-toml/tree-sitter-toml.wasm'),
+      queries: { highlights: [require.resolve('@tree-sitter-grammars/tree-sitter-toml/queries/highlights.scm')] },
     },
     {
       filetype: 'yaml',
