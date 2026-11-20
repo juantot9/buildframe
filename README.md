@@ -8,7 +8,7 @@ answer comes back under your Message, together with what it changed in the code.
 Everything stays on your machine. BuildFrame sends a Message only to the agent
 session you connected, exactly as you wrote it.
 
-> **0.1.0 is a preview.** It covers Reviewing only, on macOS and Linux. Expect
+> **0.1.0 is a preview.** It covers Reviewing only, on macOS, Linux and Windows. Expect
 > rough edges, and please [report them as GitHub issues](https://github.com/juantot9/buildframe/issues)
 > with the output of `buildframe doctor`.
 
@@ -30,7 +30,8 @@ buildframe      # or the shorter: bframe
 
 ### Requirements
 
-- macOS or Linux. Windows is not supported yet.
+- macOS, Linux, or Windows 10/11 on x64 (tested from PowerShell). WSL1 is
+  not supported and WSL2 is not claimed.
 - Node.js 26 (`>=26.4.0 <27.0.0`); CI tests `26.4.0` and the newest 26.x, and
   development runs on `26.5.1`. Its terminal
   interface needs Node 26's FFI, which BuildFrame turns on for itself.
@@ -77,7 +78,8 @@ every Message you send in BuildFrame goes straight to that session.
 
 Messages use a built-in layout: your text, a blank line, then `<file>:<line>`.
 To change it, put a `message-template.md` beside `config.json` in BuildFrame's
-configuration folder (`$XDG_CONFIG_HOME/buildframe/`, or `~/.config/buildframe/`). A
+configuration folder (`$XDG_CONFIG_HOME/buildframe/`, or `~/.config/buildframe/`;
+`%APPDATA%\BuildFrame\` on Windows). A
 template for current code uses `{{message}}` and `{{location}}` once each:
 
 ```md
@@ -119,8 +121,12 @@ its output when you report a problem.
 
 - Saved Reviews and Messages live outside your repository, in
   `$XDG_STATE_HOME/buildframe` when that is set, otherwise
-  `~/Library/Application Support/BuildFrame` on macOS and `~/.local/state/buildframe`
-  on Linux. Settings live in the configuration folder above.
+  `~/Library/Application Support/BuildFrame` on macOS, `~/.local/state/buildframe`
+  on Linux and `%LOCALAPPDATA%\BuildFrame` on Windows. Settings live in the
+  configuration folder above.
+- On Windows, after a power loss, a just-saved change can roll back to the
+  version before it; it is never left half-written. Windows cannot flush a
+  folder the way macOS and Linux can.
 - BuildFrame makes no network calls of its own: no telemetry, no update checks.
 - Uninstalling removes the program only, never your saved data. To remove that
   too, quit BuildFrame and delete the data and configuration folders.

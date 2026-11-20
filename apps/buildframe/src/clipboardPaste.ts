@@ -8,7 +8,7 @@ import type { ClipboardService, CliRenderer, KeyEvent } from '@opentui/core';
  * Terminals that paste on Ctrl+V themselves never send the key, so nothing
  * pastes twice. Elsewhere Ctrl+V is not paste and stays untouched.
  */
-export const PASTES_ON_CTRL_V: boolean =process.platform === 'win32';
+export const PASTES_ON_CTRL_V: boolean = process.platform === 'win32';
 
 function isCtrlV(event: KeyEvent): boolean {
   return event.name === 'v' && event.ctrl && !event.meta && !event.option && !event.super && !event.hyper;

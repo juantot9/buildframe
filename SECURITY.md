@@ -22,6 +22,10 @@ BuildFrame is a local, single-user tool. These are in scope:
 Out of scope: what an agent does with a Message you sent it, and anything that
 needs code already running as your own user.
 
+On Windows the same promises hold in Windows' own way: BuildFrame's folders
+are private to your user by their access list, and its background process
+listens on a named pipe that only a client proving a per-run secret can use.
+
 ## Supported versions
 
 Only the latest published release gets fixes while BuildFrame is in `0.x`.

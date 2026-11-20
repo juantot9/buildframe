@@ -4,7 +4,7 @@ import type { WorkspaceIdentity } from './baseTypes.js';
 export interface UnsupportedPlatformDiagnostic {
   readonly code: 'unsupported-platform';
   readonly platform: NodeJS.Platform;
-  readonly reason: 'native-windows' | 'wsl1' | 'unsupported-operating-system';
+  readonly reason: 'wsl1' | 'unsupported-operating-system';
 }
 
 export interface PathUnavailableDiagnostic {
