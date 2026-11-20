@@ -255,46 +255,27 @@ Nothing else from WF-050's candidate gate list is required for 0.1.0.
     then `npm publish` the same tarballs (as `latest`) and push the commit
     the plugin marketplace serves. Date the CHANGELOG entry first.
 
-    Tarballs repacked 2026-11-17 from aaf4c5d, in a clean worktree, after
-    the remaining pre-release audit fixes:
-    - a change can be reviewed in a repository with more than 100,000
-      tracked files (WS-02), in 1d6dd3b;
-    - an uncapturable file no longer makes Live Changes recapture
-      everything every 2 s (PERF-03), in 4611221;
-    - a redraw of 1,024 long Diff rows takes 5 ms instead of 125 ms
-      (APP-02), in c863c3d;
-    - the runtime socket is owner-private from creation, so a connector
-      can't give up for good during runtime startup (audit lead 7), in
-      cf8837a.
+    The aaf4c5d pack and its audit fixes, install checks and registry notes
+    are in [docs/releases/0.1.0-superseded-packs.md](../docs/releases/0.1.0-superseded-packs.md).
 
-    Audit lead 4 (CRLF-checked-out files diff as rewritten) is confirmed and
-    left for after 0.1.0 as WF-288.
-
-    These sit on top of the 2026-11-16 audit fixes: WS-01 and RT-01
-    (63b8ecd), HI-01 and APP-01 (d372d5d), PERF-01 (299faf5), PERF-02
-    (271043d), ST-01 (b9b1d40), HI-02 (ed3f6a4) and ST-02 (22d9ff1). Both
-    tarballs changed; the Pi package bundles the evidence code these touch.
-    The 22d9ff1 pack (CLI `d15ccea3…`, Pi `9a47f878…`) and every earlier pack
-    are superseded, and the gate's week restarts on this one. Two packs were
-    byte-identical. Before packing, `pnpm verify` (594 tests) and
-    `risk:state`, `risk:runtime`, `risk:pi` (Pi 1.5.0) and `risk:dogfood`
-    passed on aaf4c5d. SHA-256:
+    **Repacked 2026-11-20 from 5079c68; this is the pack to publish**
+    (owner decision 2026-11-20). The owner had moved off the aaf4c5d pack:
+    on 2026-11-17 to a pack from f7e4ac7 (CLI `47979831…`, Pi `51e438df…`,
+    never recorded here), and on 2026-11-18 11:59 to a pack from 5079c68,
+    which is what runs globally on Node 26.13.1 and 26.5.1. 5079c68 adds
+    commit visibility, code-only `z`, the calm footer, OpenTUI 0.9.1 and the
+    connector kit (WF-293), and has no OpenCode or Codex; those ship in
+    0.2.0. A clean-worktree `pnpm release:assemble` + `npm pack` of 5079c68
+    is byte-identical to the installed pack. On 5079c68, `pnpm verify` (556
+    tests, both smokes), `risk:state`, `risk:runtime`, `risk:pi` (Pi 1.5.0)
+    and `risk:dogfood` pass. The Claude plugin is unchanged from 5079c68 to
+    main, so the marketplace serves the matching plugin. The aaf4c5d and
+    f7e4ac7 packs are superseded. The gate's week on this pack ends
+    2026-11-25. SHA-256 (in `~/buildframe-dev-5079c68/`):
     - `buildframe-cli-0.1.0.tgz`
-      `7007b321527e13fb130e011830e345646e4cde82c3290f0df04eeb61c99c533d`
+      `c0d1ab781375845a6a72e4e1749087aa76a80a453d5b92b3108026c32d4ccfd0`
     - `buildframe-pi-0.1.0.tgz`
-      `f0b59f34c44ec5582b9d5fa022630afc272686d9443c451887ec83669666b0e7`
-
-    The owner's global install (Node 26.13.1 and 26.5.1) and Pi package
-    folder hold this pack. Install checks need `--registry
-    https://registry.npmjs.org/`: the owner's company mirror stalls them.
-
-    A scratch global install from npmjs.com took 14s and gave `buildframe`,
-    `bframe` and `buildframe-claude-helper`; `--version`, `--help` and
-    `doctor --json` ran. `npm publish --dry-run` targets
-    `https://registry.npmjs.org/` with public access for both packages; the
-    registry is pinned in `publishConfig` because the owner's user `.npmrc`
-    points at a company mirror. npm 11 skips the tree-sitter install scripts;
-    BuildFrame uses the grammars' bundled `.wasm` files, so they aren't needed.
+      `382e4f69c9102145c71eeca9becbbbf582f4e353ad4c597c8506ce8ac0dc0152`
 
 Order: 1 → (2, 3, 4) → 5 → 7 → 8 → 9 → 6 → 10. Child 9 must land before
 child 6's CI, and both before child 10.

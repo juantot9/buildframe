@@ -41,6 +41,9 @@ buildframe      # or the shorter: bframe
 Run `/buildframe` in an agent session inside the same repository. From then on,
 every Message you send in BuildFrame goes straight to that session.
 
+> OpenCode and Codex connect from the next release. 0.1.0 on npm connects Pi
+> and Claude Code.
+
 | Agent | Install once | Then, in a session |
 |---|---|---|
 | Pi `>=0.80.6 <2.0.0` | `pi install npm:@buildframe/pi` | `/buildframe` |
