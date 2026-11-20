@@ -10,7 +10,7 @@ import type { Workspace } from '@buildframe/workspace';
 
 import { parseDeveloperArguments } from '../../src/developerArguments.js';
 import { formatDoctorReport, hostCheck, runDoctor, type DoctorEnvironment } from '../../src/doctor.js';
-import { CLAUDE_CODE_SUPPORT, OPENCODE_SUPPORT, PI_SUPPORT } from '../../src/supportFacts.js';
+import { CLAUDE_CODE_SUPPORT, CODEX_SUPPORT, OPENCODE_SUPPORT, PI_SUPPORT } from '../../src/supportFacts.js';
 
 const execFileAsync = promisify(execFile);
 const roots: string[] = [];
@@ -33,7 +33,9 @@ function environment(startPath: string, overrides: Partial<DoctorEnvironment> = 
     startPath,
     runtimeEntrypoint: new URL('../../dist/runtimeProcess.js', import.meta.url),
     hostVersion: async command =>
-      ({ pi: '1.3.0', claude: '2.1.322 (Claude Code)', opencode: 'opencode v2.3.2' })[command],
+      ({ pi: '1.3.0', claude: '2.1.322 (Claude Code)', opencode: 'opencode v2.3.2', codex: 'codex-cli 0.171.0' })[
+        command
+      ],
     inspectRuntime: async () => ({ status: 'not-running' }),
     ...overrides,
   };
@@ -79,6 +81,11 @@ describe('buildframe doctor', () => {
       summary: 'OpenCode 2.3.2 (verified)',
     });
     expect(hostCheck('opencode', 'OpenCode', 'opencode v1.19.6', OPENCODE_SUPPORT)).toMatchObject({ status: 'error' });
+    expect(hostCheck('codex', 'Codex', 'codex-cli 0.170.0', CODEX_SUPPORT)).toMatchObject({
+      status: 'ok',
+      summary: 'Codex 0.170.0 (verified)',
+    });
+    expect(hostCheck('codex', 'Codex', 'codex-cli 0.169.0', CODEX_SUPPORT)).toMatchObject({ status: 'error' });
     expect(hostCheck('pi', 'Pi', '0.80.5', PI_SUPPORT)).toMatchObject({ status: 'error' });
     expect(hostCheck('pi', 'Pi', '1.4.0-beta.1', PI_SUPPORT)).toMatchObject({ status: 'error' });
     expect(hostCheck('pi', 'Pi', undefined, PI_SUPPORT)).toMatchObject({ status: 'note' });
@@ -98,6 +105,7 @@ describe('buildframe doctor', () => {
       'pi',
       'claude-code',
       'opencode',
+      'codex',
     ]);
   });
 
@@ -202,5 +210,15 @@ describe('agent support facts', () => {
     };
     expect([OPENCODE_SUPPORT.range]).toEqual(opencode.buildframe.supportedOpenCodeVersions);
     expect(OPENCODE_SUPPORT.verified).toEqual(opencode.buildframe.verifiedOpenCodeVersions);
+    const codex = JSON.parse(
+      await readFile(new URL('../../../../packages/codex-adapter/package.json', import.meta.url), 'utf8'),
+    ) as {
+      readonly buildframe: {
+        readonly supportedCodexVersions: readonly string[];
+        readonly verifiedCodexVersions: readonly string[];
+      };
+    };
+    expect([CODEX_SUPPORT.range]).toEqual(codex.buildframe.supportedCodexVersions);
+    expect(CODEX_SUPPORT.verified).toEqual(codex.buildframe.verifiedCodexVersions);
   });
 });

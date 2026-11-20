@@ -1,7 +1,7 @@
 ---
 id: WF-303
 title: "Connect Codex"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-289
@@ -67,3 +67,25 @@ Owner decisions (2026-11-20, after the experiments):
 - **Admit a range, checked live:** any Codex from 0.170.0 up within 0.x; on
   every connect, check the queue methods behave as verified and refuse if not.
   Doctor flags untested versions. (Replaces "verified versions only".)
+
+## Resolution (2026-11-20)
+
+- `packages/codex-adapter`: `appServerClient.ts` (JSON-RPC over WebSocket over
+  Codex's Unix socket, hand-written, no dependency; never answers approvals),
+  `codexAdapter.ts` (turn-ID and `clientUserMessageId` correlation; sends with
+  `thread/queue/add` + `thread/queue/start`; never resends), `helper.ts`
+  (`!buildframe`, `status`, `disconnect`; a detached helper that refuses
+  private-server sessions, checks the server version and the queue API on every
+  connect, and reconnects after Codex's self-updates).
+- `buildframe` switches to Codex mode when `CODEX_THREAD_ID` is set, so the
+  connector ships inside `@buildframe/cli`; no Codex install step. Doctor,
+  `support/manifest.json` and the README list Codex.
+- Verified live (dev build, Codex 0.170.0 TUI on a 0.171.0 server, fake model):
+  connect, exact delivery, answered; Enter mid-turn → unknown; Tab mid-turn →
+  answered; `status` / `disconnect`; BuildFrame's header follows. `pnpm verify`
+  passes (612 tests); release assembly checks `!buildframe status` on the
+  bundled CLI.
+- Known: `!buildframe` resolves through the user's login-shell PATH, so it
+  needs an `@buildframe/cli` that includes this change (0.1.0 opens the app
+  instead). Not covered: approvals during BuildFrame's turn, compaction,
+  subagents, Stop hooks.

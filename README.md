@@ -46,6 +46,7 @@ every Message you send in BuildFrame goes straight to that session.
 | Pi `>=0.80.6 <2.0.0` | `pi install npm:@buildframe/pi` | `/buildframe` |
 | Claude Code `>=2.1.310 <3.0.0` | `/plugin marketplace add juantot9/buildframe`, then `/plugin install buildframe@buildframe` | `/buildframe` |
 | OpenCode `>=2.3.2 <3.0.0` | `opencode plugin add @buildframe/opencode` | `/buildframe` |
+| Codex `>=0.170.0 <1.0.0` | nothing: it comes with `@buildframe/cli` | `!buildframe` |
 
 - One session is connected per repository. Running `/buildframe` in another
   session moves the connection there, and the first session is told.
@@ -58,6 +59,12 @@ every Message you send in BuildFrame goes straight to that session.
   it in the agent itself.
 - In OpenCode, what you type while a Message's turn runs waits until that turn
   ends, so BuildFrame can still tell how it ended.
+- In Codex, connect with `!buildframe` (Codex has no custom `/` commands); its
+  one-line reply is part of the conversation the model sees. Press Tab, not
+  Enter, to add something while a Message's turn runs: Enter joins that turn,
+  and BuildFrame then reports its outcome as unknown. Sessions started with
+  `--no-daemon`, `--profile` or `-c` run on a private Codex server and can't
+  connect.
 
 ## Use it
 

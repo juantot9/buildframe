@@ -198,7 +198,7 @@ await writeFile(
   `# BuildFrame\n\nReview what your coding agent changed, and send it Messages from the terminal.\n\n` +
     `\`\`\`\nnpm i -g ${RELEASE_COORDINATES.application}\nbuildframe\n\`\`\`\n\n` +
     `Connect an agent from its session with \`/buildframe\`: install ${RELEASE_COORDINATES.pi} for Pi, ` +
-    `${RELEASE_COORDINATES.opencode} for OpenCode, ` +
+    `${RELEASE_COORDINATES.opencode} for OpenCode, run \`!buildframe\` in Codex, ` +
     `or the \`buildframe\` plugin from the \`buildframe\` marketplace for Claude Code. ` +
     `Run \`buildframe doctor\` if something doesn't connect.\n\n` +
     requirements,
@@ -287,6 +287,11 @@ try {
   assert.match(help.stdout, /Usage: buildframe /u);
   const bins = (await readJson(path.join(cli, 'package.json'))).bin;
   assert.equal(bins.bframe, bins.buildframe, 'bframe runs the same program as buildframe');
+  // Inside Codex, `buildframe` connects the session instead of opening the app.
+  const codex = await execFileAsync(process.execPath, [path.join(installedCli, 'dist/buildframe.js'), 'status'], {
+    env: { ...process.env, CODEX_THREAD_ID: 'release-check-thread' },
+  });
+  assert.equal(codex.stdout, 'BuildFrame is not connected to this session.\n', 'buildframe answers !buildframe status');
   const doctor = await execFileAsync(process.execPath, [
     path.join(installedCli, 'dist/buildframe.js'),
     'doctor',

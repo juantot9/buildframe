@@ -14,7 +14,7 @@ import {
   PINNED_TESTED_NODE_VERSION,
 } from './nodeSupport.js';
 import { startupFailureSentence } from './reviewingReasons.js';
-import { CLAUDE_CODE_SUPPORT, OPENCODE_SUPPORT, PI_SUPPORT, type HostSupport } from './supportFacts.js';
+import { CLAUDE_CODE_SUPPORT, CODEX_SUPPORT, OPENCODE_SUPPORT, PI_SUPPORT, type HostSupport } from './supportFacts.js';
 
 export type DoctorStatus = 'ok' | 'note' | 'warning' | 'error';
 
@@ -45,7 +45,7 @@ export interface DoctorEnvironment {
 
 const HOST_VERSION_TIMEOUT_MS = 5_000;
 
-export type HostCommand = 'pi' | 'claude' | 'opencode';
+export type HostCommand = 'pi' | 'claude' | 'opencode' | 'codex';
 
 /** Asks an installed host for its version without a shell; nothing else is run. */
 export async function hostVersionFromPath(command: HostCommand): Promise<string | undefined> {
@@ -97,7 +97,7 @@ function nodeCheck(nodeVersion: string): DoctorCheck {
 
 /** Where a host version stands: verified live, accepted but untested, or refused. */
 export function hostCheck(
-  id: 'pi' | 'claude-code' | 'opencode',
+  id: 'pi' | 'claude-code' | 'opencode' | 'codex',
   label: string,
   line: string | undefined,
   support: HostSupport,
@@ -275,15 +275,17 @@ export async function runDoctor(environment: DoctorEnvironment): Promise<DoctorR
     }
   }
 
-  const [pi, claude, opencode] = await Promise.all([
+  const [pi, claude, opencode, codex] = await Promise.all([
     environment.hostVersion('pi'),
     environment.hostVersion('claude'),
     environment.hostVersion('opencode'),
+    environment.hostVersion('codex'),
   ]);
   checks.push(
     hostCheck('pi', 'Pi', pi, PI_SUPPORT),
     hostCheck('claude-code', 'Claude Code', claude, CLAUDE_CODE_SUPPORT),
     hostCheck('opencode', 'OpenCode', opencode, OPENCODE_SUPPORT),
+    hostCheck('codex', 'Codex', codex, CODEX_SUPPORT),
   );
   return { schema: 'buildframe.doctor/1', ok: checks.every(check => check.status !== 'error'), checks };
 }

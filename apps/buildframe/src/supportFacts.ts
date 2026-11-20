@@ -33,3 +33,10 @@ export const OPENCODE_SUPPORT: HostSupport = Object.freeze<HostSupport>({
   range: '>=2.3.2 <3.0.0',
   verified: Object.freeze(['2.3.2']),
 });
+
+export const CODEX_SUPPORT: HostSupport = Object.freeze<HostSupport>({
+  minimum: [0, 170, 0],
+  exclusiveMaximum: [1, 0, 0],
+  range: '>=0.170.0 <1.0.0',
+  verified: Object.freeze(['0.170.0', '0.171.0']),
+});
