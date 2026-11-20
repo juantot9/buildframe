@@ -270,12 +270,21 @@ Nothing else from WF-050's candidate gate list is required for 0.1.0.
     tests, both smokes), `risk:state`, `risk:runtime`, `risk:pi` (Pi 1.5.0)
     and `risk:dogfood` pass. The Claude plugin is unchanged from 5079c68 to
     main, so the marketplace serves the matching plugin. The aaf4c5d and
-    f7e4ac7 packs are superseded. The gate's week on this pack ends
-    2026-11-25. SHA-256 (in `~/buildframe-dev-5079c68/`):
+    f7e4ac7 packs are superseded. The owner extended the gate to two
+    weeks on this pack (2026-11-21): it ends 2026-12-02. SHA-256 (in `~/buildframe-dev-5079c68/`):
     - `buildframe-cli-0.1.0.tgz`
       `c0d1ab781375845a6a72e4e1749087aa76a80a453d5b92b3108026c32d4ccfd0`
     - `buildframe-pi-0.1.0.tgz`
       `382e4f69c9102145c71eeca9becbbbf582f4e353ad4c597c8506ce8ac0dc0152`
+
+    Gate check 2, Linux half: passed 2026-11-21 on this pack, as a fresh
+    non-root user in stock `node` Docker images (Debian 13, git 2.47.3):
+    Node 26.4.0 and 26.13.1 on arm64, and 26.13.1 on x86_64. Each run
+    installed the CLI tarball in 8–12 s and got `buildframe`, `bframe` and
+    `buildframe-claude-helper`. `--version`, `--help`, `doctor` and
+    `doctor --json` ran clean, and `buildframe` opened Home in a scratch
+    repository. `pi install` of the Pi tarball into Pi 1.5.0 succeeded. The
+    fresh macOS account half is the owner's.
 
 Order: 1 → (2, 3, 4) → 5 → 7 → 8 → 9 → 6 → 10. Child 9 must land before
 child 6's CI, and both before child 10.
