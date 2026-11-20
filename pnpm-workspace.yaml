@@ -29,3 +29,11 @@ minimumReleaseAgeExclude:
 
 onlyBuiltDependencies:
   - esbuild
+
+# Dev and test tooling only; nothing here reaches the published packages.
+# Each lifts a transitive dependency past a Dependabot advisory.
+overrides:
+  source-map-js: ^1.2.2 # GHSA-68fv-2mgg-jv7q, through vite's postcss
+  tinypool: ^2.1.2 # GHSA-85c8-ppgw-ccpr, GHSA-5gmw-xhrv-c9v3, through oxfmt
+  vite: ^7.3.7 # GHSA-587h-7wmj-h5pm and others, through vitest
+  zod: ^4.6.7 # GHSA-mrhx-c7xc-m3w5, through Pi 1.5.0 (tests)
