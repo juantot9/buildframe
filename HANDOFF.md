@@ -89,6 +89,13 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
   installs on Windows, for testing (WF-312). The Claude plugin runs the
   installed helper's entry file with Node, found behind its npm/pnpm shim
   (`packages/claude-adapter/plugin/helper/findHelper.js`).
+- Agents on Windows (WF-313): Claude Code, Pi and OpenCode reach the runtime
+  pipe; Pi and the Claude helper may run on Pi's own Node 22, which is first
+  on `PATH` after Pi's installer. Notes in `docs/research/*-windows-wf313.md`.
+- Use PowerShell on Windows. Node 26.5.1 is installed with nvm (default
+  stays 24); put `%LOCALAPPDATA%\Author Software\nvm\installs\v26.5.1` first
+  on `PATH`. `pnpm build` and `pnpm test` do not run from PowerShell yet
+  (WF-306).
 
 ## Development environment
 

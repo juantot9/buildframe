@@ -51,6 +51,15 @@ to be closed.
   packages on install (every platform). Their scripts only pick native
   bindings BuildFrame never loads; decide whether the README says so.
 
+## From WF-313 (2026-11-20)
+
+- The per-host round trips are still to do: `/buildframe` in a live Claude
+  Code, Pi and OpenCode session on Windows, Send, Response. The connectors
+  already reach the runtime there ([findings](../docs/research/claude-code-windows-wf313.md)).
+- On a machine with Pi installed, Pi and the Claude helper run on Pi's Node
+  22, not Node 26. Keep a round trip on that setup, and decide whether
+  `buildframe doctor` should say which Node the hosts use.
+
 ## Verification
 
 - `pnpm verify` passes on Windows, macOS and Linux.

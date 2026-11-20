@@ -57,7 +57,7 @@ Can start now:
 Blocked:
 
 - [Connect to the runtime over a named pipe](./WF-310-connect-to-the-runtime-over-a-named-pipe.md) — was blocked by WF-309; closed
-- [Can each agent connect from Windows?](./WF-313-can-each-agent-connect-from-windows.md) — unblocked (WF-310 and WF-312 closed)
+- [Can each agent connect from Windows?](./WF-313-can-each-agent-connect-from-windows.md) — closed
 - [Lift the native-Windows refusal and prove Windows end to end](./WF-315-lift-the-native-windows-refusal-and-prove-windows-end-to-end.md) — blocked by every other child
 
 Related, not a child:
@@ -94,6 +94,10 @@ close until WF-288 is closed.
   TOML highlighting moved to `@tree-sitter-grammars/tree-sitter-toml` so no
   install compiles; the Claude plugin finds the installed helper behind its
   shim and runs it with Node, no shell.
+- [Can each agent connect from Windows?](./WF-313-can-each-agent-connect-from-windows.md):
+  Claude Code, Pi and OpenCode all reach the runtime on Windows (Node 26,
+  Pi's Node 22, OpenCode's Bun); doctor now sees hosts installed as `.cmd`
+  shims; live round trips move to WF-315.
 
 ## Collision rules
 
