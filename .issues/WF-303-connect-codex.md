@@ -44,3 +44,18 @@ protocol, within what WF-302 found Codex supports.
   admission accepts only verified Codex versions.
 - **WebSocket client:** no new dependency unless Node's built-in client can't
   reach the Unix socket (experiment 8); `ws` needs the owner's go-ahead.
+
+## Experiments (2026-11-19/20)
+
+Run on Codex 0.170.0, whose daemon auto-updated to 0.171.0 mid-run
+([results](../docs/research/codex-connector-wf303-experiments.md)). Shared
+attach, exact bytes, per-turn attribution, interrupt, withdraw, the embedded
+check and a dependency-free Node WebSocket client all hold. Changes to the plan:
+
+- Send with `thread/queue/add` then `thread/queue/start` (the queue stops
+  dispatching after an interrupt).
+- The daemon updates itself overnight regardless of config, so admission must
+  read the server's version on every connect.
+- `!buildframe`'s command and output enter the model's context (decision
+  revisited below).
+- Quitting the TUI sends no signal; Codex keeps the session as a task.
