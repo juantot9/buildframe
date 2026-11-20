@@ -50,3 +50,44 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Verify
         run: pnpm verify
+
+  # Native Windows (WF-304), from PowerShell. It reports but does not gate a
+  # merge until WF-315 lifts the native-Windows refusal, which many tests still
+  # meet; each step runs even when an earlier one fails, so every result shows.
+  verify-windows:
+    name: verify (windows-latest, Node 26.13.1, not required)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    continue-on-error: true
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+      - name: Set up Node 26.13.1
+        uses: actions/setup-node@v5
+        with:
+          node-version: '26.13.1'
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Format
+        if: ${{ !cancelled() }}
+        run: pnpm format:check
+      - name: Dependencies
+        if: ${{ !cancelled() }}
+        run: pnpm check:dependencies
+      - name: Typecheck
+        if: ${{ !cancelled() }}
+        run: pnpm typecheck
+      - name: Build
+        if: ${{ !cancelled() }}
+        run: pnpm build
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: pnpm test

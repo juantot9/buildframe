@@ -60,6 +60,7 @@ import {
   type UserConfigurationSaveResult,
 } from '../../src/userConfiguration.js';
 import { resolveGitExecutable } from '../../../../packages/workspace/src/gitProcess.js';
+import { descendantsWithIdPrefix, renderableTreeText } from './renderableTree.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -245,16 +246,6 @@ class ScriptedTerminal {
   }
 }
 
-function descendantsWithIdPrefix(renderable: Renderable, prefix: string): readonly Renderable[] {
-  const matches: Renderable[] = [];
-  const visit = (candidate: Renderable): void => {
-    if (candidate.id.startsWith(prefix)) matches.push(candidate);
-    candidate.getChildren().forEach(child => visit(child as Renderable));
-  };
-  visit(renderable);
-  return matches;
-}
-
 async function git(directory: string, ...arguments_: string[]): Promise<void> {
   await execFileAsync(await resolveGitExecutable(), ['-C', directory, ...arguments_]);
 }
@@ -361,17 +352,6 @@ async function waitForLayout(terminal: ScriptedTerminal, layout: 'wide' | 'balan
     await terminal.flush();
     return terminal.renderer.root.findDescendantById(`reviewing-layout-${layout}`) !== undefined;
   }, `${layout} layout`);
-}
-
-function renderableTreeText(value: unknown): string {
-  if (value === null || typeof value !== 'object') return '';
-  const renderable = value as {
-    readonly plainText?: unknown;
-    readonly getChildren?: () => readonly unknown[];
-  };
-  const ownText = typeof renderable.plainText === 'string' ? renderable.plainText : '';
-  const children = typeof renderable.getChildren === 'function' ? renderable.getChildren() : [];
-  return `${ownText}\n${children.map(renderableTreeText).join('\n')}`;
 }
 
 class ScriptedDogfoodAdapter implements ReviewedHarnessAdapter {
@@ -1254,7 +1234,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     owners.clear();
     if (originalStateHome === undefined) delete process.env.XDG_STATE_HOME;
     else process.env.XDG_STATE_HOME = originalStateHome;
-    await Promise.all([...roots].map(root => rm(root, { recursive: true, force: true })));
+    // Windows keeps a directory busy for a moment after the processes in it exit.
+    await Promise.all([...roots].map(root => rm(root, { recursive: true, force: true, maxRetries: 10 })));
     roots.clear();
   });
 
@@ -1820,7 +1801,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       reviewing: { theme: { inherits?: string } };
     };
     expect(saved.reviewing.theme.inherits).toBe('quiet-graphite');
-    expect((await fs.stat(configurationPath)).mode & 0o777).toBe(0o600);
+    // POSIX mode; Windows keeps Configuration private by access list.
+    if (process.platform !== 'win32') expect((await fs.stat(configurationPath)).mode & 0o777).toBe(0o600);
     expect(renderableTreeText(terminal.renderer.root)).not.toContain('Layout was not saved');
     expect(terminal.outputSince(checkpoint)).not.toContain('Layout was not saved');
   });

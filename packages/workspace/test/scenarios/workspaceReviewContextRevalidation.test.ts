@@ -1,69 +1,18 @@
-import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile, chmod } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, writeFile, chmod } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { encodeBytesBase64 } from '../../src/bytesBase64.js';
-import { resolveGitExecutable } from '../../src/gitProcess.js';
-import type { Workspace } from '../../src/index.js';
 import type {
   ReviewContextSelectionChanged,
   ReviewIdentity,
   ReviewSnapshotContextItem,
   ReviewSnapshotIdentity,
 } from '@buildframe/workspace/reviewing';
+import type { Workspace } from '../../src/index.js';
 import { openWorkspaceRuntimeOwner, type WorkspaceRuntimeOwner } from '../../src/runtime.js';
-
-const execFileAsync = promisify(execFile);
-
-interface Fixture {
-  readonly root: string;
-  readonly checkout: string;
-  readonly state: string;
-  readonly basis: string;
-  readonly compared: string;
-}
-
-async function git(directory: string, ...arguments_: string[]): Promise<string> {
-  const result = await execFileAsync(await resolveGitExecutable(), ['-C', directory, ...arguments_]);
-  return result.stdout.trim();
-}
-
-function encoded(value: string): string {
-  return encodeBytesBase64(Buffer.from(value, 'utf8'));
-}
-
-async function fixture(): Promise<Fixture> {
-  const root = await mkdtemp(path.join(tmpdir(), 'buildframe-context-revalidate-'));
-  const checkout = path.join(root, 'checkout');
-  const state = path.join(root, 'state');
-  await mkdir(path.join(checkout, 'ctx'), { recursive: true });
-  await mkdir(state, { recursive: true });
-  await git(checkout, 'init', '-q');
-  await git(checkout, 'config', 'user.name', 'BuildFrame Test');
-  await git(checkout, 'config', 'user.email', 'neoflow@example.invalid');
-  await writeFile(path.join(checkout, 'review.txt'), 'before\n');
-  await writeFile(path.join(checkout, 'ctx', 'direct.txt'), 'abcdefghij\n');
-  await writeFile(path.join(checkout, 'ctx', 'excluded.txt'), 'excluded-value\n');
-  await writeFile(path.join(checkout, 'ctx', 'other.txt'), '0123456789\n');
-  await git(checkout, 'add', '.');
-  await git(checkout, 'commit', '-qm', 'basis');
-  const basis = await git(checkout, 'rev-parse', 'HEAD');
-  await writeFile(path.join(checkout, 'review.txt'), 'after\n');
-  await git(checkout, 'commit', '-qam', 'compared');
-  const compared = await git(checkout, 'rev-parse', 'HEAD');
-  return { root, checkout, state, basis, compared };
-}
-
-function requireSelection(result: Awaited<ReturnType<Workspace['execute']>>): ReviewContextSelectionChanged {
-  if (result.kind !== 'review.context-selection.changed') {
-    throw new Error(`Selection did not change: ${JSON.stringify(result)}`);
-  }
-  return result;
-}
+import { encoded, fixture, git, requireSelection, type Fixture } from './workspaceReviewContextRevalidationFixture.js';
+import { itOnPosix } from '../platformCases.js';
 
 describe('Review supporting-context revalidation and refresh', () => {
   const roots = new Set<string>();
@@ -547,57 +496,61 @@ describe('Review supporting-context revalidation and refresh', () => {
     expect(rejected).toMatchObject({ kind: 'review.command.rejected', reason: 'snapshot-stale' });
   });
 
-  it('derives mode movement as an exact changed verdict and keeps the immutable successor lineage duplicate-free across restart', async () => {
-    const created = await fixture();
-    let owner = await open(created);
-    const started = await start(owner, created, 'mode-start');
+  // Windows files have no executable bit, so a mode never moves there.
+  itOnPosix(
+    'derives mode movement as an exact changed verdict and keeps the immutable successor lineage duplicate-free across restart',
+    async () => {
+      const created = await fixture();
+      let owner = await open(created);
+      const started = await start(owner, created, 'mode-start');
 
-    const includeDirectory = await select(owner, started.reviewIdentity, 'mode-include', started.stateVersion, 0, {
-      action: 'include',
-      source: { kind: 'workspace', form: 'directory', inclusion: 'ordinary', pathBytesBase64: encoded('ctx') },
-    });
-    const frozen = await contextRefresh(
-      owner,
-      started.reviewIdentity,
-      'mode-freeze',
-      includeDirectory.stateVersion,
-      started.reviewSnapshotIdentity,
-    );
-    if (frozen.kind !== 'review.context.refreshed' || frozen.outcome !== 'changed') {
-      throw new Error('Mode freeze failed');
-    }
+      const includeDirectory = await select(owner, started.reviewIdentity, 'mode-include', started.stateVersion, 0, {
+        action: 'include',
+        source: { kind: 'workspace', form: 'directory', inclusion: 'ordinary', pathBytesBase64: encoded('ctx') },
+      });
+      const frozen = await contextRefresh(
+        owner,
+        started.reviewIdentity,
+        'mode-freeze',
+        includeDirectory.stateVersion,
+        started.reviewSnapshotIdentity,
+      );
+      if (frozen.kind !== 'review.context.refreshed' || frozen.outcome !== 'changed') {
+        throw new Error('Mode freeze failed');
+      }
 
-    await chmod(path.join(created.checkout, 'ctx', 'direct.txt'), 0o755);
-    await git(created.checkout, 'add', 'ctx/direct.txt');
-    const moved = await contextRefresh(
-      owner,
-      started.reviewIdentity,
-      'mode-moved',
-      frozen.stateVersion,
-      frozen.reviewSnapshotIdentity,
-    );
-    expect(moved).toMatchObject({ kind: 'review.context.refreshed', outcome: 'changed' });
-    if (moved.kind !== 'review.context.refreshed') throw new Error('Mode successor failed');
-    const movedVerdict = moved.delta.verdicts.find(verdict => verdict.pathBytesBase64 === encoded('ctx/direct.txt'));
-    expect(movedVerdict?.currency).toBe('changed');
+      await chmod(path.join(created.checkout, 'ctx', 'direct.txt'), 0o755);
+      await git(created.checkout, 'add', 'ctx/direct.txt');
+      const moved = await contextRefresh(
+        owner,
+        started.reviewIdentity,
+        'mode-moved',
+        frozen.stateVersion,
+        frozen.reviewSnapshotIdentity,
+      );
+      expect(moved).toMatchObject({ kind: 'review.context.refreshed', outcome: 'changed' });
+      if (moved.kind !== 'review.context.refreshed') throw new Error('Mode successor failed');
+      const movedVerdict = moved.delta.verdicts.find(verdict => verdict.pathBytesBase64 === encoded('ctx/direct.txt'));
+      expect(movedVerdict?.currency).toBe('changed');
 
-    // Restart, then prove the lineage holds exactly two successors with no duplicates.
-    await owner.dispose();
-    owners.delete(owner);
-    owner = await open(created);
-    const versions = await owner.workspace.read({
-      kind: 'review.versions',
-      reviewIdentity: started.reviewIdentity,
-      offset: 0,
-      limit: 64,
-    });
-    if (versions.status !== 'available') throw new Error('Versions unavailable');
-    const lineage = versions.versions.items.map(item => item.reviewSnapshotIdentity);
-    expect(lineage).toEqual([
-      moved.reviewSnapshotIdentity,
-      frozen.reviewSnapshotIdentity,
-      started.reviewSnapshotIdentity,
-    ]);
-    expect(new Set(lineage).size).toBe(lineage.length);
-  });
+      // Restart, then prove the lineage holds exactly two successors with no duplicates.
+      await owner.dispose();
+      owners.delete(owner);
+      owner = await open(created);
+      const versions = await owner.workspace.read({
+        kind: 'review.versions',
+        reviewIdentity: started.reviewIdentity,
+        offset: 0,
+        limit: 64,
+      });
+      if (versions.status !== 'available') throw new Error('Versions unavailable');
+      const lineage = versions.versions.items.map(item => item.reviewSnapshotIdentity);
+      expect(lineage).toEqual([
+        moved.reviewSnapshotIdentity,
+        frozen.reviewSnapshotIdentity,
+        started.reviewSnapshotIdentity,
+      ]);
+      expect(new Set(lineage).size).toBe(lineage.length);
+    },
+  );
 });

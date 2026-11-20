@@ -15,7 +15,6 @@ import {
   legacyReviewImportIndexIdentity,
   legacyReviewSourceDecisionIdentity,
   legacyReviewSourceOccurrenceIdentity,
-  legacyReviewStateDirectory,
 } from '../../src/legacyReviewImport/index.js';
 import { reviewingRecordIdentity } from '../../src/reviewing/index.js';
 import { openWorkspaceRuntimeOwner, type WorkspaceRuntimeOwner } from '../../src/runtime.js';
@@ -26,6 +25,7 @@ import {
   type RuntimeWorkspaceInternalOptions,
 } from '../../src/workspace.js';
 import { userStateDirectory } from '../../src/workspaceIdentity.js';
+import { itWithSymlinks } from '../platformCases.js';
 
 const execFileAsync = promisify(execFile);
 const GOLDEN_DIRECTORY = fileURLToPath(new URL('../fixtures/legacy-review-v1/', import.meta.url));
@@ -287,7 +287,7 @@ describe('explicit legacy Review import', () => {
     expect(await metadata(created.receiptFile)).toEqual(receiptsBefore);
   });
 
-  it('keeps missing, malformed, and unsafe sources from affecting runtime readiness', async () => {
+  itWithSymlinks('keeps missing, malformed, and unsafe sources from affecting runtime readiness', async () => {
     const absent = await fixture();
     const absentOwner = await open(absent);
     const missing = await absentOwner.workspace.read({
@@ -674,7 +674,7 @@ describe('explicit legacy Review import', () => {
     }
   });
 
-  it('fails closed for invalid sources, command reuse, and the occurrence bound', async () => {
+  itWithSymlinks('fails closed for invalid sources, command reuse, and the occurrence bound', async () => {
     const created = await fixture();
     const missingOwner = await open(created);
     const missingView = await missingOwner.workspace.read({
@@ -1655,15 +1655,5 @@ describe('explicit legacy Review import', () => {
     });
     expect(missing.stateVersion).toBe(1);
     expect(missing.sources[0].observation).toEqual({ status: 'missing' });
-  });
-
-  it('retains the old product state-base rule independently of v1 State', () => {
-    expect(legacyReviewStateDirectory({ XDG_STATE_HOME: '/configured/legacy-state' }, '/home/developer')).toBe(
-      '/configured/legacy-state',
-    );
-    expect(legacyReviewStateDirectory({}, '/home/developer')).toBe('/home/developer/.local/state');
-    expect(legacyReviewStateDirectory({ XDG_STATE_HOME: ' relative-state ' }, '/home/developer')).toBe(
-      path.resolve('relative-state'),
-    );
   });
 });

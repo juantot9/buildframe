@@ -17,6 +17,8 @@ import {
   type RuntimeWorkspaceInternalOptions,
 } from '../../src/workspace.js';
 import { userStateDirectory } from '../../src/workspaceIdentity.js';
+import { itOnPosix } from '../platformCases.js';
+import { pathOnlyReceiptDocument, receiptDocument } from './legacyReviewMovedReceiptDocuments.js';
 
 // Keep moved-receipt filesystem/State scenarios in one Vitest worker so their
 // disposable Git and SQLite process load remains serialized and bounded.
@@ -64,75 +66,6 @@ async function fixture(): Promise<Fixture> {
     state,
     currentCheckoutHash: legacyHash(canonicalCheckout),
   };
-}
-
-function receiptDocument(workspacePaths: readonly string[], marker = 'sanitized'): Buffer {
-  const timestamp = '2026-09-02T12:00:00.000Z';
-  return Buffer.from(
-    `${JSON.stringify(
-      {
-        version: 1,
-        updatedAt: timestamp,
-        batches: workspacePaths.map((workspace, index) => ({
-          id: `${marker}-batch-${index}`,
-          workspace,
-          annotations: [
-            {
-              id: `${marker}-annotation-${index}`,
-              kind: 'question',
-              anchor: { side: 'file' },
-              text: `${marker} private legacy question ${index}`,
-            },
-          ],
-          harness: {
-            id: `${marker}-harness`,
-            name: `${marker} Private Harness`,
-            sessionId: `${marker}-private-session-${index}`,
-            model: `${marker}-private-model-${index}`,
-            workspace,
-          },
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          harnessOutcome: 'pending',
-          queueDisposition: 'pending',
-        })),
-      },
-      null,
-      2,
-    )}\n`,
-  );
-}
-
-function pathOnlyReceiptDocument(workspacePaths: readonly string[]): Buffer {
-  const timestamp = '2026-09-02T12:00:00.000Z';
-  return Buffer.from(
-    `${JSON.stringify({
-      version: 1,
-      updatedAt: timestamp,
-      batches: workspacePaths.map((workspace, index) => ({
-        id: `batch-${index}`,
-        workspace,
-        annotations: [
-          {
-            id: `annotation-${index}`,
-            kind: 'question',
-            anchor: { side: 'file' },
-            text: 'sanitized',
-          },
-        ],
-        harness: {
-          id: 'harness',
-          name: 'Harness',
-          sessionId: `session-${index}`,
-          workspace,
-        },
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        harnessOutcome: 'pending',
-        queueDisposition: 'pending',
-      })),
-    })}\n`,
-  );
 }
 
 async function install(file: string, bytes: Uint8Array): Promise<void> {
@@ -393,249 +326,247 @@ describe('explicit moved legacy receipt discovery', () => {
     expect(await owner.workspace.read({ kind: 'workspace.identity' })).toEqual(identityBefore);
   });
 
-  it('orders bounded locator slots, reports failures without following them, and rejects open request shapes', async () => {
-    const created = await fixture();
-    const hashes = ['1', '2', '3', '4', '5', '6', '7', '8'].map(digit => digit.repeat(64));
-    await install(receiptPath(created.state, hashes[0] as string), receiptDocument(['/legacy/recognized']));
-    await install(receiptPath(created.state, hashes[1] as string), Buffer.from('{not json'));
-    await install(
-      receiptPath(created.state, hashes[2] as string),
-      Buffer.from('{"version":2,"updatedAt":"2026-09-02T12:00:00.000Z","batches":[]}'),
-    );
-    await fs.mkdir(path.dirname(receiptPath(created.state, hashes[3] as string)), {
-      recursive: true,
-    });
-    const outside = path.join(created.root, 'outside-hash-directory');
-    await fs.mkdir(outside, { recursive: true });
-    await install(path.join(outside, 'review-receipts.json'), receiptDocument(['/must/not/be/read']));
-    await fs.symlink(outside, path.dirname(receiptPath(created.state, hashes[4] as string)));
-    const oversized = receiptPath(created.state, hashes[5] as string);
-    await fs.mkdir(path.dirname(oversized), { recursive: true });
-    const oversizedHandle = await fs.open(oversized, 'w');
-    await oversizedHandle.truncate(16 * 1024 * 1024 + 1);
-    await oversizedHandle.close();
-    await fs.mkdir(receiptPath(created.state, hashes[6] as string), {
-      recursive: true,
-    });
-    const fifo = receiptPath(created.state, hashes[7] as string);
-    await fs.mkdir(path.dirname(fifo), { recursive: true });
-    await execFileAsync('mkfifo', [fifo]);
-    await fs.mkdir(path.join(created.state, 'neoflow', 'workspaces', 'not-a-hash'), { recursive: true });
-    await fs.mkdir(path.join(created.state, 'neoflow', 'workspaces', 'z'.repeat(255)));
-    await install(
-      path.join(created.state, 'neoflow', 'workspaces', 'not-a-hash', '6'.repeat(64), 'review-receipts.json'),
-      receiptDocument(['/nested/must/not/appear']),
-    );
-    await install(
-      receiptPath(created.state, created.currentCheckoutHash),
-      receiptDocument(['/current/must/not/appear']),
-    );
-    const owner = await open(created);
+  itOnPosix(
+    'orders bounded locator slots, reports failures without following them, and rejects open request shapes',
+    async () => {
+      const created = await fixture();
+      const hashes = ['1', '2', '3', '4', '5', '6', '7', '8'].map(digit => digit.repeat(64));
+      await install(receiptPath(created.state, hashes[0] as string), receiptDocument(['/legacy/recognized']));
+      await install(receiptPath(created.state, hashes[1] as string), Buffer.from('{not json'));
+      await install(
+        receiptPath(created.state, hashes[2] as string),
+        Buffer.from('{"version":2,"updatedAt":"2026-09-02T12:00:00.000Z","batches":[]}'),
+      );
+      await fs.mkdir(path.dirname(receiptPath(created.state, hashes[3] as string)), { recursive: true });
+      const outside = path.join(created.root, 'outside-hash-directory');
+      await fs.mkdir(outside, { recursive: true });
+      await install(path.join(outside, 'review-receipts.json'), receiptDocument(['/must/not/be/read']));
+      await fs.symlink(outside, path.dirname(receiptPath(created.state, hashes[4] as string)), 'junction');
+      const oversized = receiptPath(created.state, hashes[5] as string);
+      await fs.mkdir(path.dirname(oversized), { recursive: true });
+      const oversizedHandle = await fs.open(oversized, 'w');
+      await oversizedHandle.truncate(16 * 1024 * 1024 + 1);
+      await oversizedHandle.close();
+      await fs.mkdir(receiptPath(created.state, hashes[6] as string), {
+        recursive: true,
+      });
+      const fifo = receiptPath(created.state, hashes[7] as string);
+      await fs.mkdir(path.dirname(fifo), { recursive: true });
+      await execFileAsync('mkfifo', [fifo]);
+      await fs.mkdir(path.join(created.state, 'neoflow', 'workspaces', 'not-a-hash'), { recursive: true });
+      await fs.mkdir(path.join(created.state, 'neoflow', 'workspaces', 'z'.repeat(255)));
+      await install(
+        path.join(created.state, 'neoflow', 'workspaces', 'not-a-hash', '6'.repeat(64), 'review-receipts.json'),
+        receiptDocument(['/nested/must/not/appear']),
+      );
+      await install(
+        receiptPath(created.state, created.currentCheckoutHash),
+        receiptDocument(['/current/must/not/appear']),
+      );
+      const owner = await open(created);
 
-    const view = await owner.workspace.read({
-      kind: 'legacy-review.moved-receipt-sources',
-      search: { kind: 'legacy-state-directory' },
-      sourceOffset: 0,
-      sourceLimit: 32,
-    });
-    expect(view).toMatchObject({
-      status: 'available',
-      totalSources: 8,
-      sources: [
-        {
-          legacyCheckoutHash: hashes[0],
-          observation: {
-            status: 'detected',
-            recognition: { status: 'recognized' },
-          },
-        },
-        {
-          legacyCheckoutHash: hashes[1],
-          observation: {
-            status: 'detected',
-            recognition: { status: 'unrecognized', reason: 'malformed-json' },
-          },
-        },
-        {
-          legacyCheckoutHash: hashes[2],
-          observation: {
-            status: 'detected',
-            recognition: {
-              status: 'unrecognized',
-              reason: 'unsupported-newer-version',
-              observedVersion: 2,
+      const view = await owner.workspace.read({
+        kind: 'legacy-review.moved-receipt-sources',
+        search: { kind: 'legacy-state-directory' },
+        sourceOffset: 0,
+        sourceLimit: 32,
+      });
+      expect(view).toMatchObject({
+        status: 'available',
+        totalSources: 8,
+        sources: [
+          {
+            legacyCheckoutHash: hashes[0],
+            observation: {
+              status: 'detected',
+              recognition: { status: 'recognized' },
             },
           },
-        },
-        { legacyCheckoutHash: hashes[3], observation: { status: 'missing' } },
-        {
-          legacyCheckoutHash: hashes[4],
-          observation: { status: 'unavailable', reason: 'unsafe-path' },
-        },
-        {
-          legacyCheckoutHash: hashes[5],
-          observation: { status: 'unavailable', reason: 'source-too-large' },
-        },
-        {
-          legacyCheckoutHash: hashes[6],
-          observation: {
-            status: 'unavailable',
-            reason: 'not-regular-file',
+          {
+            legacyCheckoutHash: hashes[1],
+            observation: {
+              status: 'detected',
+              recognition: { status: 'unrecognized', reason: 'malformed-json' },
+            },
           },
-        },
-        {
-          legacyCheckoutHash: hashes[7],
-          observation: {
-            status: 'unavailable',
-            reason: 'not-regular-file',
+          {
+            legacyCheckoutHash: hashes[2],
+            observation: {
+              status: 'detected',
+              recognition: {
+                status: 'unrecognized',
+                reason: 'unsupported-newer-version',
+                observedVersion: 2,
+              },
+            },
           },
-        },
-      ],
-    });
-    if (view.status !== 'available') throw new Error(view.reason);
-    await expect(
-      owner.workspace.read({
-        kind: 'legacy-review.moved-receipt-sources',
-        search: { kind: 'legacy-state-directory' },
+          { legacyCheckoutHash: hashes[3], observation: { status: 'missing' } },
+          {
+            legacyCheckoutHash: hashes[4],
+            observation: { status: 'unavailable', reason: 'unsafe-path' },
+          },
+          {
+            legacyCheckoutHash: hashes[5],
+            observation: { status: 'unavailable', reason: 'source-too-large' },
+          },
+          {
+            legacyCheckoutHash: hashes[6],
+            observation: {
+              status: 'unavailable',
+              reason: 'not-regular-file',
+            },
+          },
+          {
+            legacyCheckoutHash: hashes[7],
+            observation: {
+              status: 'unavailable',
+              reason: 'not-regular-file',
+            },
+          },
+        ],
+      });
+      if (view.status !== 'available') throw new Error(view.reason);
+      await expect(
+        owner.workspace.read({
+          kind: 'legacy-review.moved-receipt-sources',
+          search: { kind: 'legacy-state-directory' },
+          sourceOffset: 1,
+          sourceLimit: 2,
+        }),
+      ).resolves.toMatchObject({
+        status: 'available',
+        totalSources: 8,
         sourceOffset: 1,
-        sourceLimit: 2,
-      }),
-    ).resolves.toMatchObject({
-      status: 'available',
-      totalSources: 8,
-      sourceOffset: 1,
-      sources: [{ legacyCheckoutHash: hashes[1] }, { legacyCheckoutHash: hashes[2] }],
-    });
-    const malformed = view.sources[1];
-    if (malformed === undefined) throw new Error('Malformed slot absent');
-    await expect(
-      owner.workspace.read({
-        kind: 'legacy-review.moved-receipt-source',
-        sourceIdentity: malformed.sourceIdentity,
-        legacyCheckoutHash: malformed.legacyCheckoutHash,
-        legacyWorkspacePathOffset: 0,
-        legacyWorkspacePathLimit: 32,
-      }),
-    ).resolves.toMatchObject({
-      status: 'unavailable',
-      reason: 'source-unrecognized',
-      recognition: { status: 'unrecognized', reason: 'malformed-json' },
-    });
-    const readUnknown = owner.workspace.read.bind(owner.workspace) as (request: unknown) => Promise<unknown>;
-    await expect(
-      readUnknown({
-        kind: 'legacy-review.moved-receipt-source',
-        sourceIdentity: `lgs_${'0'.repeat(64)}`,
-        legacyCheckoutHash: hashes[0],
-        legacyWorkspacePathOffset: 0,
-        legacyWorkspacePathLimit: 1,
-      }),
-    ).resolves.toMatchObject({
-      status: 'unavailable',
-      reason: 'source-identity-mismatch',
-    });
-    await expect(
-      readUnknown({
-        kind: 'legacy-review.moved-receipt-source',
-        sourceIdentity: `lgs_${'0'.repeat(64)}`,
-        legacyCheckoutHash: created.currentCheckoutHash,
-        legacyWorkspacePathOffset: 0,
-        legacyWorkspacePathLimit: 1,
-      }),
-    ).resolves.toMatchObject({
-      status: 'unavailable',
-      reason: 'current-source-ineligible',
-    });
-    const malformedRequests: readonly unknown[] = [
-      {
-        kind: 'legacy-review.moved-receipt-sources',
-        search: { kind: 'legacy-state-directory', extra: true },
-        sourceOffset: 0,
-        sourceLimit: 1,
-      },
-      {
-        kind: 'legacy-review.moved-receipt-sources',
-        search: {
-          kind: 'former-checkout-path',
-          exactFormerCanonicalCheckout: 'relative/checkout',
+        sources: [{ legacyCheckoutHash: hashes[1] }, { legacyCheckoutHash: hashes[2] }],
+      });
+      const malformed = view.sources[1];
+      if (malformed === undefined) throw new Error('Malformed slot absent');
+      await expect(
+        owner.workspace.read({
+          kind: 'legacy-review.moved-receipt-source',
+          sourceIdentity: malformed.sourceIdentity,
+          legacyCheckoutHash: malformed.legacyCheckoutHash,
+          legacyWorkspacePathOffset: 0,
+          legacyWorkspacePathLimit: 32,
+        }),
+      ).resolves.toMatchObject({
+        status: 'unavailable',
+        reason: 'source-unrecognized',
+        recognition: { status: 'unrecognized', reason: 'malformed-json' },
+      });
+      const readUnknown = owner.workspace.read.bind(owner.workspace) as (request: unknown) => Promise<unknown>;
+      await expect(
+        readUnknown({
+          kind: 'legacy-review.moved-receipt-source',
+          sourceIdentity: `lgs_${'0'.repeat(64)}`,
+          legacyCheckoutHash: hashes[0],
+          legacyWorkspacePathOffset: 0,
+          legacyWorkspacePathLimit: 1,
+        }),
+      ).resolves.toMatchObject({
+        status: 'unavailable',
+        reason: 'source-identity-mismatch',
+      });
+      await expect(
+        readUnknown({
+          kind: 'legacy-review.moved-receipt-source',
+          sourceIdentity: `lgs_${'0'.repeat(64)}`,
+          legacyCheckoutHash: created.currentCheckoutHash,
+          legacyWorkspacePathOffset: 0,
+          legacyWorkspacePathLimit: 1,
+        }),
+      ).resolves.toMatchObject({
+        status: 'unavailable',
+        reason: 'current-source-ineligible',
+      });
+      const malformedRequests: readonly unknown[] = [
+        {
+          kind: 'legacy-review.moved-receipt-sources',
+          search: { kind: 'legacy-state-directory', extra: true },
+          sourceOffset: 0,
+          sourceLimit: 1,
         },
-        sourceOffset: 0,
-        sourceLimit: 1,
-      },
-      {
-        kind: 'legacy-review.moved-receipt-sources',
-        search: {
-          kind: 'former-checkout-path',
-          exactFormerCanonicalCheckout: '/former/../not-canonical',
+        {
+          kind: 'legacy-review.moved-receipt-sources',
+          search: {
+            kind: 'former-checkout-path',
+            exactFormerCanonicalCheckout: 'relative/checkout',
+          },
+          sourceOffset: 0,
+          sourceLimit: 1,
         },
-        sourceOffset: 0,
-        sourceLimit: 1,
-      },
-      {
-        kind: 'legacy-review.moved-receipt-sources',
-        search: {
-          kind: 'former-checkout-path',
-          exactFormerCanonicalCheckout: '/former/\ud800/not-scalar',
+        {
+          kind: 'legacy-review.moved-receipt-sources',
+          search: {
+            kind: 'former-checkout-path',
+            exactFormerCanonicalCheckout: '/former/../not-canonical',
+          },
+          sourceOffset: 0,
+          sourceLimit: 1,
         },
-        sourceOffset: 0,
-        sourceLimit: 1,
-      },
-      {
-        kind: 'legacy-review.moved-receipt-sources',
-        search: {
-          kind: 'former-checkout-path',
-          exactFormerCanonicalCheckout: `/former/${'x'.repeat(16 * 1024)}`,
+        {
+          kind: 'legacy-review.moved-receipt-sources',
+          search: {
+            kind: 'former-checkout-path',
+            exactFormerCanonicalCheckout: '/former/\ud800/not-scalar',
+          },
+          sourceOffset: 0,
+          sourceLimit: 1,
         },
-        sourceOffset: 0,
-        sourceLimit: 1,
-      },
-      {
-        kind: 'legacy-review.moved-receipt-sources',
-        search: { kind: 'legacy-state-directory' },
-        sourceOffset: -1,
-        sourceLimit: 1,
-      },
-      {
-        kind: 'legacy-review.moved-receipt-source',
-        sourceIdentity: malformed.sourceIdentity,
-        legacyCheckoutHash: 'A'.repeat(64),
-        legacyWorkspacePathOffset: 0,
-        legacyWorkspacePathLimit: 1,
-      },
-      {
-        kind: 'legacy-review.moved-receipt-source',
-        sourceIdentity: malformed.sourceIdentity,
-        legacyCheckoutHash: malformed.legacyCheckoutHash,
-        legacyWorkspacePathOffset: 0,
-        legacyWorkspacePathLimit: 1,
-        bytes: 'must-not-cross',
-      },
-    ];
-    for (const request of malformedRequests) {
-      await expect(readUnknown(request)).rejects.toThrow(TypeError);
-    }
+        {
+          kind: 'legacy-review.moved-receipt-sources',
+          search: {
+            kind: 'former-checkout-path',
+            exactFormerCanonicalCheckout: `/former/${'x'.repeat(16 * 1024)}`,
+          },
+          sourceOffset: 0,
+          sourceLimit: 1,
+        },
+        {
+          kind: 'legacy-review.moved-receipt-sources',
+          search: { kind: 'legacy-state-directory' },
+          sourceOffset: -1,
+          sourceLimit: 1,
+        },
+        {
+          kind: 'legacy-review.moved-receipt-source',
+          sourceIdentity: malformed.sourceIdentity,
+          legacyCheckoutHash: 'A'.repeat(64),
+          legacyWorkspacePathOffset: 0,
+          legacyWorkspacePathLimit: 1,
+        },
+        {
+          kind: 'legacy-review.moved-receipt-source',
+          sourceIdentity: malformed.sourceIdentity,
+          legacyCheckoutHash: malformed.legacyCheckoutHash,
+          legacyWorkspacePathOffset: 0,
+          legacyWorkspacePathLimit: 1,
+          bytes: 'must-not-cross',
+        },
+      ];
+      for (const request of malformedRequests) {
+        await expect(readUnknown(request)).rejects.toThrow(TypeError);
+      }
 
-    await close(owner);
-    const outsideRoot = path.join(created.root, 'outside-state-root');
-    await fs.mkdir(outsideRoot, { recursive: true });
-    await fs.rm(path.join(created.state, 'neoflow'), {
-      recursive: true,
-      force: true,
-    });
-    await fs.symlink(outsideRoot, path.join(created.state, 'neoflow'));
-    const unsafeOwner = await open(created);
-    await expect(
-      unsafeOwner.workspace.read({
-        kind: 'legacy-review.moved-receipt-sources',
-        search: { kind: 'legacy-state-directory' },
-        sourceOffset: 0,
-        sourceLimit: 1,
-      }),
-    ).resolves.toMatchObject({
-      status: 'unavailable',
-      reason: 'search-root-unavailable',
-    });
-  });
+      await close(owner);
+      const outsideRoot = path.join(created.root, 'outside-state-root');
+      await fs.mkdir(outsideRoot, { recursive: true });
+      await fs.rm(path.join(created.state, 'neoflow'), { recursive: true, force: true });
+      await fs.symlink(outsideRoot, path.join(created.state, 'neoflow'), 'junction');
+      const unsafeOwner = await open(created);
+      await expect(
+        unsafeOwner.workspace.read({
+          kind: 'legacy-review.moved-receipt-sources',
+          search: { kind: 'legacy-state-directory' },
+          sourceOffset: 0,
+          sourceLimit: 1,
+        }),
+      ).resolves.toMatchObject({
+        status: 'unavailable',
+        reason: 'search-root-unavailable',
+      });
+    },
+  );
 
   it('enforces aggregate/page limits and keeps scalar-safe worst-case views below the frame body bound', async () => {
     const created = await fixture();

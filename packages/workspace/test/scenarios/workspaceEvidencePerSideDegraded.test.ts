@@ -19,6 +19,7 @@ import {
 } from './workspaceEvidenceScenarios.js';
 import type { Workspace } from '../../src/index.js';
 import { WorkspaceEvidence } from '../../src/workspaceEvidence/index.js';
+import { itOnPosix, itWithSymlinks } from '../platformCases.js';
 
 installWorkspaceEvidenceHygiene();
 
@@ -108,83 +109,87 @@ describe('per-side degraded Workspace Evidence', () => {
     });
   });
 
-  it('captures raw symlink targets, special-entry facts, generated evidence, and binary bytes independently', async () => {
-    const { root, checkout } = await createCheckout({ commit: true });
-    await writeFile(path.join(checkout, '.gitattributes'), '*.generated linguist-generated\n');
-    await mkdir(path.join(root, 'outside-a'));
-    await mkdir(path.join(root, 'outside-b'));
-    await symlink('../outside-a', path.join(checkout, 'link'));
-    await writeFile(path.join(checkout, 'special.pipe'), 'regular before\n');
-    await writeFile(path.join(checkout, 'code.generated'), 'before\n');
-    await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([1, 0, 2]));
-    await writeFile(path.join(checkout, 'unrenderable.txt'), Buffer.from([0xc3, 0x28]));
-    await git(checkout, 'add', '.');
-    await git(checkout, 'commit', '-qm', 'degradation basis');
+  itWithSymlinks(
+    'captures raw symlink targets, special-entry facts, generated evidence, and binary bytes independently',
+    async () => {
+      const { root, checkout } = await createCheckout({ commit: true });
+      await writeFile(path.join(checkout, '.gitattributes'), '*.generated linguist-generated\n');
+      await mkdir(path.join(root, 'outside-a'));
+      await mkdir(path.join(root, 'outside-b'));
+      await symlink('../outside-a', path.join(checkout, 'link'));
+      await writeFile(path.join(checkout, 'special.pipe'), 'regular before\n');
+      await writeFile(path.join(checkout, 'code.generated'), 'before\n');
+      await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([1, 0, 2]));
+      await writeFile(path.join(checkout, 'unrenderable.txt'), Buffer.from([0xc3, 0x28]));
+      await git(checkout, 'add', '.');
+      await git(checkout, 'commit', '-qm', 'degradation basis');
 
-    await rm(path.join(checkout, 'link'));
-    await symlink('../outside-b', path.join(checkout, 'link'));
-    await rm(path.join(checkout, 'special.pipe'));
-    await execFileAsync('/usr/bin/mkfifo', [path.join(checkout, 'special.pipe')]);
-    await writeFile(path.join(checkout, 'code.generated'), 'after\n');
-    await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([3, 0, 4]));
-    await writeFile(path.join(checkout, 'unrenderable.txt'), Buffer.from([0xe2, 0x28]));
+      await rm(path.join(checkout, 'link'));
+      await symlink('../outside-b', path.join(checkout, 'link'));
+      await rm(path.join(checkout, 'special.pipe'));
+      await execFileAsync('/usr/bin/mkfifo', [path.join(checkout, 'special.pipe')]);
+      await writeFile(path.join(checkout, 'code.generated'), 'after\n');
+      await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([3, 0, 4]));
+      await writeFile(path.join(checkout, 'unrenderable.txt'), Buffer.from([0xe2, 0x28]));
 
-    const opened = await openWorkspace(checkout);
-    const captured = await capture(opened.workspace);
-    expect(captured.status).toBe('captured');
-    if (captured.status !== 'captured') return;
-    expect(captured.verification.state).toBe('current');
-    const files = await completeManifest(opened.workspace, captured.evidenceIdentity);
+      const opened = await openWorkspace(checkout);
+      const captured = await capture(opened.workspace);
+      expect(captured.status).toBe('captured');
+      if (captured.status !== 'captured') return;
+      expect(captured.verification.state).toBe('current');
+      const files = await completeManifest(opened.workspace, captured.evidenceIdentity);
 
-    const link = fileAt(files, 'link');
-    expect(link.newSide).toMatchObject({
-      kind: 'symlink',
-      gitMode: '120000',
-      symlinkTarget: {
-        byteLength: Buffer.byteLength('../outside-b'),
-        bytesBase64: Buffer.from('../outside-b').toString('base64'),
-      },
-    });
-    expect(await capturedText(opened.workspace, captured.evidenceIdentity, link, 'new')).toBe('../outside-b');
+      const link = fileAt(files, 'link');
+      expect(link.newSide).toMatchObject({
+        kind: 'symlink',
+        gitMode: '120000',
+        symlinkTarget: {
+          byteLength: Buffer.byteLength('../outside-b'),
+          bytesBase64: Buffer.from('../outside-b').toString('base64'),
+        },
+      });
+      expect(await capturedText(opened.workspace, captured.evidenceIdentity, link, 'new')).toBe('../outside-b');
 
-    const special = fileAt(files, 'special.pipe');
-    expect(special).toMatchObject({
-      status: 'type-changed',
-      newSide: {
-        kind: 'special',
-        gitMode: '000000',
-        byteLength: null,
-        contentAvailability: 'unavailable',
-        specialEntry: { kind: 'fifo', content: 'not-applicable' },
-      },
-    });
-    expect(special.newSide?.contentIdentity).toBeUndefined();
-    expect(fileAt(files, 'code.generated').newSide?.generated).toEqual({
-      classification: 'generated',
-      source: 'git-attribute',
-      attribute: 'linguist-generated',
-    });
-    expect(fileAt(files, 'binary.bin').newSide?.classification).toBe('binary');
-    expect(fileAt(files, 'unrenderable.txt').newSide?.classification).toBe('unrenderable');
+      const special = fileAt(files, 'special.pipe');
+      expect(special).toMatchObject({
+        status: 'type-changed',
+        newSide: {
+          kind: 'special',
+          gitMode: '000000',
+          byteLength: null,
+          contentAvailability: 'unavailable',
+          specialEntry: { kind: 'fifo', content: 'not-applicable' },
+        },
+      });
+      expect(special.newSide?.contentIdentity).toBeUndefined();
+      expect(fileAt(files, 'code.generated').newSide?.generated).toEqual({
+        classification: 'generated',
+        source: 'git-attribute',
+        attribute: 'linguist-generated',
+      });
+      expect(fileAt(files, 'binary.bin').newSide?.classification).toBe('binary');
+      expect(fileAt(files, 'unrenderable.txt').newSide?.classification).toBe('unrenderable');
 
-    await writeFile(path.join(root, 'outside-b', 'irrelevant'), 'target mutation\n');
-    await expect(
-      opened.workspace.read({
-        kind: 'workspace.current-changes.verify',
-        evidenceIdentity: captured.evidenceIdentity,
-      }),
-    ).resolves.toMatchObject({ verification: { state: 'current' } });
-    await rm(path.join(checkout, 'special.pipe'));
-    await writeFile(path.join(checkout, 'special.pipe'), 'regular again\n');
-    await expect(
-      opened.workspace.read({
-        kind: 'workspace.current-changes.verify',
-        evidenceIdentity: captured.evidenceIdentity,
-      }),
-    ).resolves.toMatchObject({ verification: { state: 'stale' } });
-  });
+      await writeFile(path.join(root, 'outside-b', 'irrelevant'), 'target mutation\n');
+      await expect(
+        opened.workspace.read({
+          kind: 'workspace.current-changes.verify',
+          evidenceIdentity: captured.evidenceIdentity,
+        }),
+      ).resolves.toMatchObject({ verification: { state: 'current' } });
+      await rm(path.join(checkout, 'special.pipe'));
+      await writeFile(path.join(checkout, 'special.pipe'), 'regular again\n');
+      await expect(
+        opened.workspace.read({
+          kind: 'workspace.current-changes.verify',
+          evidenceIdentity: captured.evidenceIdentity,
+        }),
+      ).resolves.toMatchObject({ verification: { state: 'stale' } });
+    },
+  );
 
-  it('records a working socket kind without inventing content', async () => {
+  // Needs a FIFO or a Unix socket file, which Windows checkouts cannot hold.
+  itOnPosix('records a working socket kind without inventing content', async () => {
     const { checkout } = await createCheckout({ commit: true });
     const socketPath = path.join(checkout, 'service.socket');
     await writeFile(socketPath, 'tracked placeholder\n');
@@ -602,43 +607,5 @@ describe('per-side degraded Workspace Evidence', () => {
     await expect(evidence.verifyReviewComparison(captured)).resolves.toBe('current');
     await writeFile(path.join(checkout, 'materialized.bin'), Buffer.from([9, 0, 8, 7, 5]));
     await expect(evidence.verifyReviewComparison(captured)).resolves.toBe('stale');
-  });
-
-  it('captures raw working bytes but leaves arbitrary filtered identity unverified', async () => {
-    const { root, checkout } = await createCheckout({ commit: true });
-    const home = path.join(root, 'filter-home');
-    await mkdir(home);
-    process.env.HOME = home;
-    const filter = path.join(root, 'operator-filter.sh');
-    await writeFile(filter, '#!/bin/sh\ncat\n', { mode: 0o700 });
-    await writeFile(path.join(home, '.gitconfig'), `[filter "operator"]\n\tclean = ${filter}\n`);
-    await writeFile(path.join(checkout, '.gitattributes'), '*.txt filter=operator\n');
-    await writeFile(path.join(checkout, 'filtered.txt'), 'basis\n');
-    await git(checkout, 'add', '.');
-    await git(checkout, 'commit', '-qm', 'filtered basis');
-    const basisCommit = (await git(checkout, 'rev-parse', 'HEAD')).trim();
-    await writeFile(path.join(checkout, 'filtered.txt'), 'working\n');
-
-    const opened = await openWorkspace(checkout);
-    const evidence = new WorkspaceEvidence({
-      workspaceIdentity: opened.workspaceIdentity,
-      canonicalCheckout: opened.canonicalCheckout,
-    });
-    const captured = await evidence.read({
-      kind: 'workspace.review-comparison.capture',
-      selection: {
-        kind: 'revision-to-working-state',
-        basis: { kind: 'object', objectKind: 'commit', objectIdentity: basisCommit },
-      },
-    });
-    expect(captured.status).toBe('captured');
-    if (captured.status !== 'captured') return;
-    expect(captured.verification.state).toBe('unverified');
-    const files = await completeManifest(evidence as unknown as Workspace, captured.evidenceIdentity);
-    expect(fileAt(files, 'filtered.txt').newSide).toMatchObject({
-      contentAvailability: 'captured',
-      workingEvidenceLimitation: 'unsupported-content-filter',
-    });
-    await expect(evidence.verifyReviewComparison(captured)).resolves.toBe('unverified');
   });
 });

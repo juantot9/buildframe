@@ -34,6 +34,8 @@ export async function git(directory: string, ...arguments_: string[]): Promise<s
 
 export async function fixture(withChange = true): Promise<Fixture> {
   const root = await mkdtemp(path.join(tmpdir(), 'buildframe-reviewing-direct-'));
+  // Removed after the test even when it never opens the fixture.
+  roots.add(root);
   const checkout = path.join(root, 'checkout');
   const state = path.join(root, 'state');
   await mkdir(checkout, { recursive: true });
@@ -190,7 +192,8 @@ export function installWorkspaceReviewingHygiene(): void {
     owners.clear();
     if (originalStateHome === undefined) delete process.env.XDG_STATE_HOME;
     else process.env.XDG_STATE_HOME = originalStateHome;
-    await Promise.all([...roots].map(async root => rm(root, { recursive: true, force: true })));
+    // Windows keeps a directory busy for a moment after the processes in it exit.
+    await Promise.all([...roots].map(async root => rm(root, { recursive: true, force: true, maxRetries: 10 })));
     roots.clear();
   });
 }

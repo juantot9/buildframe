@@ -37,3 +37,8 @@ overrides:
   tinypool: ^2.1.2 # GHSA-85c8-ppgw-ccpr, GHSA-5gmw-xhrv-c9v3, through oxfmt
   vite: ^7.3.7 # GHSA-587h-7wmj-h5pm and others, through vitest
   zod: ^4.6.7 # GHSA-mrhx-c7xc-m3w5, through Pi 1.5.0 (tests)
+
+# pnpm runs scripts through cmd.exe on Windows, which cannot read
+# `NAME=value command` or `&&` the POSIX way; the emulated shell runs them
+# the same on every platform.
+shellEmulator: true

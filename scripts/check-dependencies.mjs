@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import ts from 'typescript';
 
@@ -260,7 +261,7 @@ function checkSpecifier(specifier, fromFile, owner, allowedExternalDependencies,
 
   let resolved;
   if (specifier.startsWith('file:')) {
-    resolved = new URL(specifier).pathname;
+    resolved = fileURLToPath(specifier);
   } else if (specifier.startsWith('.') || path.isAbsolute(specifier)) {
     resolved = path.resolve(path.dirname(fromFile), specifier);
   } else if (specifier.startsWith('node:')) {

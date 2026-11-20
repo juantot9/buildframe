@@ -60,6 +60,17 @@ to be closed.
   22, not Node 26. Keep a round trip on that setup, and decide whether
   `buildframe doctor` should say which Node the hosts use.
 
+## From WF-306 (2026-11-20)
+
+- Make the `verify-windows` CI job required (drop `continue-on-error`) once
+  the refusal is gone; it has not run yet.
+- Many Windows tests meet the refusal today (doctor, scenarios that open a
+  Workspace); with it patched out locally, 643 of 671 pass and 26 skip by
+  stated reason.
+- The hung-Git deadline test ("retires hung identity Git inspection at the
+  package-owned deadline") still skips on Windows: its stand-in Git is a
+  shell script. A stand-in that is a real `git.exe` would restore it.
+
 ## Verification
 
 - `pnpm verify` passes on Windows, macOS and Linux.

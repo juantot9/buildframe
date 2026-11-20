@@ -1,20 +1,25 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-  captureLegacyReviewSource,
   LEGACY_REVIEW_SOURCE_CAPTURE_ATTEMPTS,
   MAX_LEGACY_REVIEW_SOURCE_BYTES,
   MAX_LEGACY_REVIEW_SOURCE_ENTRIES,
-  type LegacyReviewSourceCaptured,
-  type LegacyReviewSourceKind,
-  type LegacyReviewSourceRecognition,
 } from '../../src/legacyReviewSource.js';
+import {
+  capture,
+  captureRecognition,
+  installSource,
+  recognitionEntryCount,
+  recognized,
+  removeTemporaryRoots,
+  stableMetadata,
+  temporaryRoot,
+} from './legacyReviewSourceScenarios.js';
 
 const GOLDEN_DIRECTORY = fileURLToPath(new URL('../fixtures/legacy-review-v1/', import.meta.url));
 const GOLDENS = [
@@ -48,95 +53,7 @@ const GOLDENS = [
   },
 ] as const;
 
-const roots = new Set<string>();
-
-async function temporaryRoot(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'neoflow-legacy-source-v1-'));
-  roots.add(root);
-  return root;
-}
-
-async function installSource(bytes: Uint8Array): Promise<{ readonly root: string; readonly file: string }> {
-  const root = await temporaryRoot();
-  const directory = path.join(root, 'owned');
-  const file = path.join(directory, 'source.json');
-  await fs.mkdir(directory, { mode: 0o700 });
-  await fs.writeFile(file, bytes, { mode: 0o640 });
-  await fs.chmod(file, 0o640);
-  const modified = new Date('2026-09-02T07:00:00.000Z');
-  await fs.utimes(file, modified, modified);
-  return { root, file };
-}
-
-async function capture(
-  sourceKind: LegacyReviewSourceKind,
-  root: string,
-  testControl: Parameters<typeof captureLegacyReviewSource>[1] = {},
-) {
-  return await captureLegacyReviewSource(
-    {
-      sourceKind,
-      trustedRoot: root,
-      relativePath: ['owned', 'source.json'],
-    },
-    testControl,
-  );
-}
-
-async function stableMetadata(file: string): Promise<{
-  readonly device: bigint;
-  readonly inode: bigint;
-  readonly mode: bigint;
-  readonly size: bigint;
-  readonly mtimeNs: bigint;
-  readonly ctimeNs: bigint;
-}> {
-  const information = await fs.stat(file, { bigint: true });
-  return {
-    device: information.dev,
-    inode: information.ino,
-    mode: information.mode,
-    size: information.size,
-    mtimeNs: information.mtimeNs,
-    ctimeNs: information.ctimeNs,
-  };
-}
-
-type RecognizedCapture = LegacyReviewSourceCaptured & {
-  readonly recognition: Extract<LegacyReviewSourceRecognition, { readonly status: 'recognized' }>;
-};
-
-function recognized(result: Awaited<ReturnType<typeof captureLegacyReviewSource>>): RecognizedCapture {
-  expect(result.status).toBe('captured');
-  if (result.status !== 'captured') throw new Error('Source was not captured');
-  expect(result.recognition.status).toBe('recognized');
-  if (result.recognition.status !== 'recognized') {
-    throw new Error('Source was not recognized');
-  }
-  return result as RecognizedCapture;
-}
-
-function recognitionEntryCount(
-  recognition: Extract<LegacyReviewSourceRecognition, { readonly status: 'recognized' }>,
-): number {
-  return 'annotations' in recognition.value ? recognition.value.annotations.length : recognition.value.batches.length;
-}
-
-async function captureRecognition(
-  sourceKind: LegacyReviewSourceKind,
-  value: Uint8Array | string,
-): Promise<LegacyReviewSourceRecognition> {
-  const installed = await installSource(typeof value === 'string' ? Buffer.from(value) : value);
-  const result = await capture(sourceKind, installed.root);
-  expect(result.status).toBe('captured');
-  if (result.status !== 'captured') throw new Error('Source was not captured');
-  return result.recognition;
-}
-
-afterEach(async () => {
-  await Promise.all([...roots].map(root => fs.rm(root, { recursive: true, force: true })));
-  roots.clear();
-});
+afterEach(removeTemporaryRoots);
 
 describe('bounded legacy Review source recognition', () => {
   it.each(GOLDENS)('preserves and recognizes immutable $format golden bytes', async golden => {
@@ -476,64 +393,6 @@ describe('bounded legacy Review source recognition', () => {
       status: 'unrecognized',
       reason: 'entry-limit-exceeded',
     });
-  });
-
-  it('rejects missing, symlinked, non-regular, and invalid locators', async () => {
-    const missingRoot = await temporaryRoot();
-    await expect(capture('queue', missingRoot)).resolves.toMatchObject({
-      status: 'unavailable',
-      reason: 'missing',
-    });
-
-    const finalLinkRoot = await temporaryRoot();
-    await fs.mkdir(path.join(finalLinkRoot, 'owned'));
-    await fs.writeFile(path.join(finalLinkRoot, 'target.json'), '[]\n');
-    await fs.symlink(path.join(finalLinkRoot, 'target.json'), path.join(finalLinkRoot, 'owned', 'source.json'));
-    await expect(capture('queue', finalLinkRoot)).resolves.toMatchObject({
-      status: 'unavailable',
-      reason: 'unsafe-path',
-    });
-
-    const directoryLinkRoot = await temporaryRoot();
-    await fs.mkdir(path.join(directoryLinkRoot, 'actual'));
-    await fs.writeFile(path.join(directoryLinkRoot, 'actual', 'source.json'), '[]\n');
-    await fs.symlink(path.join(directoryLinkRoot, 'actual'), path.join(directoryLinkRoot, 'owned'));
-    await expect(capture('queue', directoryLinkRoot)).resolves.toMatchObject({
-      status: 'unavailable',
-      reason: 'unsafe-path',
-    });
-
-    const nonRegularRoot = await temporaryRoot();
-    await fs.mkdir(path.join(nonRegularRoot, 'owned', 'source.json'), {
-      recursive: true,
-    });
-    await expect(capture('queue', nonRegularRoot)).resolves.toMatchObject({
-      status: 'unavailable',
-      reason: 'not-regular-file',
-    });
-
-    const aliasedParent = await temporaryRoot();
-    const actualRoot = path.join(aliasedParent, 'actual-root');
-    const aliasedRoot = path.join(aliasedParent, 'configured-root');
-    await fs.mkdir(path.join(actualRoot, 'owned'), { recursive: true });
-    await fs.writeFile(path.join(actualRoot, 'owned', 'source.json'), '[]\n');
-    await fs.symlink(actualRoot, aliasedRoot);
-    const aliased = recognized(
-      await captureLegacyReviewSource({
-        sourceKind: 'queue',
-        trustedRoot: aliasedRoot,
-        relativePath: ['owned', 'source.json'],
-      }),
-    );
-    expect(aliased.sourcePath).toBe(await fs.realpath(path.join(actualRoot, 'owned', 'source.json')));
-
-    await expect(
-      captureLegacyReviewSource({
-        sourceKind: 'queue',
-        trustedRoot: missingRoot,
-        relativePath: ['owned', '..', 'source.json'],
-      }),
-    ).rejects.toThrow('relative path is invalid');
   });
 
   it('retries a replaced path and publishes only the stable successor bytes', async () => {

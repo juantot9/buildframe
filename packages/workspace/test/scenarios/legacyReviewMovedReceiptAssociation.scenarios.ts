@@ -825,10 +825,8 @@ describe('moved legacy receipt association and import', () => {
         const outside = path.join(unavailable.root, 'outside');
         await fs.mkdir(outside, { recursive: true });
         await install(path.join(outside, 'review-receipts.json'), receiptDocument('/must/not/be/read', 'unsafe'));
-        await fs.mkdir(path.dirname(path.dirname(unavailableFile)), {
-          recursive: true,
-        });
-        await fs.symlink(outside, path.dirname(unavailableFile));
+        await fs.mkdir(path.dirname(path.dirname(unavailableFile)), { recursive: true });
+        await fs.symlink(outside, path.dirname(unavailableFile), 'junction');
       } else if (failure === 'not-regular-file') {
         await fs.mkdir(unavailableFile, { recursive: true });
       } else {

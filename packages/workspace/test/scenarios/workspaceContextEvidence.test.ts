@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -14,11 +14,13 @@ import type {
   ContextSourceCandidate,
   ContextItemVerdict,
   ContextSourceCaptureItem,
-  ContextSourceManifestView,
   ContextSelectionVerifyView,
   ContextSourceSelection,
 } from '../../src/contextEvidence.js';
+import { allCandidates, candidateAt, manifest, pathsOf } from './workspaceContextEvidenceScenarios.js';
+import { gitWithInput } from './workspaceEvidenceScenarios.js';
 import { WorkspaceEvidence } from '../../src/workspaceEvidence/index.js';
+import { itOnPosix, itWithSymlinks } from '../platformCases.js';
 
 const execFileAsync = promisify(execFile);
 const roots = new Set<string>();
@@ -38,33 +40,6 @@ async function git(checkout: string, ...arguments_: string[]): Promise<string> {
     },
   });
   return stdout;
-}
-
-async function gitWithInput(checkout: string, arguments_: readonly string[], input: Buffer): Promise<void> {
-  const executable = await resolveGitExecutable();
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(executable, [...arguments_], {
-      cwd: checkout,
-      env: {
-        ...process.env,
-        GIT_PAGER: 'cat',
-        GIT_TERMINAL_PROMPT: '0',
-        LANG: 'C',
-        LC_ALL: 'C',
-      },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let stderr = '';
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8');
-    });
-    child.once('error', reject);
-    child.once('close', code => {
-      if (code === 0) resolve();
-      else reject(new Error(stderr));
-    });
-    child.stdin.end(input);
-  });
 }
 
 async function createCheckout(): Promise<{ readonly root: string; readonly checkout: string }> {
@@ -99,122 +74,84 @@ afterEach(async () => {
   else process.env.XDG_STATE_HOME = originalStateHome;
 });
 
-async function manifest(
-  workspace: Workspace,
-  selections: readonly (ContextSourceSelection & { readonly classification?: 'generated' | 'binary' })[],
-  offset = 0,
-  limit = 64,
-): Promise<ContextSourceManifestView> {
-  return await workspace.read({ kind: 'workspace.context.manifest', selections, offset, limit });
-}
-
-async function allCandidates(
-  workspace: Workspace,
-  selections: readonly (ContextSourceSelection & { readonly classification?: 'generated' | 'binary' })[],
-): Promise<readonly ContextSourceCandidate[]> {
-  const collected: ContextSourceCandidate[] = [];
-  let offset = 0;
-  while (true) {
-    const view = await manifest(workspace, selections, offset);
-    collected.push(...view.candidates);
-    if (view.nextOffset === null) return collected;
-    offset = view.nextOffset;
-  }
-}
-
-function candidateAt(candidates: readonly ContextSourceCandidate[], relative: string): ContextSourceCandidate {
-  const found = candidates.find(
-    candidate =>
-      candidate.pathBytesBase64 !== undefined &&
-      Buffer.from(candidate.pathBytesBase64, 'base64').toString('utf8') === relative,
-  );
-  if (found === undefined) throw new Error(`Missing context candidate: ${relative}`);
-  return found;
-}
-
-function pathsOf(candidates: readonly ContextSourceCandidate[]): readonly string[] {
-  return candidates.map(candidate =>
-    candidate.pathBytesBase64 === undefined
-      ? (candidate.absolutePath ?? '')
-      : Buffer.from(candidate.pathBytesBase64, 'base64').toString('utf8'),
-  );
-}
-
 describe('bounded Context Locator expansion over explicit selections', () => {
-  it('expands complete directory membership over tracked, untracked, ignored, and special content', async () => {
-    const { checkout } = await createCheckout();
-    await writeFile(path.join(checkout, 'tracked.txt'), 'tracked\n');
-    await writeFile(path.join(checkout, 'ignored-as-tracked.txt'), 'tracked despite ignore\n');
-    await git(checkout, 'add', 'tracked.txt', 'ignored-as-tracked.txt');
-    await git(checkout, 'commit', '-qm', 'tracked content');
-    await writeFile(path.join(checkout, '.gitignore'), 'ignored.txt\nignored-as-tracked.txt\nignored-dir/\n');
-    await writeFile(path.join(checkout, 'untracked.txt'), 'untracked\n');
-    await writeFile(path.join(checkout, 'ignored.txt'), 'ignored untracked\n');
-    await mkdir(path.join(checkout, 'nested', 'deep'), { recursive: true });
-    await writeFile(path.join(checkout, 'nested', 'tracked-deep.txt'), 'deep tracked\n');
-    await writeFile(path.join(checkout, 'nested', 'deep', 'untracked-deep.txt'), 'deep untracked\n');
-    await git(checkout, 'add', 'nested/tracked-deep.txt');
-    await git(checkout, 'commit', '-qm', 'nested tracked');
-    await mkdir(path.join(checkout, 'ignored-dir'), { recursive: true });
-    await writeFile(path.join(checkout, 'ignored-dir', 'inside.txt'), 'ignored inside\n');
-    await symlink('tracked.txt', path.join(checkout, 'link.txt'));
-    await symlink('nested', path.join(checkout, 'dir-link'));
-    await symlink(path.join(checkout, '..', 'outside-target.txt'), path.join(checkout, 'escape-link'));
-    await execFileAsync('mkfifo', [path.join(checkout, 'special.pipe')]);
-    const workspace = await openWorkspace(checkout);
+  itWithSymlinks(
+    'expands complete directory membership over tracked, untracked, ignored, and special content',
+    async () => {
+      const { checkout } = await createCheckout();
+      await writeFile(path.join(checkout, 'tracked.txt'), 'tracked\n');
+      await writeFile(path.join(checkout, 'ignored-as-tracked.txt'), 'tracked despite ignore\n');
+      await git(checkout, 'add', 'tracked.txt', 'ignored-as-tracked.txt');
+      await git(checkout, 'commit', '-qm', 'tracked content');
+      await writeFile(path.join(checkout, '.gitignore'), 'ignored.txt\nignored-as-tracked.txt\nignored-dir/\n');
+      await writeFile(path.join(checkout, 'untracked.txt'), 'untracked\n');
+      await writeFile(path.join(checkout, 'ignored.txt'), 'ignored untracked\n');
+      await mkdir(path.join(checkout, 'nested', 'deep'), { recursive: true });
+      await writeFile(path.join(checkout, 'nested', 'tracked-deep.txt'), 'deep tracked\n');
+      await writeFile(path.join(checkout, 'nested', 'deep', 'untracked-deep.txt'), 'deep untracked\n');
+      await git(checkout, 'add', 'nested/tracked-deep.txt');
+      await git(checkout, 'commit', '-qm', 'nested tracked');
+      await mkdir(path.join(checkout, 'ignored-dir'), { recursive: true });
+      await writeFile(path.join(checkout, 'ignored-dir', 'inside.txt'), 'ignored inside\n');
+      await symlink('tracked.txt', path.join(checkout, 'link.txt'));
+      await symlink('nested', path.join(checkout, 'dir-link'));
+      await symlink(path.join(checkout, '..', 'outside-target.txt'), path.join(checkout, 'escape-link'));
+      await execFileAsync('mkfifo', [path.join(checkout, 'special.pipe')]);
+      const workspace = await openWorkspace(checkout);
 
-    const view = await manifest(workspace, [{ kind: 'workspace-directory', pathBytesBase64: '' }]);
-    expect(view.kind).toBe('workspace.context.manifest');
-    expect(view.status).toBe('complete');
-    expect(view.limits.formatVersion).toBe(1);
+      const view = await manifest(workspace, [{ kind: 'workspace-directory', pathBytesBase64: '' }]);
+      expect(view.kind).toBe('workspace.context.manifest');
+      expect(view.status).toBe('complete');
+      expect(view.limits.formatVersion).toBe(1);
 
-    const candidates = await allCandidates(workspace, [{ kind: 'workspace-directory', pathBytesBase64: '' }]);
-    const paths = pathsOf(candidates);
-    expect(paths).toContain('.gitignore');
-    // Ignored untracked content is excluded by default; tracked content stays eligible.
-    expect(paths).toContain('ignored-as-tracked.txt');
-    expect(paths).not.toContain('ignored.txt');
-    expect(paths).not.toContain('ignored-dir/inside.txt');
-    expect(paths).toContain('tracked.txt');
-    expect(paths).toContain('untracked.txt');
-    expect(paths).toContain('nested/tracked-deep.txt');
-    expect(paths).toContain('nested/deep/untracked-deep.txt');
-    // Symlinks are candidates and were never dereferenced or followed.
-    expect(paths).toContain('link.txt');
-    expect(paths).toContain('dir-link');
-    expect(paths).toContain('escape-link');
-    expect(paths).not.toContain('outside-target.txt');
-    expect(paths).toContain('special.pipe');
-    const tracked = candidateAt(candidates, 'tracked.txt');
-    expect(tracked.eligibility).toBe('tracked');
-    expect(tracked.gitMode).toBe('100644');
-    expect(tracked.contentIdentity).toMatch(/^[0-9a-f]{40}$/);
-    expect(tracked.availability).toBe('available');
-    expect(tracked.size).toBe(8);
-    expect(tracked.sensitive).toBe(false);
-    const untracked = candidateAt(candidates, 'untracked.txt');
-    expect(untracked.eligibility).toBe('untracked');
-    expect(untracked.contentIdentity).toBeUndefined();
-    expect(untracked.size).toBe(10);
-    const trackedIgnored = candidateAt(candidates, 'ignored-as-tracked.txt');
-    expect(trackedIgnored.eligibility).toBe('tracked');
-    expect(trackedIgnored.sensitive).toBe(false);
-    const link = candidateAt(candidates, 'link.txt');
-    expect(link.sourceKind).toBe('symlink');
-    expect(link.availability).toBe('available');
-    expect(link.size).toBe(Buffer.byteLength('tracked.txt'));
-    const dirLink = candidateAt(candidates, 'dir-link');
-    expect(dirLink.sourceKind).toBe('symlink');
-    expect(paths.filter(candidate => candidate.startsWith('nested/')).length).toBe(2);
-    const special = candidateAt(candidates, 'special.pipe');
-    expect(special.sourceKind).toBe('special');
-    expect(special.availability).toBe('unavailable');
-    expect(special.absenceReason).toBe('special-entry');
-    // Stable lossless byte order within one expansion.
-    expect([...paths]).toEqual(
-      paths.slice().sort((left, right) => Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))),
-    );
-  });
+      const candidates = await allCandidates(workspace, [{ kind: 'workspace-directory', pathBytesBase64: '' }]);
+      const paths = pathsOf(candidates);
+      expect(paths).toContain('.gitignore');
+      // Ignored untracked content is excluded by default; tracked content stays eligible.
+      expect(paths).toContain('ignored-as-tracked.txt');
+      expect(paths).not.toContain('ignored.txt');
+      expect(paths).not.toContain('ignored-dir/inside.txt');
+      expect(paths).toContain('tracked.txt');
+      expect(paths).toContain('untracked.txt');
+      expect(paths).toContain('nested/tracked-deep.txt');
+      expect(paths).toContain('nested/deep/untracked-deep.txt');
+      // Symlinks are candidates and were never dereferenced or followed.
+      expect(paths).toContain('link.txt');
+      expect(paths).toContain('dir-link');
+      expect(paths).toContain('escape-link');
+      expect(paths).not.toContain('outside-target.txt');
+      expect(paths).toContain('special.pipe');
+      const tracked = candidateAt(candidates, 'tracked.txt');
+      expect(tracked.eligibility).toBe('tracked');
+      expect(tracked.gitMode).toBe('100644');
+      expect(tracked.contentIdentity).toMatch(/^[0-9a-f]{40}$/);
+      expect(tracked.availability).toBe('available');
+      expect(tracked.size).toBe(8);
+      expect(tracked.sensitive).toBe(false);
+      const untracked = candidateAt(candidates, 'untracked.txt');
+      expect(untracked.eligibility).toBe('untracked');
+      expect(untracked.contentIdentity).toBeUndefined();
+      expect(untracked.size).toBe(10);
+      const trackedIgnored = candidateAt(candidates, 'ignored-as-tracked.txt');
+      expect(trackedIgnored.eligibility).toBe('tracked');
+      expect(trackedIgnored.sensitive).toBe(false);
+      const link = candidateAt(candidates, 'link.txt');
+      expect(link.sourceKind).toBe('symlink');
+      expect(link.availability).toBe('available');
+      expect(link.size).toBe(Buffer.byteLength('tracked.txt'));
+      const dirLink = candidateAt(candidates, 'dir-link');
+      expect(dirLink.sourceKind).toBe('symlink');
+      expect(paths.filter(candidate => candidate.startsWith('nested/')).length).toBe(2);
+      const special = candidateAt(candidates, 'special.pipe');
+      expect(special.sourceKind).toBe('special');
+      expect(special.availability).toBe('unavailable');
+      expect(special.absenceReason).toBe('special-entry');
+      // Stable lossless byte order within one expansion.
+      expect([...paths]).toEqual(
+        paths.slice().sort((left, right) => Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))),
+      );
+    },
+  );
 
   it('keeps additions, deletions, and windows exact across re-inspection', async () => {
     const { checkout } = await createCheckout();
@@ -243,7 +180,7 @@ describe('bounded Context Locator expansion over explicit selections', () => {
     expect(beyond.nextOffset).toBeNull();
   });
 
-  it('admits explicit ignored and outside-checkout selections as bounded sensitive sources', async () => {
+  itWithSymlinks('admits explicit ignored and outside-checkout selections as bounded sensitive sources', async () => {
     const { root, checkout } = await createCheckout();
     await writeFile(path.join(checkout, 'ignored.txt'), 'secret-ish\n');
     await mkdir(path.join(checkout, 'ignored-dir'), { recursive: true });
@@ -417,106 +354,109 @@ describe('immutable exact context capture', () => {
     expect(pathsOf(candidates)).not.toContain('loose-repository/inside.txt');
   });
 
-  it('captures byte-exact content with digests, raw symlink targets, and per-item degradation', async () => {
-    const { checkout } = await createCheckout();
-    await writeFile(path.join(checkout, 'text.txt'), 'exact text\n');
-    const binary = Buffer.from([0x00, 0xff, 0xfe, 0x07, 0x80]);
-    await writeFile(path.join(checkout, 'binary.bin'), binary);
-    await writeFile(path.join(checkout, 'target.txt'), 'target bytes\n');
-    await symlink('target.txt', path.join(checkout, 'link.txt'));
-    await writeFile(path.join(checkout, 'tracked.txt'), 'tracked\n');
-    await git(checkout, 'add', 'tracked.txt');
-    await git(checkout, 'commit', '-qm', 'tracked');
-    await rm(path.join(checkout, 'gone.txt'), { force: true });
-    const goneOid = (await git(checkout, 'hash-object', '-w', 'tracked.txt')).trim();
-    await git(checkout, 'update-index', '--add', '--cacheinfo', `100644,${goneOid},gone.txt`);
-    await git(checkout, 'update-index', '--skip-worktree', 'gone.txt');
-    const nestedOid = '0123456789012345678901234567890123456789';
-    await git(checkout, 'update-index', '--add', '--cacheinfo', `160000,${nestedOid},sub`);
-    await execFileAsync('mkfifo', [path.join(checkout, 'special.pipe')]);
-    const workspace = await openWorkspace(checkout);
+  itWithSymlinks(
+    'captures byte-exact content with digests, raw symlink targets, and per-item degradation',
+    async () => {
+      const { checkout } = await createCheckout();
+      await writeFile(path.join(checkout, 'text.txt'), 'exact text\n');
+      const binary = Buffer.from([0x00, 0xff, 0xfe, 0x07, 0x80]);
+      await writeFile(path.join(checkout, 'binary.bin'), binary);
+      await writeFile(path.join(checkout, 'target.txt'), 'target bytes\n');
+      await symlink('target.txt', path.join(checkout, 'link.txt'));
+      await writeFile(path.join(checkout, 'tracked.txt'), 'tracked\n');
+      await git(checkout, 'add', 'tracked.txt');
+      await git(checkout, 'commit', '-qm', 'tracked');
+      await rm(path.join(checkout, 'gone.txt'), { force: true });
+      const goneOid = (await git(checkout, 'hash-object', '-w', 'tracked.txt')).trim();
+      await git(checkout, 'update-index', '--add', '--cacheinfo', `100644,${goneOid},gone.txt`);
+      await git(checkout, 'update-index', '--skip-worktree', 'gone.txt');
+      const nestedOid = '0123456789012345678901234567890123456789';
+      await git(checkout, 'update-index', '--add', '--cacheinfo', `160000,${nestedOid},sub`);
+      await execFileAsync('mkfifo', [path.join(checkout, 'special.pipe')]);
+      const workspace = await openWorkspace(checkout);
 
-    const captured = await workspace.read({
-      kind: 'workspace.context.capture',
-      selections: [{ kind: 'workspace-directory', pathBytesBase64: '' }],
-    });
-    expect(captured.kind).toBe('workspace.context.capture');
-    expect(captured.status).toBe('ready');
-    if (captured.status !== 'ready') throw new Error('unreachable');
-    expect(captured.captureIdentity).toMatch(/^cctx_[0-9a-f-]{36}$/);
-    const itemAt = (relative: string): ContextSourceCaptureItem => {
-      const found = captured.items.find(
-        item =>
-          item.pathBytesBase64 !== undefined &&
-          Buffer.from(item.pathBytesBase64, 'base64').toString('utf8') === relative,
-      );
-      if (found === undefined) throw new Error(`Missing capture item: ${relative}`);
-      return found;
-    };
-    const text = itemAt('text.txt');
-    expect(text.status).toBe('captured');
-    expect(text.byteLength).toBe(11);
-    expect(text.contentDigest).toBe(createHash('sha256').update('exact text\n').digest('hex'));
-    const binaryItem = itemAt('binary.bin');
-    expect(binaryItem.status).toBe('captured');
-    expect(binaryItem.contentDigest).toBe(createHash('sha256').update(binary).digest('hex'));
-    const link = itemAt('link.txt');
-    expect(link.status).toBe('captured');
-    expect(link.byteLength).toBe(Buffer.byteLength('target.txt'));
-    expect(link.contentDigest).toBe(createHash('sha256').update('target.txt').digest('hex'));
-    const tracked = itemAt('tracked.txt');
-    expect(tracked.sourceIdentity).toMatch(/^[0-9a-f]{40}$/);
-    expect(itemAt('gone.txt')).toMatchObject({ status: 'unavailable', reason: 'skip-worktree' });
-    expect(itemAt('sub')).toMatchObject({ status: 'unavailable', reason: 'gitlink' });
-    expect(itemAt('special.pipe')).toMatchObject({ status: 'unavailable', reason: 'special-entry' });
-    expect(itemAt('.gitignore').status).toBe('captured');
+      const captured = await workspace.read({
+        kind: 'workspace.context.capture',
+        selections: [{ kind: 'workspace-directory', pathBytesBase64: '' }],
+      });
+      expect(captured.kind).toBe('workspace.context.capture');
+      expect(captured.status).toBe('ready');
+      if (captured.status !== 'ready') throw new Error('unreachable');
+      expect(captured.captureIdentity).toMatch(/^cctx_[0-9a-f-]{36}$/);
+      const itemAt = (relative: string): ContextSourceCaptureItem => {
+        const found = captured.items.find(
+          item =>
+            item.pathBytesBase64 !== undefined &&
+            Buffer.from(item.pathBytesBase64, 'base64').toString('utf8') === relative,
+        );
+        if (found === undefined) throw new Error(`Missing capture item: ${relative}`);
+        return found;
+      };
+      const text = itemAt('text.txt');
+      expect(text.status).toBe('captured');
+      expect(text.byteLength).toBe(11);
+      expect(text.contentDigest).toBe(createHash('sha256').update('exact text\n').digest('hex'));
+      const binaryItem = itemAt('binary.bin');
+      expect(binaryItem.status).toBe('captured');
+      expect(binaryItem.contentDigest).toBe(createHash('sha256').update(binary).digest('hex'));
+      const link = itemAt('link.txt');
+      expect(link.status).toBe('captured');
+      expect(link.byteLength).toBe(Buffer.byteLength('target.txt'));
+      expect(link.contentDigest).toBe(createHash('sha256').update('target.txt').digest('hex'));
+      const tracked = itemAt('tracked.txt');
+      expect(tracked.sourceIdentity).toMatch(/^[0-9a-f]{40}$/);
+      expect(itemAt('gone.txt')).toMatchObject({ status: 'unavailable', reason: 'skip-worktree' });
+      expect(itemAt('sub')).toMatchObject({ status: 'unavailable', reason: 'gitlink' });
+      expect(itemAt('special.pipe')).toMatchObject({ status: 'unavailable', reason: 'special-entry' });
+      expect(itemAt('.gitignore').status).toBe('captured');
 
-    const content = await workspace.read({
-      kind: 'workspace.context.content',
-      captureIdentity: captured.captureIdentity,
-      pathBytesBase64: Buffer.from('text.txt').toString('base64'),
-      offset: 6,
-      length: 4,
-    });
-    expect(content.status).toBe('available');
-    if (content.status !== 'available') throw new Error('unreachable');
-    expect(content.byteLength).toBe(4);
-    expect(content.totalByteLength).toBe(11);
-    expect(Buffer.from(content.bytesBase64, 'base64').toString('utf8')).toBe('text');
-
-    const range = await workspace.read({
-      kind: 'workspace.context.capture',
-      selections: [
-        {
-          kind: 'workspace-file',
-          pathBytesBase64: Buffer.from('text.txt').toString('base64'),
-          scope: { kind: 'bytes', offset: 6, length: 4 },
-        },
-      ],
-    });
-    expect(range.status).toBe('ready');
-    if (range.status !== 'ready') throw new Error('unreachable');
-    expect(range.items[0]).toMatchObject({ status: 'captured', byteLength: 4 });
-
-    await expect(
-      workspace.read({
-        kind: 'workspace.context.content',
-        captureIdentity: 'cctx_00000000-0000-0000-0000-000000000000',
-        pathBytesBase64: Buffer.from('text.txt').toString('base64'),
-        offset: 0,
-        length: 1,
-      }),
-    ).resolves.toMatchObject({ status: 'unavailable', reason: 'capture-not-retained' });
-    await expect(
-      workspace.read({
+      const content = await workspace.read({
         kind: 'workspace.context.content',
         captureIdentity: captured.captureIdentity,
-        pathBytesBase64: Buffer.from('absent.txt').toString('base64'),
-        offset: 0,
-        length: 1,
-      }),
-    ).resolves.toMatchObject({ status: 'unavailable', reason: 'candidate-not-captured' });
-  });
+        pathBytesBase64: Buffer.from('text.txt').toString('base64'),
+        offset: 6,
+        length: 4,
+      });
+      expect(content.status).toBe('available');
+      if (content.status !== 'available') throw new Error('unreachable');
+      expect(content.byteLength).toBe(4);
+      expect(content.totalByteLength).toBe(11);
+      expect(Buffer.from(content.bytesBase64, 'base64').toString('utf8')).toBe('text');
+
+      const range = await workspace.read({
+        kind: 'workspace.context.capture',
+        selections: [
+          {
+            kind: 'workspace-file',
+            pathBytesBase64: Buffer.from('text.txt').toString('base64'),
+            scope: { kind: 'bytes', offset: 6, length: 4 },
+          },
+        ],
+      });
+      expect(range.status).toBe('ready');
+      if (range.status !== 'ready') throw new Error('unreachable');
+      expect(range.items[0]).toMatchObject({ status: 'captured', byteLength: 4 });
+
+      await expect(
+        workspace.read({
+          kind: 'workspace.context.content',
+          captureIdentity: 'cctx_00000000-0000-0000-0000-000000000000',
+          pathBytesBase64: Buffer.from('text.txt').toString('base64'),
+          offset: 0,
+          length: 1,
+        }),
+      ).resolves.toMatchObject({ status: 'unavailable', reason: 'capture-not-retained' });
+      await expect(
+        workspace.read({
+          kind: 'workspace.context.content',
+          captureIdentity: captured.captureIdentity,
+          pathBytesBase64: Buffer.from('absent.txt').toString('base64'),
+          offset: 0,
+          length: 1,
+        }),
+      ).resolves.toMatchObject({ status: 'unavailable', reason: 'candidate-not-captured' });
+    },
+  );
 
   it('degrades oversized items per item and never rewrites a retained capture', async () => {
     const { checkout } = await createCheckout();
@@ -789,7 +729,8 @@ describe('overlap normalization without erasing provenance', () => {
 });
 
 describe('coherent context revalidation', () => {
-  it('derives exact per-item currency with bounded retry and fails closed on instability', async () => {
+  // Needs a FIFO or a Unix socket file, which Windows checkouts cannot hold.
+  itOnPosix('derives exact per-item currency with bounded retry and fails closed on instability', async () => {
     const { checkout } = await createCheckout();
     await writeFile(path.join(checkout, 'same-size.txt'), 'aaaa\\n');
     await writeFile(path.join(checkout, 'tracked.txt'), 'tracked\\n');
@@ -908,7 +849,7 @@ describe('coherent context revalidation', () => {
     ).resolves.toMatchObject({ kind: 'workspace.context.verify', status: 'unstable', reason: 'unstable-workspace' });
   });
 
-  it('blocks on unknown scope instead of publishing partial verdicts', async () => {
+  itOnPosix('blocks on unknown scope instead of publishing partial verdicts', async () => {
     const { checkout } = await createCheckout();
     await mkdir(path.join(checkout, 'sealed'), { recursive: true });
     await writeFile(path.join(checkout, 'open.txt'), 'open\\n');
@@ -946,7 +887,7 @@ describe('coherent context revalidation', () => {
 });
 
 describe('versioned context matrix and scale limits', () => {
-  it('proves every eligibility and degradation class with lossless special-path evidence', async () => {
+  itWithSymlinks('proves every eligibility and degradation class with lossless special-path evidence', async () => {
     const { checkout } = await createCheckout();
     await writeFile(path.join(checkout, 'Alpha.txt'), 'alpha one\n');
     await git(checkout, 'add', 'Alpha.txt');
