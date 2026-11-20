@@ -94,8 +94,18 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
   on `PATH` after Pi's installer. Notes in `docs/research/*-windows-wf313.md`.
 - Use PowerShell on Windows. Node 26.5.1 is the nvm default, and nvm sits
   ahead of Pi's Node 22 on the user `PATH`, so `node` is 26.5.1 in a new
-  terminal (Pi runs on it too). `pnpm build` and `pnpm test` do not run from
-  PowerShell yet (WF-306).
+  terminal (Pi runs on it too). `pnpm` must be pnpm's own
+  (`%LOCALAPPDATA%\pnpm\bin`): nvm's directory also holds a `pnpm.exe` that
+  fails with `CommandNotFound`.
+- Development on Windows (WF-306): every `pnpm` script runs from PowerShell
+  (`shellEmulator: true` in `pnpm-workspace.yaml`; `clean` is
+  `scripts/remove-dist.mjs`). `* text=auto eol=lf` in `.gitattributes` gives
+  LF checkouts; an older Windows clone renormalises once. Many tests still
+  meet the native-Windows refusal until WF-315; the Windows CI job reports
+  without gating. Tests that need symlinks or POSIX files use `itWithSymlinks`
+  and `itOnPosix` (`packages/workspace/test/platformCases.ts`). Never set
+  `NODE_OPTIONS=--experimental-ffi` in the shell: pnpm's executable refuses
+  it.
 
 ## Development environment
 

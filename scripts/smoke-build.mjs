@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -83,13 +84,13 @@ assert.deepEqual(
 await fs.access(new URL('../apps/buildframe/dist/runtimeProcess.js', import.meta.url));
 const executable = new URL('../apps/buildframe/dist/developerExecutable.js', import.meta.url);
 await fs.access(executable);
-const help = await execFileAsync(process.execPath, [executable.pathname, '--help']);
+const help = await execFileAsync(process.execPath, [fileURLToPath(executable), '--help']);
 assert.match(help.stdout, /Usage: buildframe \[--no-color\]/u);
 assert.match(
   help.stdout,
   /running\s+\/buildframe in a Pi, Claude Code or OpenCode session, or !buildframe in a\s+Codex session/u,
 );
-const versionRun = await execFileAsync(process.execPath, [executable.pathname, '--version']);
+const versionRun = await execFileAsync(process.execPath, [fileURLToPath(executable), '--version']);
 assert.equal(
   versionRun.stdout,
   `${JSON.parse(await fs.readFile(new URL('../apps/buildframe/package.json', import.meta.url), 'utf8')).version}\n`,

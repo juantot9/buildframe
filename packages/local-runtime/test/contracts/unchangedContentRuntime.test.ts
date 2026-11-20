@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -30,14 +31,17 @@ afterEach(async () => {
 });
 
 it('pages a large unchanged file through real IPC and leaves the same client usable', async () => {
-  // A short root keeps the owner-private Unix socket inside the disposable fixture.
-  root = await mkdtemp('/tmp/buildframe-content-runtime-');
+  // A short root keeps the owner-private Unix socket inside the disposable
+  // fixture. Windows has no /tmp and uses a named pipe, not a socket path.
+  const windows = process.platform === 'win32';
+  root = await mkdtemp(path.join(windows ? os.tmpdir() : '/tmp', 'buildframe-content-runtime-'));
   const checkout = path.join(root, 'checkout');
   await mkdir(checkout);
   process.env.XDG_STATE_HOME = path.join(root, 'state');
   process.env.XDG_RUNTIME_DIR = path.join(root, 'runtime');
   await mkdir(process.env.XDG_RUNTIME_DIR, { mode: 0o700 });
-  const git = async (...args: string[]) => await execFileAsync('/usr/bin/git', ['-C', checkout, ...args]);
+  const git = async (...args: string[]) =>
+    await execFileAsync(windows ? 'git' : '/usr/bin/git', ['-C', checkout, ...args]);
   await git('init', '-q');
   await git('config', 'user.name', 'BuildFrame Test');
   await git('config', 'user.email', 'buildframe@example.invalid');

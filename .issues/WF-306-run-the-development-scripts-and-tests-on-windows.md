@@ -1,11 +1,11 @@
 ---
 id: WF-306
 title: "Run the development scripts and tests on Windows"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-304
-assignee: null
+assignee: juanan
 blocked_by: []
 created: 2026-11-19
 ---
@@ -82,3 +82,78 @@ created: 2026-11-19
   Bash.
 - No test leaves directories in `%TEMP%`.
 - The Windows CI job runs and reports; the macOS and Linux jobs are unchanged.
+
+## Resolution and evidence (2026-11-20)
+
+- **Scripts run from PowerShell.** `shellEmulator: true` in
+  `pnpm-workspace.yaml` (pnpm 11 reads its settings there, not from
+  `.npmrc`) runs `NAME=value command` and `&&` the same way under `cmd.exe`.
+  Each package's `clean` is now `node ../../scripts/remove-dist.mjs`. From
+  plain PowerShell: `pnpm lint`, `format:check`, `check:dependencies`,
+  `typecheck`, `build`, `test:fast` and `test` all start, and `smoke:build`
+  runs. `smoke-build.mjs` and `check-dependencies.mjs` turned file URLs into
+  paths with `.pathname` (`/C:/…`); both use `fileURLToPath` now.
+  `smoke-claude-direct.mjs` stops at the native-Windows refusal and passes
+  with it patched out locally.
+- **pnpm's own executable refuses `NODE_OPTIONS=--experimental-ffi`.** The
+  scripts set it only for vitest. Do not export it in a shell where you run
+  `pnpm`.
+- **LF everywhere.** `.gitattributes` starts with `* text=auto eol=lf`; the
+  fixture rule stays `-text`. The index was already LF, so the commit changes
+  no file contents. This clone was renormalised in place (CRLF working files
+  rewritten to LF). An older Windows clone needs `git rm --cached -r . && git
+  reset --hard` on a clean tree, or a fresh clone. `pnpm format:check` passes.
+- **Tests.** Full suite on Windows, refusal patched out locally:
+  - At the start: 597 pass, 61 fail, 13 skipped of 671.
+  - Now, from Git Bash: 643 pass, 2 fail, 26 skipped.
+  - From PowerShell the last full run was 642/6/23. The four failures fixed
+    after it pass in targeted runs.
+  - The two failures left:
+    - "rejects native Windows", which only fails because the refusal is
+      patched out.
+    - A TUI ordering bug, handed to WF-314. At a past step on a slow
+      machine, `a` says "Still loading … press a again" instead of "Press
+      Esc to come back to now first."
+  - **`EBUSY` at teardown:** teardown order was already right (apps and
+    owners close first). Removal now retries briefly (`maxRetries: 10`) in
+    `reviewingApplication.test.ts`, `workspaceProjectionScenarios.ts` and
+    `workspaceReviewingScenarios.ts`.
+  - **Leak, every platform:** the reviewing fixture's directory was removed
+    only if the test opened it; now it is registered when created. No
+    `buildframe-*`/`neoflow-*` directory is left in `%TEMP%`. The empty
+    `<guid>.tmp` files there are not the suite's: they appear outside test
+    runs too.
+  - **Symlinks:** directory links in tests are junctions (checkout alias,
+    legacy locators, moved receipts). Cases that need a real symlink use
+    `itWithSymlinks` from `packages/workspace/test/platformCases.ts`, which
+    probes once and skips without Developer Mode.
+  - **POSIX-only cases** use `itOnPosix`: a FIFO, a Unix socket file,
+    `chmod 000`, the executable bit, `"` in a file name. POSIX mode
+    assertions are skipped on Windows, where access lists keep files private
+    (WF-309 tests that).
+  - **Git config paths are written with `/`:** the operator clean-filter,
+    fsmonitor and include tests. `unchangedContentRuntime.test.ts` uses
+    `os.tmpdir()` and `git` on Windows (still `/tmp` and `/usr/bin/git`
+    elsewhere). Legacy state-directory expectations use
+    `path.resolve`/`path.join`.
+- **Size budget.** Test files at or over the budget would have grown, so
+  each gave something up at a seam:
+  - Git-configuration identity tests → `workspaceIdentityGitConfig.test.ts`.
+  - Operator clean-filter evidence tests →
+    `workspaceEvidenceOperatorFilters.test.ts`.
+  - Legacy source helpers and locator test → `legacyReviewSourceScenarios.ts`
+    and `legacyReviewSourceLocators.test.ts`.
+  - The legacy state-directory rule → `test/fast/legacyReviewStateDirectory.test.ts`.
+  - Context-evidence manifest helpers → `workspaceContextEvidenceScenarios.ts`
+    (its `gitWithInput` copy uses the shared one).
+  - Revalidation fixture → `workspaceReviewContextRevalidationFixture.ts`.
+  - Receipt documents → `legacyReviewMovedReceiptDocuments.ts`.
+  - Renderable-tree helpers → `apps/buildframe/test/scenarios/renderableTree.ts`.
+- **CI.** `verify.yml` has a `verify-windows` job: windows-latest, Node
+  26.13.1, PowerShell, each step reported, `continue-on-error`. The macOS and
+  Linux matrix is unchanged. **Not yet run**: the workflow runs on pushes to
+  `main`, on pull requests and by hand, and `gh` isn't installed here.
+- **Not done here:** the hung-Git deadline test still skips on Windows (its
+  stand-in Git is a shell script); moved to WF-315. Without the refusal
+  patch, Windows tests that open a Workspace meet the refusal (e.g. 4 doctor
+  tests in `test:fast`) until WF-315.

@@ -147,7 +147,8 @@ export function installWorkspaceProjectionHygiene(): void {
     owners.clear();
     if (originalStateHome === undefined) delete process.env.XDG_STATE_HOME;
     else process.env.XDG_STATE_HOME = originalStateHome;
-    await Promise.all([...roots].map(async root => rm(root, { recursive: true, force: true })));
+    // Windows keeps a directory busy for a moment after the processes in it exit.
+    await Promise.all([...roots].map(async root => rm(root, { recursive: true, force: true, maxRetries: 10 })));
     roots.clear();
   });
 }

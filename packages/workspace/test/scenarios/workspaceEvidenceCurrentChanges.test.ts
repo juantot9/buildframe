@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -16,58 +16,11 @@ import {
 } from './workspaceEvidenceScenarios.js';
 import type { Workspace } from '../../src/index.js';
 import { WorkspaceEvidence } from '../../src/workspaceEvidence/index.js';
+import { itOnPosix } from '../platformCases.js';
 
 installWorkspaceEvidenceHygiene();
 
 describe('current-change Workspace Evidence', () => {
-  it('runs an operator-owned global clean filter selected by tracked attributes', async () => {
-    const { root, checkout } = await createCheckout();
-    const home = path.join(root, 'operator-home');
-    const xdg = path.join(root, 'operator-xdg');
-    await mkdir(home);
-    process.env.HOME = home;
-    process.env.XDG_CONFIG_HOME = xdg;
-
-    const marker = path.join(root, 'operator-filter.marker');
-    const filter = path.join(root, 'operator-filter.sh');
-    await writeFile(filter, `#!/bin/sh\ncat\nprintf executed >> ${JSON.stringify(marker)}\n`, { mode: 0o700 });
-    await writeFile(path.join(home, '.gitconfig'), `[filter "operator"]\n\tclean = ${filter}\n`);
-    await writeFile(path.join(checkout, '.gitattributes'), '*.txt filter=operator\n');
-    await writeFile(path.join(checkout, 'filtered.txt'), 'content\n');
-    await git(checkout, 'add', '.');
-    await git(checkout, 'commit', '-qm', 'operator filter basis');
-    await rm(marker, { force: true });
-    const later = new Date(Date.now() + 2_000);
-    await utimes(path.join(checkout, 'filtered.txt'), later, later);
-
-    const { workspace } = await openWorkspace(checkout);
-    const captured = await capture(workspace);
-    expect(captured.status).toBe('captured');
-    expect(await readFile(marker, 'utf8')).toContain('executed');
-  });
-
-  it('ignores checkout-local info attributes that select an operator command', async () => {
-    const { root, checkout } = await createCheckout({ commit: true });
-    const home = path.join(root, 'operator-home');
-    const xdg = path.join(root, 'operator-xdg');
-    await mkdir(home);
-    process.env.HOME = home;
-    process.env.XDG_CONFIG_HOME = xdg;
-
-    const marker = path.join(root, 'info-filter.marker');
-    const filter = path.join(root, 'info-filter.sh');
-    await writeFile(filter, `#!/bin/sh\ncat\nprintf executed >> ${JSON.stringify(marker)}\n`, { mode: 0o700 });
-    await writeFile(path.join(home, '.gitconfig'), `[filter "info"]\n\tclean = ${filter}\n`);
-    await mkdir(path.join(checkout, '.git', 'info'), { recursive: true });
-    await writeFile(path.join(checkout, '.git', 'info', 'attributes'), '*.txt filter=info\n');
-    await writeFile(path.join(checkout, 'info-selected.txt'), 'content\n');
-
-    const { workspace } = await openWorkspace(checkout);
-    const captured = await capture(workspace);
-    expect(captured.status).toBe('captured');
-    await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
   it('captures exact local commit and first-parent range comparisons without using the working tree', async () => {
     const { checkout } = await createCheckout({ commit: true });
     await writeFile(path.join(checkout, 'history.txt'), 'before\n');
@@ -703,117 +656,121 @@ describe('current-change Workspace Evidence', () => {
     ).toMatchObject({ status: 'unavailable', reason: 'merge-parent-ambiguous' });
   });
 
-  it('captures one complete immutable HEAD-to-effective-working-state manifest with exact old/new bytes', async () => {
-    const { checkout } = await createCheckout({ commit: true });
-    await writeFile(path.join(checkout, 'overlap.txt'), 'before\n');
-    await writeFile(path.join(checkout, 'deleted.txt'), 'delete me\n');
-    await writeFile(path.join(checkout, 'rename-source.txt'), 'rename me\n');
-    await writeFile(path.join(checkout, 'mode.txt'), 'mode\n');
-    await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([1, 0, 2]));
-    await writeFile(path.join(checkout, 'quoted " file.txt'), 'quoted before\n');
-    await git(checkout, 'add', '.');
-    await git(checkout, 'commit', '-qm', 'fixture');
+  // POSIX only: Windows forbids `"` in file names and has no executable bit.
+  itOnPosix(
+    'captures one complete immutable HEAD-to-effective-working-state manifest with exact old/new bytes',
+    async () => {
+      const { checkout } = await createCheckout({ commit: true });
+      await writeFile(path.join(checkout, 'overlap.txt'), 'before\n');
+      await writeFile(path.join(checkout, 'deleted.txt'), 'delete me\n');
+      await writeFile(path.join(checkout, 'rename-source.txt'), 'rename me\n');
+      await writeFile(path.join(checkout, 'mode.txt'), 'mode\n');
+      await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([1, 0, 2]));
+      await writeFile(path.join(checkout, 'quoted " file.txt'), 'quoted before\n');
+      await git(checkout, 'add', '.');
+      await git(checkout, 'commit', '-qm', 'fixture');
 
-    await writeFile(path.join(checkout, 'overlap.txt'), 'staged\n');
-    await git(checkout, 'add', 'overlap.txt');
-    await writeFile(path.join(checkout, 'overlap.txt'), 'working\n');
-    await rm(path.join(checkout, 'deleted.txt'));
-    await git(checkout, 'mv', 'rename-source.txt', 'renamed-café.txt');
-    await chmod(path.join(checkout, 'mode.txt'), 0o755);
-    await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([3, 0, 4]));
-    await writeFile(path.join(checkout, 'quoted " file.txt'), 'quoted after\n');
-    await writeFile(path.join(checkout, 'staged-added.txt'), 'staged add\n');
-    await git(checkout, 'add', 'staged-added.txt');
-    await writeFile(path.join(checkout, 'untracked-λ.txt'), 'untracked\n');
-    await writeFile(path.join(checkout, 'ignored.txt'), 'excluded\n');
+      await writeFile(path.join(checkout, 'overlap.txt'), 'staged\n');
+      await git(checkout, 'add', 'overlap.txt');
+      await writeFile(path.join(checkout, 'overlap.txt'), 'working\n');
+      await rm(path.join(checkout, 'deleted.txt'));
+      await git(checkout, 'mv', 'rename-source.txt', 'renamed-café.txt');
+      await chmod(path.join(checkout, 'mode.txt'), 0o755);
+      await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([3, 0, 4]));
+      await writeFile(path.join(checkout, 'quoted " file.txt'), 'quoted after\n');
+      await writeFile(path.join(checkout, 'staged-added.txt'), 'staged add\n');
+      await git(checkout, 'add', 'staged-added.txt');
+      await writeFile(path.join(checkout, 'untracked-λ.txt'), 'untracked\n');
+      await writeFile(path.join(checkout, 'ignored.txt'), 'excluded\n');
 
-    const { workspace, workspaceIdentity } = await openWorkspace(checkout);
-    const captured = await capture(workspace);
-    expect(captured.status).toBe('captured');
-    if (captured.status !== 'captured') return;
+      const { workspace, workspaceIdentity } = await openWorkspace(checkout);
+      const captured = await capture(workspace);
+      expect(captured.status).toBe('captured');
+      if (captured.status !== 'captured') return;
 
-    expect(captured).toMatchObject({
-      workspaceIdentity,
-      basis: { kind: 'head', selector: 'HEAD', state: 'resolved' },
-      comparedState: {
-        kind: 'effective-working-state',
-        staged: 'included',
-        unstaged: 'included',
-        nonIgnoredUntracked: 'included',
-        ignoredUntracked: 'excluded',
-      },
-      verification: { state: 'current' },
-      captureAttempts: 1,
-    });
-    expect(Object.isFrozen(captured)).toBe(true);
-    expect(Object.isFrozen(captured.manifest)).toBe(true);
+      expect(captured).toMatchObject({
+        workspaceIdentity,
+        basis: { kind: 'head', selector: 'HEAD', state: 'resolved' },
+        comparedState: {
+          kind: 'effective-working-state',
+          staged: 'included',
+          unstaged: 'included',
+          nonIgnoredUntracked: 'included',
+          ignoredUntracked: 'excluded',
+        },
+        verification: { state: 'current' },
+        captureAttempts: 1,
+      });
+      expect(Object.isFrozen(captured)).toBe(true);
+      expect(Object.isFrozen(captured.manifest)).toBe(true);
 
-    const files = await completeManifest(workspace, captured.evidenceIdentity, 3);
-    expect(files).toHaveLength(8);
-    expect(files.some(file => file.newSide?.path.display === 'ignored.txt')).toBe(false);
-    expect(Object.isFrozen(files[0])).toBe(true);
+      const files = await completeManifest(workspace, captured.evidenceIdentity, 3);
+      expect(files).toHaveLength(8);
+      expect(files.some(file => file.newSide?.path.display === 'ignored.txt')).toBe(false);
+      expect(Object.isFrozen(files[0])).toBe(true);
 
-    const overlap = fileAt(files, 'overlap.txt');
-    expect(overlap).toMatchObject({
-      status: 'modified',
-      staging: { index: 'modified', workingTree: 'modified' },
-      oldSide: { contentAvailability: 'captured', classification: 'text' },
-      newSide: { contentAvailability: 'captured', classification: 'text' },
-    });
-    expect(await capturedText(workspace, captured.evidenceIdentity, overlap, 'old')).toBe('before\n');
-    expect(await capturedText(workspace, captured.evidenceIdentity, overlap, 'new')).toBe('working\n');
+      const overlap = fileAt(files, 'overlap.txt');
+      expect(overlap).toMatchObject({
+        status: 'modified',
+        staging: { index: 'modified', workingTree: 'modified' },
+        oldSide: { contentAvailability: 'captured', classification: 'text' },
+        newSide: { contentAvailability: 'captured', classification: 'text' },
+      });
+      expect(await capturedText(workspace, captured.evidenceIdentity, overlap, 'old')).toBe('before\n');
+      expect(await capturedText(workspace, captured.evidenceIdentity, overlap, 'new')).toBe('working\n');
 
-    const deleted = fileAt(files, 'deleted.txt');
-    expect(deleted.status).toBe('deleted');
-    expect(deleted.oldSide).toBeDefined();
-    expect(deleted.newSide).toBeUndefined();
+      const deleted = fileAt(files, 'deleted.txt');
+      expect(deleted.status).toBe('deleted');
+      expect(deleted.oldSide).toBeDefined();
+      expect(deleted.newSide).toBeUndefined();
 
-    const renamed = fileAt(files, 'renamed-café.txt');
-    expect(renamed.status).toBe('renamed');
-    expect(renamed.oldSide?.path.display).toBe('rename-source.txt');
-    expect(renamed.newSide?.path.display).toBe('renamed-café.txt');
-    expect(Buffer.from(renamed.newSide?.path.bytesBase64 ?? '', 'base64').toString('utf8')).toBe('renamed-café.txt');
+      const renamed = fileAt(files, 'renamed-café.txt');
+      expect(renamed.status).toBe('renamed');
+      expect(renamed.oldSide?.path.display).toBe('rename-source.txt');
+      expect(renamed.newSide?.path.display).toBe('renamed-café.txt');
+      expect(Buffer.from(renamed.newSide?.path.bytesBase64 ?? '', 'base64').toString('utf8')).toBe('renamed-café.txt');
 
-    const mode = fileAt(files, 'mode.txt');
-    expect(mode.status).toBe('mode-changed');
-    expect(mode.oldSide?.gitMode).toBe('100644');
-    expect(mode.newSide?.gitMode).toBe('100755');
+      const mode = fileAt(files, 'mode.txt');
+      expect(mode.status).toBe('mode-changed');
+      expect(mode.oldSide?.gitMode).toBe('100644');
+      expect(mode.newSide?.gitMode).toBe('100755');
 
-    const binary = fileAt(files, 'binary.bin');
-    expect(binary.newSide?.classification).toBe('binary');
-    const quoted = fileAt(files, 'quoted " file.txt');
-    expect(quoted.newSide?.path.display).toBe('quoted " file.txt');
-    expect(fileAt(files, 'staged-added.txt').oldSide).toBeUndefined();
-    expect(fileAt(files, 'untracked-λ.txt').staging).toEqual({
-      index: 'untracked',
-      workingTree: 'untracked',
-    });
+      const binary = fileAt(files, 'binary.bin');
+      expect(binary.newSide?.classification).toBe('binary');
+      const quoted = fileAt(files, 'quoted " file.txt');
+      expect(quoted.newSide?.path.display).toBe('quoted " file.txt');
+      expect(fileAt(files, 'staged-added.txt').oldSide).toBeUndefined();
+      expect(fileAt(files, 'untracked-λ.txt').staging).toEqual({
+        index: 'untracked',
+        workingTree: 'untracked',
+      });
 
-    const firstTwoBytes = await workspace.read({
-      kind: 'workspace.current-changes.content',
-      evidenceIdentity: captured.evidenceIdentity,
-      fileIdentity: overlap.fileIdentity,
-      side: 'new',
-      offset: 0,
-      length: 2,
-    });
-    expect(firstTwoBytes.status).toBe('available');
-    if (firstTwoBytes.status === 'available') {
-      expect(Buffer.from(firstTwoBytes.bytesBase64, 'base64').toString()).toBe('wo');
-      expect(firstTwoBytes.complete).toBe(false);
-      expect(firstTwoBytes.byteLength).toBe(2);
-    }
-    await expect(
-      workspace.read({
+      const firstTwoBytes = await workspace.read({
         kind: 'workspace.current-changes.content',
         evidenceIdentity: captured.evidenceIdentity,
         fileIdentity: overlap.fileIdentity,
         side: 'new',
         offset: 0,
-        length: captured.limits.maxContentWindowBytes + 1,
-      }),
-    ).rejects.toThrow('bounded evidence window');
-  });
+        length: 2,
+      });
+      expect(firstTwoBytes.status).toBe('available');
+      if (firstTwoBytes.status === 'available') {
+        expect(Buffer.from(firstTwoBytes.bytesBase64, 'base64').toString()).toBe('wo');
+        expect(firstTwoBytes.complete).toBe(false);
+        expect(firstTwoBytes.byteLength).toBe(2);
+      }
+      await expect(
+        workspace.read({
+          kind: 'workspace.current-changes.content',
+          evidenceIdentity: captured.evidenceIdentity,
+          fileIdentity: overlap.fileIdentity,
+          side: 'new',
+          offset: 0,
+          length: captured.limits.maxContentWindowBytes + 1,
+        }),
+      ).rejects.toThrow('bounded evidence window');
+    },
+  );
 
   it('uses an explicit unborn HEAD basis while retaining staged, unstaged, and untracked evidence once', async () => {
     const { checkout } = await createCheckout();

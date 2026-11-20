@@ -39,7 +39,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "clean": "rm -rf dist",
+    "clean": "node ../../scripts/remove-dist.mjs",
     "build": "pnpm run clean && tsc -p tsconfig.json"
   },
   "dependencies": {

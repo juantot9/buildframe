@@ -98,6 +98,10 @@ close until WF-288 is closed.
   Claude Code, Pi and OpenCode all reach the runtime on Windows (Node 26,
   Pi's Node 22, OpenCode's Bun); doctor now sees hosts installed as `.cmd`
   shims; live round trips move to WF-315.
+- [Run the development scripts and tests on Windows](./WF-306-run-the-development-scripts-and-tests-on-windows.md):
+  pnpm's shell emulator runs every script from PowerShell; LF checkouts via
+  `* text=auto eol=lf`; tests skip by stated reason where Windows lacks
+  symlinks or POSIX files; a non-blocking `windows-latest` CI job.
 
 ## Collision rules
 

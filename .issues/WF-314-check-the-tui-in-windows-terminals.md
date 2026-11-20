@@ -42,3 +42,13 @@ Note: the probe showed OpenTUI guessing the terminal from an inherited
 
 A findings note in `docs/research/` with a terminal × check table, and a
 ticket for each binding or behaviour that needs a change.
+
+## From WF-306 (2026-11-20)
+
+- At a past step, `a` (and the other keys blocked there) answers "Still
+  loading (Loading Diff rows); press a again in a moment." while the Diff
+  rows load, instead of "Press Esc to come back to now first.": the loading
+  notice is checked first. On Windows the rows load slowly enough that
+  `reviewingApplication.test.ts` "says whether the agent changed code while
+  answering" fails every run. At a past step the key can never act, so the
+  Esc notice should win (`apps/buildframe/src/reviewingActions.ts`).

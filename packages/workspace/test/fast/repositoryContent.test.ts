@@ -5,6 +5,7 @@ import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { readRepositoryContentWindow } from '../../src/workspaceEvidence/repositoryContent.js';
+import { itWithSymlinks } from '../platformCases.js';
 
 let root: string;
 beforeEach(async () => {
@@ -97,16 +98,22 @@ describe('bounded repository content windows', () => {
     if (view.status === 'available') expect(view.byteLength).toBeLessThanOrEqual(256 * 1024);
   });
 
-  it('refuses files above the scan budget, directories, missing files and symlinks', async () => {
+  it('refuses files above the scan budget, directories and missing files', async () => {
     await expect(read('x'.repeat(2 * 1024 * 1024 + 1))).resolves.toEqual({ status: 'too-large' });
-    const source = path.join(root, 'target.txt');
-    await writeFile(source, 'target');
-    const link = path.join(root, 'link.txt');
-    await symlink(source, link);
-    for (const filename of [root, link, path.join(root, 'absent')]) {
+    for (const filename of [root, path.join(root, 'absent')]) {
       await expect(readRepositoryContentWindow(Buffer.from(filename), 1024, 1024)).resolves.toEqual({
         status: 'unavailable',
       });
     }
+  });
+
+  itWithSymlinks('refuses symlinks', async () => {
+    const source = path.join(root, 'target.txt');
+    await writeFile(source, 'target');
+    const link = path.join(root, 'link.txt');
+    await symlink(source, link);
+    await expect(readRepositoryContentWindow(Buffer.from(link), 1024, 1024)).resolves.toEqual({
+      status: 'unavailable',
+    });
   });
 });
