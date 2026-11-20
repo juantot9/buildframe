@@ -28,6 +28,10 @@ Both are how people paste in a Windows console, so a Windows user cannot
 paste a Message at all. In WezTerm, pasting works: the terminal sends a
 bracketed paste.
 
+Blocks [WF-315](./WF-315-lift-the-native-windows-refusal-and-prove-windows-end-to-end.md)
+(owner decision, 2026-11-20): Windows support does not ship until a Windows
+user can paste.
+
 ## Direction
 
 In a text input (composer, searches, filters, the comparison picker's

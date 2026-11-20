@@ -6,7 +6,7 @@ labels:
   - wayfinder:task
 parent: WF-304
 assignee: null
-blocked_by: [WF-305, WF-306, WF-307, WF-308, WF-309, WF-310, WF-311, WF-312, WF-313, WF-314]
+blocked_by: [WF-305, WF-306, WF-307, WF-308, WF-309, WF-310, WF-311, WF-312, WF-313, WF-314, WF-320]
 created: 2026-11-19
 ---
 
@@ -27,6 +27,8 @@ BuildFrame claims native Windows support, and the `windows` branch merges into
 - [Package BuildFrame and start the Claude helper on Windows](./WF-312-package-buildframe-and-start-the-claude-helper-on-windows.md)
 - [Can each agent connect from Windows?](./WF-313-can-each-agent-connect-from-windows.md)
 - [Check the TUI in Windows terminals](./WF-314-check-the-tui-in-windows-terminals.md)
+- [Ctrl+V and right-click do not paste in conhost](./WF-320-paste-on-windows-consoles.md)
+  (owner decision, 2026-11-20: a Windows user must be able to paste a Message)
 
 Also requires
 [A one-line edit in a CRLF-checked-out file shows the whole file rewritten](./WF-288-crlf-files-diff-as-rewritten.md)
