@@ -92,7 +92,7 @@ export class CodexAppServerClient {
         socket.off('data', onData);
         socket.off('error', reject);
         const head = received.subarray(0, end).toString('latin1');
-        if (!/^HTTP\/1\.1 101/u.test(head) || !head.toLowerCase().includes(accept.toLowerCase())) {
+        if (!head.startsWith('HTTP/1.1 101') || !head.toLowerCase().includes(accept.toLowerCase())) {
           socket.destroy();
           reject(new CodexConnectionLost('Codex refused the WebSocket upgrade'));
           return;
