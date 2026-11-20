@@ -56,6 +56,13 @@ async function run(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  // Inside Codex, `!buildframe` connects that session instead of opening the app.
+  if (process.argv[2] === '--codex-helper' || process.env.CODEX_THREAD_ID !== undefined) {
+    const codex = await import('@buildframe/codex-adapter-source/helper');
+    if (process.argv[2] === codex.CODEX_HELPER_ARGUMENT) await codex.runCodexHelper();
+    else await codex.runCodexCommand(process.argv.slice(2), process.env, fileURLToPath(import.meta.url));
+    return;
+  }
   if (!experimentalFfiEnabled()) {
     await reexecuteWithFfi();
     return;

@@ -39,6 +39,7 @@
     "dogfood": "node dist/developerExecutable.js"
   },
   "dependencies": {
+    "@buildframe/codex-adapter-source": "workspace:*",
     "@buildframe/local-runtime": "workspace:*",
     "@buildframe/workspace": "workspace:*",
     "@opentui/core": "0.9.1",

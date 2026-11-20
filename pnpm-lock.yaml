@@ -35,6 +35,9 @@ importers:
 
   apps/buildframe:
     dependencies:
+      '@buildframe/codex-adapter-source':
+        specifier: workspace:*
+        version: link:../../packages/codex-adapter
       '@buildframe/local-runtime':
         specifier: workspace:*
         version: link:../../packages/local-runtime

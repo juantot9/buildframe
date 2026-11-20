@@ -16,6 +16,14 @@
       },
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./helper": {
+      "development": {
+        "types": "./src/helper.ts",
+        "import": "./src/helper.ts"
+      },
+      "types": "./dist/helper.d.ts",
+      "import": "./dist/helper.js"
     }
   },
   "files": [

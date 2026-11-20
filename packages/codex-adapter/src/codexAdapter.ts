@@ -200,6 +200,9 @@ export class CodexReviewedAdapter implements ReviewedHarnessAdapter {
 
   /** The connection to Codex dropped: whatever was in flight can no longer be followed. */
   async connectionLost(): Promise<void> {
+    // Nothing can be sent until Codex is reachable again.
+    this.#idle = false;
+    this.#announced.clear();
     const own = this.#own;
     if (own === undefined) return;
     if (!own.taken) await this.#fact({ type: 'own-input-unknown' });
@@ -209,6 +212,11 @@ export class CodexReviewedAdapter implements ReviewedHarnessAdapter {
         outcome: 'unknown',
         ...(own.turnId === undefined ? {} : { turnId: own.turnId }),
       });
+  }
+
+  /** Codex is reachable again, after a server restart; its turns before this are over for BuildFrame. */
+  connectionRestored(idle: boolean): void {
+    this.#idle = idle;
   }
 
   async runtimeConnected(runtimeGeneration: string): Promise<void> {

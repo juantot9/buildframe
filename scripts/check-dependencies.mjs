@@ -113,7 +113,12 @@ const v1Packages = [
   },
   {
     directory: path.join(repoRoot, 'apps/buildframe'),
-    allowedV1Dependencies: new Set(['@buildframe/local-runtime', '@buildframe/workspace']),
+    // The app hosts the Codex connector's helper: Codex runs `buildframe` itself.
+    allowedV1Dependencies: new Set([
+      '@buildframe/codex-adapter-source',
+      '@buildframe/local-runtime',
+      '@buildframe/workspace',
+    ]),
     allowedExternalDependencies: externalDependencyPolicy({
       production: [OPENTUI_PACKAGE, ...REVIEWING_PARSER_PACKAGES],
       test: [OPENTUI_PACKAGE, TEST_RUNNER_PACKAGE],
