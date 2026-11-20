@@ -239,7 +239,7 @@ const REVIEW_KEYS: readonly KeyAction<M, E>[] = [
 /**
  * Every key Reviewing acts on once the shell has passed it on, in the order
  * that decides which meaning wins: the commit picker's keys, movement (which
- * keeps working while a Review loads), Home, the loading and past-step
+ * keeps working while a Review loads), Home, the past-step and loading
  * guards, then the Review's own keys.
  */
 const REVIEWING_ACTIONS: readonly KeyAction<M, E>[] = [
@@ -265,19 +265,8 @@ const REVIEWING_ACTIONS: readonly KeyAction<M, E>[] = [
     run: (model, input, now) => model.handleHomeAction(input, now),
   },
   { actsFor: [], match: () => true, when: model => !review(model), run: () => [] },
-  // While the Review loads, a key that acts on what is loading (write, copy,
-  // switch, send, interrupt) would act on the wrong thing or on nothing. Say
-  // so instead of running it; movement above keeps working.
-  {
-    actsFor: [],
-    match: onText(...ACTS_ON_LOADED_REVIEW),
-    when: model => model.state.loading !== undefined,
-    run: (model, input) => {
-      model.sayStillLoading(input.text!);
-      return [];
-    },
-  },
-  { actsFor: ['copy'], match: onText('y'), run: model => model.copyFocusedContent() },
+  // At a past step these keys can never act, loaded or not, so Esc is the
+  // answer even while rows load.
   {
     actsFor: [],
     match: onKey(Key.enter),
@@ -299,6 +288,19 @@ const REVIEWING_ACTIONS: readonly KeyAction<M, E>[] = [
     when: model => pastStep(model) && model.state.focus === 'files',
     run: say('Press Esc to come back to now first.'),
   },
+  // While the Review loads, a key that acts on what is loading (write, copy,
+  // switch, send, interrupt) would act on the wrong thing or on nothing. Say
+  // so instead of running it; movement above keeps working.
+  {
+    actsFor: [],
+    match: onText(...ACTS_ON_LOADED_REVIEW),
+    when: model => model.state.loading !== undefined,
+    run: (model, input) => {
+      model.sayStillLoading(input.text!);
+      return [];
+    },
+  },
+  { actsFor: ['copy'], match: onText('y'), run: model => model.copyFocusedContent() },
   ...REVIEW_KEYS,
 ];
 
