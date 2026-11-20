@@ -59,3 +59,11 @@ check and a dependency-free Node WebSocket client all hold. Changes to the plan:
 - `!buildframe`'s command and output enter the model's context (decision
   revisited below).
 - Quitting the TUI sends no signal; Codex keeps the session as a task.
+
+Owner decisions (2026-11-20, after the experiments):
+
+- **Keep `!buildframe`**, printing one line, since its output reaches the
+  model's context.
+- **Admit a range, checked live:** any Codex from 0.170.0 up within 0.x; on
+  every connect, check the queue methods behave as verified and refuse if not.
+  Doctor flags untested versions. (Replaces "verified versions only".)
