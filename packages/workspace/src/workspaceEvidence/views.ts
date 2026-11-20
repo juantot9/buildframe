@@ -152,6 +152,9 @@ function publicSide(side: SideDraft): CurrentChangeSide {
     ...(side.workingEvidenceLimitation === undefined
       ? {}
       : { workingEvidenceLimitation: side.workingEvidenceLimitation }),
+    ...(side.lineEndingRule === undefined || side.containsCrlf !== true
+      ? {}
+      : { lineEndingConversion: side.lineEndingRule }),
   });
 }
 

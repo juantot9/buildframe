@@ -12,6 +12,17 @@ import type {
 } from '../contextEvidence.js';
 import { deepFreeze } from '../recordCodec.js';
 import type { WorkspaceIdentity } from '../baseTypes.js';
+import type {
+  EvidenceGeneratedClassification,
+  EvidenceLargeFilePointer,
+  EvidenceLineEndingConversion,
+} from './sideFacts.js';
+
+export type {
+  EvidenceGeneratedClassification,
+  EvidenceLargeFilePointer,
+  EvidenceLineEndingConversion,
+} from './sideFacts.js';
 
 export const MEBIBYTE: number = 1024 * 1024;
 
@@ -145,32 +156,6 @@ export interface EvidenceGitlink {
   readonly checkout?: EvidenceGitlinkCheckout;
 }
 
-export interface EvidenceGeneratedClassification {
-  readonly classification: 'generated';
-  readonly source: 'git-attribute';
-  readonly attribute: 'linguist-generated' | 'generated';
-}
-
-export interface EvidenceLargeFilePointer {
-  readonly kind: 'git-lfs-pointer-v1';
-  readonly pointer: {
-    readonly byteLength: number;
-    readonly contentIdentity: EvidenceContentIdentity;
-    readonly bytesBase64: string;
-  };
-  readonly declaredPayload: {
-    readonly objectIdentity: EvidenceContentIdentity;
-    readonly byteLength: number;
-  };
-  readonly sideRepresentation: 'pointer' | 'payload' | 'unverified';
-  readonly localPayload: {
-    readonly availability: 'available' | 'unavailable' | 'unverified';
-    readonly contentAvailability: EvidenceContentAvailability;
-    readonly contentIdentity?: EvidenceContentIdentity;
-    readonly contentLimitation?: EvidenceContentLimitation;
-  };
-}
-
 export interface CurrentChangeSide {
   readonly path: EvidencePath;
   readonly kind: EvidenceSideKind;
@@ -192,6 +177,7 @@ export interface CurrentChangeSide {
   readonly generated?: EvidenceGeneratedClassification;
   /** Raw bytes may be captured, but canonical filtered identity is unsupported. */
   readonly workingEvidenceLimitation?: 'unsupported-content-filter';
+  readonly lineEndingConversion?: EvidenceLineEndingConversion;
 }
 
 export type CurrentChangeStatus =

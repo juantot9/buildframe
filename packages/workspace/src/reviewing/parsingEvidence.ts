@@ -10,7 +10,6 @@ import {
   type CurrentChangesManifestSummary,
   type EvidenceContentIdentity,
   type EvidencePath,
-  type EvidenceScopeMembership,
   type GitObjectIdentity,
   type ReviewComparedState,
   type ReviewComparisonBasis,
@@ -27,6 +26,7 @@ import type { ReviewQuestionAnchor, ReviewQuestionWholeFileAnchor } from './cont
 import type { ReviewSnapshotIdentity } from './identities.js';
 import { ReviewingStateProblem } from './internalTypes.js';
 import { ANCHOR_LINE_MAX_BYTES, DIFF_ROW_ID_PATTERN, FILE_ID_PATTERN } from './limits.js';
+import { parseEvidenceScopeMembership } from './parsingScopeMembership.js';
 import { decodeReviewingBytesBase64, recordIdentity } from './utils.js';
 
 export function parseEvidenceContentIdentity(value: unknown): EvidenceContentIdentity {
@@ -88,6 +88,7 @@ export function parseCurrentChangeSide(value: unknown): CurrentChangeSide {
         'largeFilePointer',
         'generated',
         'workingEvidenceLimitation',
+        'lineEndingConversion',
       ],
     ) ||
     !memberOf(value.kind, ['regular', 'symlink', 'gitlink', 'special', 'unknown'] as const) ||
@@ -379,6 +380,15 @@ export function parseCurrentChangeSide(value: unknown): CurrentChangeSide {
   ) {
     throw new ReviewingStateProblem();
   }
+  const lineEndingConversion = memberOf(value.lineEndingConversion, ['text', 'auto'] as const)
+    ? value.lineEndingConversion
+    : undefined;
+  if (
+    value.lineEndingConversion !== undefined &&
+    (lineEndingConversion === undefined || value.evidenceSource !== 'working-tree')
+  ) {
+    throw new ReviewingStateProblem();
+  }
 
   return {
     path,
@@ -399,6 +409,7 @@ export function parseCurrentChangeSide(value: unknown): CurrentChangeSide {
     ...(largeFilePointer === undefined ? {} : { largeFilePointer }),
     ...(generated === undefined ? {} : { generated }),
     ...(workingEvidenceLimitation === undefined ? {} : { workingEvidenceLimitation }),
+    ...(lineEndingConversion === undefined ? {} : { lineEndingConversion }),
   };
 }
 
@@ -407,57 +418,6 @@ export function parseCurrentChangeSide(value: unknown): CurrentChangeSide {
  * Evidence's public-file tree because Harness hashes parsed manifest windows
  * with plain JSON.stringify. The golden manifest-digest scenario pins the pair.
  */
-export function validScopeMembershipPath(value: EvidencePath): boolean {
-  const bytes = decodeReviewingBytesBase64(value.bytesBase64);
-  if (bytes.byteLength === 0 || bytes[0] === 0x2f || bytes.includes(0)) {
-    return false;
-  }
-  let start = 0;
-  while (start <= bytes.byteLength) {
-    const slash = bytes.indexOf(0x2f, start);
-    const end = slash < 0 ? bytes.byteLength : slash;
-    const component = bytes.subarray(start, end);
-    if (
-      component.byteLength === 0 ||
-      (component.byteLength === 1 && component[0] === 0x2e) ||
-      (component.byteLength === 2 && component[0] === 0x2e && component[1] === 0x2e)
-    ) {
-      return false;
-    }
-    if (slash < 0) return true;
-    start = slash + 1;
-  }
-  return true;
-}
-
-export function parseEvidenceScopeMembership(value: unknown): EvidenceScopeMembership {
-  if (
-    !isRecord(value) ||
-    !hasOnlyKeys(value, ['selectionPath', 'selectionKind', 'inclusion', 'matchedSides']) ||
-    (value.selectionKind !== 'file' && value.selectionKind !== 'directory') ||
-    (value.inclusion !== 'ordinary' && value.inclusion !== 'explicit-ignored') ||
-    !Array.isArray(value.matchedSides) ||
-    value.matchedSides.length < 1 ||
-    value.matchedSides.length > 2 ||
-    !value.matchedSides.every(side => side === 'old' || side === 'new') ||
-    new Set(value.matchedSides).size !== value.matchedSides.length ||
-    !['["old"]', '["new"]', '["old","new"]'].includes(JSON.stringify(value.matchedSides)) ||
-    (value.inclusion === 'explicit-ignored' && !(value.matchedSides as readonly unknown[]).includes('new'))
-  ) {
-    throw new ReviewingStateProblem();
-  }
-  const selectionPath = parseEvidencePath(value.selectionPath);
-  if (!validScopeMembershipPath(selectionPath)) {
-    throw new ReviewingStateProblem();
-  }
-  return {
-    selectionPath,
-    selectionKind: value.selectionKind,
-    inclusion: value.inclusion,
-    matchedSides: value.matchedSides as readonly ('old' | 'new')[],
-  };
-}
-
 export function parseCurrentChangedFile(value: unknown): CurrentChangedFile {
   if (
     !isRecord(value) ||
