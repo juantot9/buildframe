@@ -7,6 +7,7 @@ import {
   type EvidenceContentLimitation,
   type EvidenceGeneratedClassification,
   type EvidenceGitlink,
+  type EvidenceLineEndingConversion,
   type EvidenceScopeMembership,
   type EvidenceSideKind,
   type EvidenceSparseAbsence,
@@ -217,6 +218,10 @@ export interface SideDraft {
   generated?: EvidenceGeneratedClassification;
   filterDriver?: string;
   workingEvidenceLimitation?: 'unsupported-content-filter';
+  /** How Git converts this working-tree file's line endings, from its attributes and core.autocrlf. */
+  lineEndingRule?: EvidenceLineEndingConversion;
+  /** Whether the bytes last read hold a CRLF, retained or not. */
+  containsCrlf?: boolean;
 }
 
 export interface FileDraft {
@@ -259,6 +264,7 @@ interface StreamedFile {
   readonly digest: string;
   readonly classification: EvidenceContentClassification;
   readonly content?: Buffer;
+  readonly crlf?: true;
 }
 
 interface StreamLimit {

@@ -63,7 +63,8 @@ Blocked:
 Related, not a child:
 [A one-line edit in a CRLF-checked-out file shows the whole file rewritten](./WF-288-crlf-files-diff-as-rewritten.md)
 is rare on macOS and Linux but the normal case on Windows. WF-315 does not
-close until WF-288 is closed.
+close until WF-288 is closed. Closed 2026-11-20: Diffs compare line endings
+the way Git does, from its attributes and the effective `core.autocrlf`.
 
 ## Decisions so far
 

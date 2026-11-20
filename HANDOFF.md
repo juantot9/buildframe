@@ -106,6 +106,9 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
   and `itOnPosix` (`packages/workspace/test/platformCases.ts`). Never set
   `NODE_OPTIONS=--experimental-ffi` in the shell: pnpm's executable refuses
   it.
+- Line endings (WF-288): a working-tree side Git converts from CRLF carries
+  `lineEndingConversion`, and Diffs ignore the CR before LF on it, as Git
+  does. Saved Snapshots keep the rows they were captured with.
 
 ## Development environment
 

@@ -16,6 +16,7 @@ describe('direct retained Reviewing diff bytes', () => {
       bytes: new Uint8Array(bytes),
       side: 'new',
       digest: 'file-content-identity',
+      comparedLength: bytes.length,
     });
     const bufferFrom = vi.spyOn(Buffer, 'from').mockImplementation(() => {
       throw new Error('sameDiffLine constructed a Buffer');

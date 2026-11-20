@@ -20,6 +20,7 @@ import {
   type ReviewSnapshotDiffIndex,
   type ReviewSnapshotPayload,
 } from './internalTypes.js';
+import { gitIgnoresCrBeforeLf } from './lineEndingComparison.js';
 import { MAX_DIFF_ROWS_PER_FILE, MAX_LCS_CELLS, REVIEW_DIFF_WINDOW_ROWS } from './limits.js';
 
 export interface ProjectedReviewCaptureFile {
@@ -49,6 +50,8 @@ export interface DiffLineSlice {
   readonly bytes: Uint8Array;
   readonly side: 'old' | 'new';
   readonly digest: string;
+  /** The bytes that take part in comparison: all of them, or all but a CR before LF. */
+  readonly comparedLength: number;
 }
 
 export interface BuiltReviewDiff {
@@ -56,7 +59,13 @@ export interface BuiltReviewDiff {
   readonly rows: readonly ReviewDiffRowPayload[];
 }
 
-export function diffLines(bytes: Uint8Array, side: 'old' | 'new', digest: string): readonly DiffLineSlice[] {
+/** Splits bytes into lines; with ignoreCrBeforeLf, a line's CR before its LF is not compared. */
+export function diffLines(
+  bytes: Uint8Array,
+  side: 'old' | 'new',
+  digest: string,
+  ignoreCrBeforeLf = false,
+): readonly DiffLineSlice[] {
   const lines: DiffLineSlice[] = [];
   let start = 0;
   let number = 1;
@@ -72,6 +81,10 @@ export function diffLines(bytes: Uint8Array, side: 'old' | 'new', digest: string
         bytes: bytes.slice(start, offset),
         side,
         digest,
+        comparedLength:
+          ignoreCrBeforeLf && atNewline && offset > start && bytes[offset - 1] === 0x0d
+            ? offset - start - 1
+            : offset - start,
       });
     }
     if (atEnd) break;
@@ -122,8 +135,8 @@ export function requiredWholeFileAnchorContent(
 }
 
 export function sameDiffLine(left: DiffLineSlice, right: DiffLineSlice): boolean {
-  if (left.bytes.byteLength !== right.bytes.byteLength) return false;
-  for (let index = 0; index < left.bytes.byteLength; index += 1) {
+  if (left.comparedLength !== right.comparedLength) return false;
+  for (let index = 0; index < left.comparedLength; index += 1) {
     if (left.bytes[index] !== right.bytes[index]) return false;
   }
   return true;
@@ -238,14 +251,26 @@ export function buildReviewDiff(reviewSnapshotIdentity: string, captured: Captur
     return { index: { status: 'unavailable', reason: 'not-text' }, rows: [] };
   }
 
+  // Lines compare the way Git compares them: a side whose CRLFs Git turns
+  // into LF does not differ by those CRs. Rows still carry the exact bytes.
   const oldLines =
     captured.oldContent === undefined || oldSide?.contentIdentity === undefined
       ? []
-      : diffLines(captured.oldContent, 'old', oldSide.contentIdentity.value);
+      : diffLines(
+          captured.oldContent,
+          'old',
+          oldSide.contentIdentity.value,
+          gitIgnoresCrBeforeLf(oldSide, captured.oldContent, captured.newContent),
+        );
   const newLines =
     captured.newContent === undefined || newSide?.contentIdentity === undefined
       ? []
-      : diffLines(captured.newContent, 'new', newSide.contentIdentity.value);
+      : diffLines(
+          captured.newContent,
+          'new',
+          newSide.contentIdentity.value,
+          gitIgnoresCrBeforeLf(newSide, captured.newContent, captured.oldContent),
+        );
   // Context consumes one line from each side; every other row consumes one.
   // Bound that worst-case row count before constructing and hashing any row.
   if (oldLines.length + newLines.length > MAX_DIFF_ROWS_PER_FILE) {
