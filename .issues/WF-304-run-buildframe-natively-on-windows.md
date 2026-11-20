@@ -58,7 +58,7 @@ Blocked:
 
 - [Connect to the runtime over a named pipe](./WF-310-connect-to-the-runtime-over-a-named-pipe.md) — was blocked by WF-309; closed
 - [Can each agent connect from Windows?](./WF-313-can-each-agent-connect-from-windows.md) — closed
-- [Lift the native-Windows refusal and prove Windows end to end](./WF-315-lift-the-native-windows-refusal-and-prove-windows-end-to-end.md) — every other child is closed; also waits for [WF-320](./WF-320-paste-on-windows-consoles.md) (paste in conhost, owner decision 2026-11-20)
+- [Lift the native-Windows refusal and prove Windows end to end](./WF-315-lift-the-native-windows-refusal-and-prove-windows-end-to-end.md) — every other child is closed; also waited for [WF-320](./WF-320-paste-on-windows-consoles.md) (paste in conhost, owner decision 2026-11-20), closed 2026-11-21
 
 Related, not a child:
 [A one-line edit in a CRLF-checked-out file shows the whole file rewritten](./WF-288-crlf-files-diff-as-rewritten.md)
@@ -109,6 +109,9 @@ the way Git does, from its attributes and the effective `core.autocrlf`.
   hidden, since every run of the console-less runtime flashed a window. Filed
   WF-319 and WF-320 (conhost: input cursor glyph, no paste) and WF-316 to
   WF-318 (shared layout and wheel bugs).
+- [Ctrl+V and right-click do not paste in conhost](./WF-320-paste-on-windows-consoles.md):
+  on Windows, Ctrl+V reads the system clipboard and replays it as a
+  bracketed paste; right-click stays a mouse click.
 
 ## Collision rules
 

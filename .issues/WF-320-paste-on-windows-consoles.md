@@ -1,7 +1,7 @@
 ---
 id: WF-320
 title: "Ctrl+V and right-click do not paste in conhost"
-status: open
+status: closed
 labels:
   - wayfinder:task
 assignee: null
@@ -50,3 +50,25 @@ not paste twice.
 - In conhost, Ctrl+V in the composer inserts the clipboard text with its line
   breaks, and nothing is sent.
 - In WezTerm, a paste still arrives once.
+
+## Done (2026-11-21)
+
+On Windows, Ctrl+V reads the system clipboard and hands the text to OpenTUI
+as a bracketed paste (`apps/buildframe/src/clipboardPaste.ts`, started by
+`ShellClipboard`, which both apps create before any screen listens for
+keys). Every input takes it exactly as a terminal paste, and no screen sees
+the key. macOS and Linux are untouched: Ctrl+V is not paste there.
+Terminals that paste on Ctrl+V themselves never send the key, so nothing
+pastes twice. `test/fast/clipboardPaste.test.ts` covers the paste, an
+empty or non-text clipboard, two quick presses, stopping, and a terminal's
+own bracketed paste.
+
+Checked by hand in conhost and WezTerm (both send Ctrl+V as `0x16`): Ctrl+V
+pastes into the composer and into `/`, and nothing is sent.
+
+- Line breaks: the composer drops control characters from every paste, line
+  breaks included, so two pasted lines join into one. That is what a
+  bracketed paste already does; Ctrl+V does the same, as Direction asks.
+- Right-click still belongs to BuildFrame's mouse handling and does not
+  paste. Making it paste inside an input would change the Reviewing view,
+  which is over the file size budget; not done.
