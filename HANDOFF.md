@@ -92,10 +92,10 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
 - Agents on Windows (WF-313): Claude Code, Pi and OpenCode reach the runtime
   pipe; Pi and the Claude helper may run on Pi's own Node 22, which is first
   on `PATH` after Pi's installer. Notes in `docs/research/*-windows-wf313.md`.
-- Use PowerShell on Windows. Node 26.5.1 is installed with nvm (default
-  stays 24); put `%LOCALAPPDATA%\Author Software\nvm\installs\v26.5.1` first
-  on `PATH`. `pnpm build` and `pnpm test` do not run from PowerShell yet
-  (WF-306).
+- Use PowerShell on Windows. Node 26.5.1 is the nvm default, and nvm sits
+  ahead of Pi's Node 22 on the user `PATH`, so `node` is 26.5.1 in a new
+  terminal (Pi runs on it too). `pnpm build` and `pnpm test` do not run from
+  PowerShell yet (WF-306).
 
 ## Development environment
 
