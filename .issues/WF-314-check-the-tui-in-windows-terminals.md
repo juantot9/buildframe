@@ -1,7 +1,7 @@
 ---
 id: WF-314
 title: "Check the TUI in Windows terminals"
-status: open
+status: closed
 labels:
   - wayfinder:research
 parent: WF-304
@@ -20,7 +20,11 @@ actually use, without the kitty keyboard protocol?
 ## Terminals
 
 Windows Terminal, conhost, WezTerm, and the VS Code terminal. Run each from
-PowerShell and from Git Bash.
+PowerShell.
+
+Owner decision (2026-11-20): Git Bash is out of scope. herdr is checked as
+a terminal too; Windows Terminal and the VS Code terminal are not installed
+on the reference machine.
 
 ## What to check
 
@@ -43,6 +47,15 @@ Note: the probe showed OpenTUI guessing the terminal from an inherited
 A findings note in `docs/research/` with a terminal × check table, and a
 ticket for each binding or behaviour that needs a change.
 
+## Checklist (2026-11-20)
+
+The checks, setup and result tables are in
+[`docs/research/tui-windows-terminals-wf314.md`](../docs/research/tui-windows-terminals-wf314.md);
+`node scripts/tui-check-fixture.mjs` builds the repository they use. Until
+WF-315, the run needs the native-Windows refusal lifted locally (the note
+says how). Windows Terminal and the VS Code terminal are not installed on the
+reference machine.
+
 ## From WF-306 (2026-11-20)
 
 - At a past step, `a` (and the other keys blocked there) answers "Still
@@ -56,3 +69,24 @@ ticket for each binding or behaviour that needs a change.
   `test/fast/reviewingActionOrder.test.ts` pins the order. With the refusal
   patched out locally, the scenario passed 3 of 3 runs (it failed every run
   before).
+
+## Done (2026-11-20)
+
+Findings, per-terminal results and method:
+[`docs/research/tui-windows-terminals-wf314.md`](../docs/research/tui-windows-terminals-wf314.md).
+Reviewing holds up in conhost, WezTerm and herdr from PowerShell; Windows
+Terminal and the VS Code terminal were not installed and were not checked.
+
+- Fixed in this work: every Git run of the runtime flashed a console window
+  that took the keyboard and mouse (`runGitProcess` now passes
+  `windowsHide: true`).
+- Filed: [WF-316](./WF-316-narrow-diff-clips-instead-of-wrapping.md),
+  [WF-317](./WF-317-narrow-screens-cut-chrome-mid-word.md),
+  [WF-318](./WF-318-wheel-in-a-short-files-list-jumps-to-the-ends.md) (shared
+  code), [WF-319](./WF-319-input-cursor-glyph-missing-in-conhost.md) and
+  [WF-320](./WF-320-paste-on-windows-consoles.md) (Windows).
+- Key collisions without the kitty keyboard protocol need no change: no
+  listed key depends on telling Ctrl+I, Ctrl+M, Ctrl+H or Ctrl+[ apart.
+- Not done: arm64, and the agent-connected keys (Enter sends, F3 previews,
+  `x`, `r`, `[`/`]`), which need the refusal lifted and an agent attached;
+  they move to WF-315.
