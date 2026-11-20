@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import type {
   CommittedHarnessDirective,
   HarnessAvailability,
@@ -96,7 +98,8 @@ class OpenConnectorSession implements ConnectorSession {
       destination: {
         harnessLabel: options.manifest.adapterDisplayName,
         sessionLabel: options.sessionLabel,
-        repositoryLabel: options.canonicalCheckout.split('/').filter(Boolean).at(-1) ?? 'workspace',
+        // basename: the checkout is `C:\...\repo` on Windows.
+        repositoryLabel: path.basename(options.canonicalCheckout) || 'workspace',
         canonicalCheckout: options.canonicalCheckout,
       },
       availability,

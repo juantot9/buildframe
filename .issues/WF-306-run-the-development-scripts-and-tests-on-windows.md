@@ -50,6 +50,12 @@ created: 2026-11-19
   `PATH`: each package's `clean` script is `rm -rf dist`, and pnpm runs
   scripts through `cmd.exe`.
 
+- (WF-313) From plain PowerShell, which is the shell to support: `pnpm build`
+  fails at `rm -rf dist` and `pnpm test` at `NODE_OPTIONS=… vitest` (cmd.exe
+  runs pnpm's scripts). Both worked only from Git Bash. Node 26.5.1 is
+  installed with nvm; Pi's Node 22 comes first on the user `PATH`, so
+  `node` there is not the repository's Node.
+
 ## Direction
 
 - Make the scripts run under `cmd.exe` as well. `shell-emulator=true` in

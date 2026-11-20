@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 
 import { bootstrapWorkspace, WORKSPACE_INTERFACE_VERSION, type Workspace } from '@buildframe/workspace';
@@ -13,6 +12,7 @@ import {
   parseVersion,
   PINNED_TESTED_NODE_VERSION,
 } from './nodeSupport.js';
+import type { HostCommand } from './hostVersion.js';
 import { startupFailureSentence } from './reviewingReasons.js';
 import { CLAUDE_CODE_SUPPORT, CODEX_SUPPORT, OPENCODE_SUPPORT, PI_SUPPORT, type HostSupport } from './supportFacts.js';
 
@@ -43,22 +43,7 @@ export interface DoctorEnvironment {
   readonly inspectRuntime?: typeof inspectWorkspaceRuntime;
 }
 
-const HOST_VERSION_TIMEOUT_MS = 5_000;
-
-export type HostCommand = 'pi' | 'claude' | 'opencode' | 'codex';
-
-/** Asks an installed host for its version without a shell; nothing else is run. */
-export async function hostVersionFromPath(command: HostCommand): Promise<string | undefined> {
-  return await new Promise(resolve => {
-    execFile(command, ['--version'], { timeout: HOST_VERSION_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
-      if (error !== null) {
-        resolve(undefined);
-        return;
-      }
-      resolve(stdout.trim().split('\n', 1)[0]);
-    });
-  });
-}
+export { hostVersionFromPath, type HostCommand } from './hostVersion.js';
 
 export async function productVersion(): Promise<string> {
   try {

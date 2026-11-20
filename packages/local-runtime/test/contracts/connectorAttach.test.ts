@@ -43,6 +43,20 @@ function open(runtime: ScriptedRuntime) {
   return { scheduler, session, statuses, first };
 }
 
+describe('connector kit destination', () => {
+  it('names the repository after the checkout folder on this platform', () => {
+    const label = (canonicalCheckout: string): string =>
+      createConnectorSession(
+        { ...sessionOptions(new ScriptedHost(), new ManualScheduler()), canonicalCheckout },
+        new ScriptedRuntime().connect,
+      ).attachment.destination.repositoryLabel;
+    expect(label('/repositories/example')).toBe('example');
+    expect(label('/repositories/example/')).toBe('example');
+    // Windows reports the checkout as `C:\…`.
+    if (process.platform === 'win32') expect(label('C:\\Users\\dev\\example')).toBe('example');
+  });
+});
+
 describe('connector kit attach loop', () => {
   it('waits for a runtime that is not there yet, then connects', async () => {
     const runtime = new ScriptedRuntime();
