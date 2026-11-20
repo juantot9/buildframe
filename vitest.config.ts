@@ -13,6 +13,7 @@ export default defineConfig({
     include: [
       'apps/buildframe/test/**/*.test.ts',
       'packages/claude-adapter/test/**/*.test.ts',
+      'packages/codex-adapter/test/**/*.test.ts',
       'packages/local-runtime/test/**/*.test.ts',
       'packages/opencode-adapter/test/**/*.test.ts',
       'packages/pi-adapter/test/**/*.test.ts',

@@ -93,6 +93,15 @@ importers:
         specifier: workspace:*
         version: link:../workspace
 
+  packages/codex-adapter:
+    dependencies:
+      '@buildframe/local-runtime':
+        specifier: workspace:*
+        version: link:../local-runtime
+      '@buildframe/workspace':
+        specifier: workspace:*
+        version: link:../workspace
+
   packages/local-runtime:
     dependencies:
       '@buildframe/workspace':

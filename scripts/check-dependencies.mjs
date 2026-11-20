@@ -84,6 +84,15 @@ const v1Packages = [
     }),
   },
   {
+    directory: path.join(repoRoot, 'packages/codex-adapter'),
+    // Codex runs no plugin code: the connector is a client of Codex's own app-server.
+    allowedV1Dependencies: new Set(['@buildframe/local-runtime', '@buildframe/workspace']),
+    allowedProductionSubpaths: CONNECTOR_PRODUCTION_SUBPATHS,
+    allowedExternalDependencies: externalDependencyPolicy({
+      test: [TEST_RUNNER_PACKAGE],
+    }),
+  },
+  {
     directory: path.join(repoRoot, 'packages/opencode-adapter'),
     // OpenCode supplies its own plugin modules at load; the connector imports none of them.
     allowedV1Dependencies: new Set(['@buildframe/local-runtime', '@buildframe/workspace']),
