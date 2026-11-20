@@ -84,7 +84,10 @@ older commit ID that `.issues/` and `docs/` mention, lives in the private
 - Lock holders are identified on Windows by process start time
   (`packages/workspace/src/processIdentity.ts`, WF-311); without `node:ffi`
   a running holder is never taken for gone. Nothing signals the runtime; on
-  Windows the re-exec parent leaves Ctrl+C to its child.
+  Windows the re-exec parent leaves Ctrl+C to its child. The runtime has no
+  console, so every program it starts needs `windowsHide: true` (Git does, in
+  `runGitProcess`); without it each run flashes a console window that takes
+  the keyboard and mouse (WF-314).
 - `node scripts/assemble-release.mjs --windows` builds a CLI package that
   installs on Windows, for testing (WF-312). The Claude plugin runs the
   installed helper's entry file with Node, found behind its npm/pnpm shim
