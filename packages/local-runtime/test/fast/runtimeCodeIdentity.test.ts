@@ -1,9 +1,10 @@
-import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { rename, rm, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { runtimeCodeIdentityForEntrypoint } from '../../src/runtimeCodeIdentity.js';
+import { shortScratchRoot } from '../shortScratchRoot.js';
 
 const scratchDirectories = new Set<string>();
 
@@ -14,7 +15,7 @@ afterEach(async () => {
 
 describe('Local Runtime code identity', () => {
   it('is stable for one entrypoint incarnation and changes across a byte-identical rebuild', async () => {
-    const directory = await mkdtemp('/tmp/buildframe-runtime-code-');
+    const directory = await shortScratchRoot('buildframe-runtime-code-');
     scratchDirectories.add(directory);
     const entrypoint = `${directory}/runtime.js`;
     const replacement = `${directory}/replacement.js`;

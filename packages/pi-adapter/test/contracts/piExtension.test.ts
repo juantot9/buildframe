@@ -180,7 +180,9 @@ describe('BuildFrame Pi extension against a live runtime', () => {
 
   it('loses the connection when the attached Pi session ends', async () => {
     // Keep this root short: macOS os.tmpdir() can push the runtime socket past its 100-byte bound.
-    const root = await fs.realpath(await fs.mkdtemp('/tmp/buildframe-pi-shutdown-'));
+    // Windows has no /tmp and its runtime listens on a named pipe.
+    const scratch = process.platform === 'win32' ? os.tmpdir() : '/tmp';
+    const root = await fs.realpath(await fs.mkdtemp(path.join(scratch, 'buildframe-pi-shutdown-')));
     temporaryDirectories.push(root);
     const checkout = path.join(root, 'checkout');
     await fs.mkdir(checkout);

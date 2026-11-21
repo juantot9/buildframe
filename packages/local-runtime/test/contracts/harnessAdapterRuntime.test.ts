@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 
 import type { Workspace, WorkspaceIdentity } from '@buildframe/workspace';
 import type {
@@ -20,6 +20,7 @@ import { connectWorkspaceRuntime } from '../../src/client.js';
 import { connectHarnessAdapterRuntime, type HarnessAdapterRuntimeConnected } from '../../src/harnessAdapter.js';
 import { startLocalRuntimeServer, type LocalRuntimeServer } from '../../src/server.js';
 import type { RuntimeCodeIdentity, RuntimeGeneration } from '../../src/contracts.js';
+import { shortScratchRoot } from '../shortScratchRoot.js';
 
 const WORKSPACE_IDENTITY = 'wsp_00000000-0000-4000-8000-000000000031' as WorkspaceIdentity;
 const ATTACHMENT_IDENTITY = `att_${'3'.repeat(64)}` as HarnessAttachmentIdentity;
@@ -160,9 +161,7 @@ describe('reviewed Harness Adapter runtime role', () => {
 
   beforeEach(async () => {
     originalRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
-    // Keep this root short: macOS os.tmpdir() can push the Unix endpoint past
-    // its 100-byte bound, selecting a shared fallback outside this fixture.
-    scratch = await mkdtemp('/tmp/buildframe-harness-adapter-runtime-');
+    scratch = await shortScratchRoot('buildframe-harness-adapter-runtime-');
     process.env.XDG_RUNTIME_DIR = scratch;
   });
 

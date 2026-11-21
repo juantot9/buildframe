@@ -110,6 +110,16 @@ Windows (clean install, round trips).
   refused every Workspace on the GitHub runner, though all of them open on
   the reference machine; the tests now print the whole refusal, so the
   next run says why.
+- Second run (44845393414, on `2d2f0c9`): Linux and macOS passed. Windows
+  refused at `lock-registry`: the runner runs as the built-in Administrator,
+  which SDDL writes as `LA`, not its SID, so the private-directory check
+  never matched the owner. Fixed in `a10ecc9`: access lists are compared
+  against the user as SDDL spells them (`currentUserInSddl`).
+- Third run (44952513278, on `a10ecc9`): Workspaces open on the runner.
+  Windows failed only where runtime tests made their scratch folder under a
+  hard-coded `/tmp`, which the runner lacks (the reference machine has a
+  `C:\tmp`). They now use `os.tmpdir()` on Windows and keep the short `/tmp`
+  on macOS and Linux (WF-128).
 
 ## Verification
 

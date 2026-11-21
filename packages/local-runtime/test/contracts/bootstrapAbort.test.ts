@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import process from 'node:process';
 
@@ -14,6 +14,7 @@ import {
   runtimeLocationForWorkspace,
   secureBoundEndpoint,
 } from '../../src/runtimeLocation.js';
+import { shortScratchRoot } from '../shortScratchRoot.js';
 
 const WORKSPACE_IDENTITY = 'wsp_00000000-0000-4000-8000-000000000081' as WorkspaceIdentity;
 const RUNTIME_GENERATION = 'rtg_00000000-0000-4000-8000-000000000082';
@@ -116,7 +117,7 @@ describe('Local Runtime bootstrap abort ownership', () => {
 
   beforeEach(async () => {
     originalRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
-    scratch = await mkdtemp('/tmp/buildframe-runtime-abort-');
+    scratch = await shortScratchRoot('buildframe-runtime-abort-');
     process.env.XDG_RUNTIME_DIR = scratch;
   });
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdtemp, rm } from 'node:fs/promises';
+import { lstat, rm } from 'node:fs/promises';
 
 import type { Workspace, WorkspaceIdentity, WorkspaceViewUpdate } from '@buildframe/workspace';
 import type { ReviewIdentity, ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
@@ -18,6 +18,7 @@ import { waitForLocalRuntimeServerIdle } from '../../src/server.js';
 import { MAX_FRAME_BYTES } from '../../src/protocol.js';
 import { runtimeLocationForWorkspace } from '../../src/runtimeLocation.js';
 import { connectRawPeer, type RawPeer } from './rawRuntimePeer.js';
+import { shortScratchRoot } from '../shortScratchRoot.js';
 
 const WORKSPACE_IDENTITY = 'wsp_00000000-0000-4000-8000-000000000001' as WorkspaceIdentity;
 const OTHER_WORKSPACE_IDENTITY = 'wsp_00000000-0000-4000-8000-000000000002' as WorkspaceIdentity;
@@ -845,9 +846,7 @@ describe('semantic local-runtime client/server contract', () => {
 
   beforeEach(async () => {
     originalRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
-    // Keep this root short: macOS os.tmpdir() can push the Unix endpoint past
-    // its 100-byte bound, selecting a shared fallback outside this fixture.
-    scratchRoot = await mkdtemp('/tmp/buildframe-runtime-contract-');
+    scratchRoot = await shortScratchRoot('buildframe-runtime-contract-');
     process.env.XDG_RUNTIME_DIR = scratchRoot;
   });
 
