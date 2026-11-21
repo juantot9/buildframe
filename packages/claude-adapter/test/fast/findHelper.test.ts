@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -51,7 +51,8 @@ const PNPM_CMD = [
 let scratch: string;
 
 beforeEach(async () => {
-  scratch = await mkdtemp(path.join(os.tmpdir(), 'buildframe-find-helper-'));
+  // Resolved, so it matches what following npm's symlink gives (macOS's /var is /private/var).
+  scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'buildframe-find-helper-')));
 });
 
 afterEach(async () => {
