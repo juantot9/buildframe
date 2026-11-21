@@ -49,7 +49,7 @@ import {
 } from './reviewingModel.js';
 import { firstListedFile, manifestFileItems } from './reviewingFileList.js';
 import { ReviewingView } from './reviewingView.js';
-import { NOTICE_LIFETIME_MS, SPINNER_FRAME_MS } from './reviewingStatus.js';
+import { ShellPulse, type PulseSource } from './shellPulse.js';
 import { ReviewingHighlight } from './reviewingHighlight.js';
 import {
   createEphemeralUserConfiguration,
@@ -263,10 +263,7 @@ class OpenReviewingApplication implements ReviewingApplication {
       clearTimeout(this.#comparisonPreviewTimer);
       this.#comparisonPreviewTimer = undefined;
     }
-    if (this.#animationTimer !== undefined) clearTimeout(this.#animationTimer);
-    this.#animationTimer = undefined;
-    if (this.#noticeTimer !== undefined) clearTimeout(this.#noticeTimer);
-    this.#noticeTimer = undefined;
+    this.#pulse.stop();
     this.#reviewSearchSequence += 1;
     if (this.#reviewSearchTimer !== undefined) {
       clearTimeout(this.#reviewSearchTimer);
@@ -312,8 +309,7 @@ class OpenReviewingApplication implements ReviewingApplication {
   #render(): void {
     this.#view?.render();
     this.#scheduleNeighborWarmup();
-    this.#scheduleAnimation();
-    this.#scheduleNoticeExpiry();
+    this.#pulse.follow(this.#pulseSource);
   }
 
   /**
@@ -380,32 +376,6 @@ class OpenReviewingApplication implements ReviewingApplication {
   }
 
   /** Keeps spinners moving while something works; stops as soon as nothing does. */
-  #scheduleAnimation(): void {
-    if (this.#stopped || this.#animationTimer !== undefined || !this.#model.animating()) return;
-    this.#animationTimer = setTimeout(() => {
-      this.#animationTimer = undefined;
-      if (this.#stopped) return;
-      this.#model.advanceAnimation();
-      this.#render();
-    }, SPINNER_FRAME_MS);
-  }
-
-  /** Clears a status-line notice after its tone's lifetime unless something replaced it. */
-  #scheduleNoticeExpiry(): void {
-    const notice = this.#model.state.notice;
-    if (notice === this.#noticeShown) return;
-    this.#noticeShown = notice;
-    if (this.#noticeTimer !== undefined) clearTimeout(this.#noticeTimer);
-    this.#noticeTimer = undefined;
-    if (notice === undefined || this.#stopped) return;
-    this.#noticeTimer = setTimeout(() => {
-      this.#noticeTimer = undefined;
-      if (this.#stopped || this.#model.state.notice !== notice) return;
-      this.#model.state.notice = undefined;
-      this.#render();
-    }, NOTICE_LIFETIME_MS[noticeToneOf(this.#model.state)]);
-  }
-
   #runEffects(effects: readonly ReviewingModelEffect[]): void {
     for (const effect of effects) {
       if (effect.type === 'stop') {
@@ -656,9 +626,20 @@ class OpenReviewingApplication implements ReviewingApplication {
   }
 
   #neighborWarmupTimer: NodeJS.Timeout | undefined;
-  #animationTimer: NodeJS.Timeout | undefined;
-  #noticeTimer: NodeJS.Timeout | undefined;
-  #noticeShown: string | undefined;
+  readonly #pulse = new ShellPulse(() => this.#render());
+  readonly #pulseSource: PulseSource = {
+    animating: () => this.#model.animating(),
+    advance: () => this.#model.advanceAnimation(),
+    notice: () => {
+      const notice = this.#model.state.notice;
+      return notice === undefined ? undefined : { identity: notice, tone: noticeToneOf(this.#model.state) };
+    },
+    expire: notice => {
+      if (this.#model.state.notice !== notice) return false;
+      this.#model.state.notice = undefined;
+      return true;
+    },
+  };
   #neighborWarmupSelection: string | undefined;
 
   /** Prefetches around each newly presented selection without delaying its own preview. */

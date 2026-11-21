@@ -3,7 +3,7 @@ import type { Workspace, WorkspaceCommand } from '@buildframe/workspace';
 import type { HarnessConnectionView } from '@buildframe/workspace/harness-interaction';
 
 import { reviewingInputFromKeyEvent, type ReviewingInput } from './reviewingInput.js';
-import { NOTICE_LIFETIME_MS, noticeGlyph, noticeStatusTone, type NoticeTone } from './reviewingStatus.js';
+import { noticeGlyph, noticeStatusTone, type NoticeTone } from './reviewingStatus.js';
 import { Box } from './renderTree.js';
 import { actionChecksPanel, agentIndicator, keyListPanel, shellHeader } from './shellChrome.js';
 import {
@@ -25,6 +25,7 @@ import { routeShellKey, type ShellKeyHost } from './shellInput.js';
 import { footerSentence, keyList, keysRow } from './shellKeys.js';
 import { theme, type Look } from './shellLook.js';
 import { DebouncedSave } from './shellPreferences.js';
+import { ShellPulse } from './shellPulse.js';
 import { ShellRoots } from './shellRoots.js';
 import { dispatchScreenKey, type Screen, type ScreenEffect } from './shellScreen.js';
 import { ShellTerminal } from './shellTerminal.js';
@@ -113,7 +114,7 @@ class ShellApplication implements Shell {
   #connection: HarnessConnectionView | undefined;
   #unsubscribeFromConnection: (() => void) | undefined;
   #said: { readonly text: string; readonly tone: NoticeTone } | undefined;
-  #saidTimer: NodeJS.Timeout | undefined;
+  readonly #pulse = new ShellPulse(() => this.#render());
   #keyListOpen = false;
   #saving = 0;
   #starting: Promise<void> | undefined;
@@ -214,7 +215,7 @@ class ShellApplication implements Shell {
       this.#clipboard?.cancel();
       this.#views.stop();
       this.#unsubscribeFromConnection?.();
-      if (this.#saidTimer !== undefined) clearTimeout(this.#saidTimer);
+      this.#pulse.stop();
       terminal?.renderer.keyInput.off('keypress', this.#onKeyPress);
       terminal?.renderer.off('resize', this.#onResize);
       this.#roots?.stop();
@@ -415,14 +416,8 @@ class ShellApplication implements Shell {
 
   #say(text: string, tone: NoticeTone): void {
     if (this.#stopped) return;
-    const said = { text, tone };
-    this.#said = said;
-    if (this.#saidTimer !== undefined) clearTimeout(this.#saidTimer);
-    this.#saidTimer = setTimeout(() => {
-      if (this.#said !== said) return;
-      this.#said = undefined;
-      this.#render();
-    }, NOTICE_LIFETIME_MS[tone]);
+    // A new object each time: saying the same words again restarts their lifetime.
+    this.#said = { text, tone };
     this.#render();
   }
 
@@ -477,6 +472,16 @@ class ShellApplication implements Shell {
     roots.retire(() => undefined);
     roots.mount(Box({ id: ROOT_ID, width: '100%', height: '100%' }, frame));
     roots.present();
+    this.#pulse.follow({
+      animating: () => screen.animating?.(state) === true,
+      advance: () => screen.advance?.(state),
+      notice: () => (said === undefined ? undefined : { identity: said, tone: said.tone }),
+      expire: identity => {
+        if (this.#said !== identity) return false;
+        this.#said = undefined;
+        return true;
+      },
+    });
   }
 }
 

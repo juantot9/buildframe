@@ -83,6 +83,10 @@ export interface ScreenDefinition<S, Mode extends string = string> {
   settings?(state: S): { readonly rows: readonly ConfigurationRow[]; readonly descriptions: readonly string[] };
   /** The `!` panel's lines: what the screen's actions can do at the State version shown. */
   checks?(state: S): readonly string[];
+  /** Something on the screen moves (a spinner): the shell draws again one spinner step later. */
+  animating?(state: S): boolean;
+  /** Moves the screen's spinners one step. */
+  advance?(state: S): void;
 }
 
 /** A checked screen, with the key table the shell draws its footer and `?` list from. */
