@@ -114,6 +114,7 @@ import {
   shellHeader,
 } from './shellChrome.js';
 import { configurationDialog } from './shellConfiguration.js';
+import { homeLauncherCard, homePane, homeRow, homeSentence, type HomeCard, type HomeChoice } from './shellHome.js';
 import { fitPaneDetail, shortDisplayPath, treeName } from './reviewingPathText.js';
 import { reviewingSettings } from './reviewingSettings.js';
 
@@ -3598,114 +3599,6 @@ function pendingReviewBody(state: ReviewingApplicationState): RenderChild {
  * The launcher, the commit picker and Previous Reviews all live in it, so
  * nothing moves when you go between them.
  */
-/** A Home card and its height in rows, so the body can place it without measuring. */
-interface HomeCard {
-  readonly node: RenderChild;
-  readonly height: number;
-}
-
-/** Home's card is the width of a comfortable reading column, or the whole width when that is less. */
-const HOME_CARD_WIDTH = 76;
-
-function homeCardWidth(state: ReviewingApplicationState): number {
-  return Math.min(HOME_CARD_WIDTH, state.width);
-}
-
-/**
- * Home's one pane: the same rounded frame, title row and selection as a
- * Review's panes, so opening BuildFrame and opening a Review look like one app.
- * It is a card centred in the body, as tall as its rows, like a dialog. The
- * launcher, the commit picker and Previous Reviews share its width and left
- * edge, so going between them never moves the column.
- */
-function homePane(
-  state: ReviewingApplicationState,
-  id: string,
-  title: string,
-  detail: string,
-  rows: number,
-  ...children: RenderChild[]
-): HomeCard {
-  const colors = theme(state);
-  const height = rows + 3;
-  const node = borderedBox(
-    state,
-    {
-      id,
-      width: homeCardWidth(state),
-      // Border and title row, then the content; never taller than the body.
-      height,
-      maxHeight: '100%',
-      flexShrink: 1,
-      flexDirection: 'column',
-      borderColor: colors.accent,
-      backgroundColor: colors.surface,
-      overflow: 'hidden',
-    },
-    label(state, `${state.presentation.ascii ? '|' : '▌'} ${title} FOCUSED  ${detail}`, {
-      fg: colors.accent,
-      bold: true,
-      height: 1,
-      paddingLeft: 1,
-      paddingRight: 1,
-    }),
-    ...children,
-  );
-  return { node, height };
-}
-
-/** A Home list row: `›`, bold Frost Text and the wash across the whole row, like a focused Files row. */
-function homeRow(
-  state: ReviewingApplicationState,
-  text: string,
-  selected: boolean,
-  options: {
-    readonly id?: string;
-    readonly fg?: ThemeColor;
-    readonly pointer?: ReturnType<typeof pointerMouseHandlers>;
-  },
-): RenderChild {
-  const colors = theme(state);
-  const cursor = selected ? (state.presentation.ascii ? '>' : '›') : ' ';
-  // A terminal paints a background only behind characters, so the row is
-  // filled to the pane's inner width (border and padding take four cells).
-  const inner = Math.max(1, homeCardWidth(state) - 4);
-  const fitted = fitDisplayCellsEnd(`${cursor} ${text}`, inner, state.presentation.ascii ? '...' : '…');
-  return label(state, `${fitted}${' '.repeat(Math.max(0, inner - displayCells(fitted)))}`, {
-    ...(options.id === undefined ? {} : { id: options.id }),
-    fg: selected ? colors.text : (options.fg ?? colors.text),
-    bg: selected ? colors.accentSoft : colors.surface,
-    bold: selected,
-    width: '100%',
-    height: 1,
-    paddingLeft: 1,
-    paddingRight: 1,
-    ...(options.pointer ?? {}),
-  });
-}
-
-/** A sentence in the pane: wrapped on whole words, every row indented alike. */
-function homeSentence(state: ReviewingApplicationState, text: string, fg: ThemeColor, id?: string): RenderChild[] {
-  // Border, padding and the two-cell indent.
-  const width = Math.max(8, homeCardWidth(state) - 8);
-  return wrappedRows(text, width).map((row, index) =>
-    label(state, `  ${row}`, {
-      ...(id === undefined ? {} : { id: index === 0 ? id : `${id}-${index}` }),
-      fg,
-      height: 1,
-      paddingLeft: 1,
-      paddingRight: 1,
-    }),
-  );
-}
-
-interface HomeChoice {
-  readonly selection: 'primary' | 'new-current' | 'comparison' | 'history';
-  readonly icon: string;
-  readonly label: string;
-  readonly description: string;
-  readonly available: boolean;
-}
 
 function homeChoices(state: ReviewingApplicationState): readonly HomeChoice[] {
   const home = state.home!;
@@ -3713,7 +3606,7 @@ function homeChoices(state: ReviewingApplicationState): readonly HomeChoice[] {
   const ascii = state.presentation.ascii;
   return [
     {
-      selection: 'primary',
+      id: 'primary',
       // ASCII twins stay distinct from the `>` cursor and the `-` separator.
       icon: current === undefined ? (ascii ? '+' : '◇') : ascii ? '@' : '●',
       label: current === undefined ? 'Review current changes' : 'Continue Current Review',
@@ -3727,7 +3620,7 @@ function homeChoices(state: ReviewingApplicationState): readonly HomeChoice[] {
       ? []
       : [
           {
-            selection: 'new-current' as const,
+            id: 'new-current',
             icon: ascii ? '+' : '◆',
             label: 'Start new Review',
             description: 'Start fresh from the code as it is now; the open Review moves to Previous Reviews.',
@@ -3735,14 +3628,14 @@ function homeChoices(state: ReviewingApplicationState): readonly HomeChoice[] {
           },
         ]),
     {
-      selection: 'comparison',
+      id: 'comparison',
       icon: ascii ? '=' : '↔',
       label: 'Review a commit or range',
       description: 'Pick commits from history; your files are not touched.',
       available: true,
     },
     {
-      selection: 'history',
+      id: 'history',
       icon: ascii ? '%' : '◷',
       label:
         home.header.totalPastReviews === 0
@@ -3758,35 +3651,15 @@ function homeChoices(state: ReviewingApplicationState): readonly HomeChoice[] {
 }
 
 function homeLauncher(state: ReviewingApplicationState, interaction: ReviewPointerInteraction): HomeCard {
-  const colors = theme(state);
-  const home = state.home;
-  if (home === undefined) {
-    const unavailable = homeSentence(state, 'Reviewing is unavailable.', colors.danger);
+  if (state.home === undefined) {
+    const unavailable = homeSentence(state, 'Reviewing is unavailable.', theme(state).danger);
     return homePane(state, 'reviewing-home-pane', 'Home', '', unavailable.length, ...unavailable);
   }
-  const entries = homeChoices(state);
-  const selected = entries.find(entry => entry.selection === state.homeLauncherSelection) ?? entries[0]!;
-  // The card keeps the height of the longest description, so moving between
-  // choices never makes it jump.
-  const descriptionRows = Math.max(
-    ...entries.map(entry => homeSentence(state, entry.description, colors.muted).length),
-  );
-  const description = homeSentence(state, selected.description, colors.muted, 'reviewing-home-description');
-  return homePane(
-    state,
-    'reviewing-home-pane',
-    'Home',
-    plural(entries.filter(entry => entry.available).length, 'choice'),
-    entries.length + 1 + descriptionRows,
-    ...entries.map(entry =>
-      homeRow(state, `${entry.icon}  ${entry.label}`, entry.selection === state.homeLauncherSelection, {
-        id: `reviewing-home-choice-${entry.selection}`,
-        fg: entry.available ? colors.text : colors.muted,
-        pointer: pointerMouseHandlers(interaction, { kind: 'home-launcher-choice', selection: entry.selection }),
-      }),
-    ),
-    label(state, '', { height: 1 }),
-    ...description,
+  return homeLauncherCard(state, homeChoices(state), state.homeLauncherSelection, 'reviewing', selection =>
+    pointerMouseHandlers(interaction, {
+      kind: 'home-launcher-choice',
+      selection: selection as ReviewingApplicationState['homeLauncherSelection'],
+    }),
   );
 }
 
