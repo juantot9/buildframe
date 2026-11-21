@@ -7,7 +7,6 @@ import {
   type MouseEvent,
   type PasteEvent,
   type Renderable,
-  type Selection,
 } from '@opentui/core';
 import { decodeBytesBase64 } from '@buildframe/workspace/bytes-base64';
 import type { DefaultReviewMessageInspectionView } from '@buildframe/workspace/harness-interaction';
@@ -104,6 +103,7 @@ import {
   statusIcon,
 } from './reviewingFileGlyphs.js';
 import { ShellRoots } from './shellRoots.js';
+import { ShellSelection } from './shellSelection.js';
 import { shellFrame } from './shellFrame.js';
 import {
   actionChecksPanel,
@@ -4997,7 +4997,7 @@ export class ReviewingView {
   #questionTextarea: TextareaRenderable | undefined;
   #discussionPage: DiscussionPage | undefined;
   #contentPageSize: number | undefined;
-  #reviewSelectionText: string | undefined;
+  readonly #selection: ShellSelection;
   #synchronizingQuestionTextarea = false;
   #wheelRenderQueued: NodeJS.Immediate | undefined;
   #wheelFramePending = false;
@@ -5181,24 +5181,6 @@ export class ReviewingView {
     this.#activatePointerTarget(gesture.target);
   };
 
-  readonly #onSelection = (selection: Selection): void => {
-    if (!this.#started || this.#model.state.editor !== undefined) return;
-    const text = selection.getSelectedText();
-    this.#pointerGesture = undefined;
-    this.#reviewSelectionText = text.length === 0 ? undefined : text;
-    if (text.length === 0) return;
-    // Let OpenTUI complete the selection gesture before using the composed
-    // clipboard. The quiet first write preserves the visible selection;
-    // explicit Ctrl+C then reports clipboard support and clears without quitting.
-    queueMicrotask(() => {
-      if (!this.#started || this.#reviewSelectionText !== text) return;
-      this.#onEffects(
-        [{ type: 'copy-text', source: 'review-selection', text, announce: 'failure-only' }],
-        performance.now(),
-      );
-    });
-  };
-
   readonly #onKeyPress = (event: KeyEvent): void => {
     const input = reviewingInputFromKeyEvent(event);
     if (input === undefined) return;
@@ -5285,17 +5267,7 @@ export class ReviewingView {
       return;
     }
 
-    if (input.name === 'c' && input.ctrl && (this.renderer.hasSelection || this.#reviewSelectionText !== undefined)) {
-      const text = this.renderer.getSelection()?.getSelectedText() || this.#reviewSelectionText || '';
-      if (text.length > 0) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.#reviewSelectionText = undefined;
-        this.renderer.clearSelection();
-        this.#onEffects([{ type: 'copy-text', source: 'review-selection', text, announce: 'always' }], inputStartedAt);
-        return;
-      }
-    }
+    if (this.#selection.copyOnCtrlC(input, event)) return;
 
     const editorWasOpen = this.#model.state.editor !== undefined;
     const effects = this.#model.handleInput(input, inputStartedAt);
@@ -5351,6 +5323,14 @@ export class ReviewingView {
     this.#model = model;
     this.#onEffects = onEffects;
     this.#roots = new ShellRoots(renderer, 'reviewing-screen');
+    this.#selection = new ShellSelection(renderer, {
+      copying: () => this.#started && this.#model.state.editor === undefined,
+      selected: () => {
+        this.#pointerGesture = undefined;
+      },
+      copy: (text, announce) =>
+        this.#onEffects([{ type: 'copy-text', source: 'review-selection', text, announce }], performance.now()),
+    });
   }
 
   #synchronizeQuestionTextarea(): void {
@@ -5445,7 +5425,7 @@ export class ReviewingView {
     this.#roots.start();
     this.renderer.keyInput.on('keypress', this.#onKeyPress);
     this.renderer.keyInput.on('paste', this.#onPaste);
-    this.renderer.on('selection', this.#onSelection);
+    this.#selection.start();
     this.renderer.on('resize', this.#onResize);
     this.renderer.on('frame', this.#onHighlightFrame);
     this.render();
@@ -5511,7 +5491,7 @@ export class ReviewingView {
     this.#started = false;
     this.renderer.keyInput.off('keypress', this.#onKeyPress);
     this.renderer.keyInput.off('paste', this.#onPaste);
-    this.renderer.off('selection', this.#onSelection);
+    this.#selection.stop();
     this.renderer.off('resize', this.#onResize);
     this.renderer.off('frame', this.#onHighlightFrame);
     this.renderer.off('frame', this.#onWheelRenderFrame);
@@ -5524,7 +5504,6 @@ export class ReviewingView {
     this.#questionTextarea = undefined;
     this.#discussionPage = undefined;
     this.#pointerGesture = undefined;
-    this.#reviewSelectionText = undefined;
   }
 }
 
