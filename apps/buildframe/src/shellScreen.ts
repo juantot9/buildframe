@@ -5,6 +5,7 @@ import type { RenderChild } from './renderTree.js';
 import type { CommandOutcome } from './shellCommands.js';
 import type { ConfigurationRow } from './shellConfiguration.js';
 import type { FrameLook } from './shellFrame.js';
+import type { HomeChoice } from './shellHome.js';
 import {
   defineKeyTable,
   type FooterMode,
@@ -83,10 +84,25 @@ export interface ScreenDefinition<S, Mode extends string = string> {
   settings?(state: S): { readonly rows: readonly ConfigurationRow[]; readonly descriptions: readonly string[] };
   /** The `!` panel's lines: what the screen's actions can do at the State version shown. */
   checks?(state: S): readonly string[];
+  /** The rows this screen adds to Home, and the views they are read from. */
+  readonly home?: ScreenHome;
   /** Something on the screen moves (a spinner): the shell draws again one spinner step later. */
   animating?(state: S): boolean;
   /** Moves the screen's spinners one step. */
   advance?(state: S): void;
+}
+
+/** One row a screen adds to Home, and what choosing it does. */
+export interface HomeRow extends Omit<HomeChoice, 'icon'> {
+  /** The row's mark, and its ASCII stand-in. */
+  readonly icon: { readonly text: string; readonly ascii: string };
+  choose(): ScreenResult;
+}
+
+export interface ScreenHome {
+  /** The views the rows are read from; Home reads every screen's together, at one State version. */
+  views?(): Readonly<Record<string, WorkspaceViewScope>>;
+  rows(views: Readonly<Record<string, WorkspaceView>>): readonly HomeRow[];
 }
 
 /** A checked screen, with the key table the shell draws its footer and `?` list from. */

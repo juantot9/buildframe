@@ -104,6 +104,27 @@ const summary = defineScreen<SummaryState, 'idle' | 'reviewing'>({
     state.home = views.home as WorkspaceHomeView;
   },
   checks: () => ['Start a Review: ready'],
+  home: {
+    views: () => ({ home: { kind: 'workspace.home', offset: 0, limit: 1 } }),
+    rows: views => [
+      {
+        id: 'summary',
+        icon: { text: '◇', ascii: '+' },
+        label: `Summary of Reviews (${(views.home as WorkspaceHomeView | undefined)?.header.totalReviews ?? 0})`,
+        description: 'Count the Reviews and start one.',
+        available: true,
+        choose: () => [{ type: 'open', screen: 'summary' }],
+      },
+      {
+        id: 'later',
+        icon: { text: '◷', ascii: '%' },
+        label: 'Later (not yet)',
+        description: 'Nothing here yet.',
+        available: false,
+        choose: () => [{ type: 'say', text: 'Not yet.', tone: 'info' }],
+      },
+    ],
+  },
   settled: (state, _command, outcome) => {
     state.starting = false;
     if (outcome.status !== 'answered') return [];
@@ -177,13 +198,14 @@ describe('the shell', () => {
 
   async function startShell(
     owner: WorkspaceRuntimeOwner,
-    userConfiguration: UserConfiguration,
+    userConfiguration: UserConfiguration = createEphemeralUserConfiguration(),
+    first: { readonly screen: string } | 'home' = { screen: 'summary' },
   ): Promise<{ shell: Shell; terminal: TestRendererSetup }> {
     const terminal = await createTestRenderer({ width: 80, height: 12, exitOnCtrlC: false, kittyKeyboard: true });
     const shell = createShell({
       workspace: owner.workspace,
       screens: [summary, details],
-      first: { screen: 'summary' },
+      ...(first === 'home' ? {} : { first }),
       renderer: terminal.renderer,
       createClipboard: recordingClipboard,
       userConfiguration,
@@ -268,5 +290,34 @@ describe('the shell', () => {
     terminal.mockInput.pressKey('q');
     await shell.closed;
     expect(saved.at(-1)?.background).toBe('terminal');
+  });
+
+  it('opens on Home, built from the rows each screen adds, and comes back to it with Esc', async () => {
+    const owner = await openWorkspace();
+    const { shell, terminal } = await startShell(owner, undefined, 'home');
+
+    await shows(terminal, 'Summary of Reviews (0)');
+    expect(frame(terminal)).toContain('BuildFrame / Home');
+    expect(frame(terminal)).toContain('1 choice');
+    expect(frame(terminal)).toContain('Count the Reviews and start one.');
+    expect(frame(terminal)).toContain('[j/k] move  [Enter] open');
+
+    terminal.mockInput.pressKey('j');
+    await shows(terminal, 'Nothing here yet.');
+    terminal.mockInput.pressEnter();
+    await shows(terminal, 'Not yet.');
+
+    terminal.mockInput.pressKey('k');
+    terminal.mockInput.pressEnter();
+    await shows(terminal, 'BuildFrame / Summary');
+    terminal.mockInput.pressKey('s');
+    await shows(terminal, 'Started.');
+
+    // Back on Home, its rows are read again at the new State version.
+    terminal.mockInput.pressEscape();
+    await shows(terminal, 'Summary of Reviews (1)');
+
+    terminal.mockInput.pressKey('q');
+    await shell.closed;
   });
 });

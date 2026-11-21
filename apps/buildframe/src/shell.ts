@@ -27,6 +27,7 @@ import { theme, type Look } from './shellLook.js';
 import { DebouncedSave } from './shellPreferences.js';
 import { ShellPulse } from './shellPulse.js';
 import { ShellRoots } from './shellRoots.js';
+import { HOME_SCREEN, homeScreen } from './shellHomeScreen.js';
 import { dispatchScreenKey, type Screen, type ScreenEffect } from './shellScreen.js';
 import { ShellTerminal } from './shellTerminal.js';
 import { ShellViews } from './shellViews.js';
@@ -43,8 +44,8 @@ export interface ShellOptions {
   readonly workspace: Workspace;
   // Screens keep their own state types; the shell only hands each its own.
   readonly screens: readonly Screen<any, any>[];
-  /** The screen shown first, and what it opens with. */
-  readonly first: { readonly screen: string; readonly args?: unknown };
+  /** The screen shown first, and what it opens with; Home when a screen adds rows to it. */
+  readonly first?: { readonly screen: string; readonly args?: unknown };
   readonly presentation?: Partial<Look['presentation']>;
   /** Portable UI preferences; production supplies the file-backed Module. */
   readonly userConfiguration?: UserConfiguration;
@@ -87,6 +88,7 @@ class ShellApplication implements Shell {
   readonly closed: Promise<void>;
   readonly #options: ShellOptions;
   readonly #screens: ReadonlyMap<string, Screen<any, any>>;
+  readonly #first: { readonly screen: string; readonly args?: unknown };
   readonly #stack: OpenScreen[] = [];
   readonly #views: ShellViews;
   readonly #presentation: Look['presentation'];
@@ -127,8 +129,10 @@ class ShellApplication implements Shell {
       this.#resolveClosed = resolve;
     });
     this.#options = options;
-    this.#screens = new Map(options.screens.map(screen => [screen.name, screen]));
-    if (!this.#screens.has(options.first.screen)) throw new TypeError(`No screen named ${options.first.screen}`);
+    const home = options.screens.some(screen => screen.home !== undefined) ? [homeScreen(options.screens)] : [];
+    this.#screens = new Map([...home, ...options.screens].map(screen => [screen.name, screen]));
+    this.#first = options.first ?? { screen: HOME_SCREEN };
+    if (!this.#screens.has(this.#first.screen)) throw new TypeError(`No screen named ${this.#first.screen}`);
     this.#presentation = { ascii: false, noColor: false, ...options.presentation };
     const configuration = (this.#userConfiguration = options.userConfiguration ?? createEphemeralUserConfiguration());
     this.#preferencesSave = new DebouncedSave(async preferences => {
@@ -197,7 +201,7 @@ class ShellApplication implements Shell {
     renderer.on('resize', this.#onResize);
     this.#subscribeToConnection();
     if (warning !== undefined) this.#say(warning, 'warning');
-    await this.#open(this.#options.first.screen, this.#options.first.args);
+    await this.#open(this.#first.screen, this.#first.args);
   }
 
   stop(): Promise<void> {

@@ -132,10 +132,14 @@ export function homeLauncherCard(
   choices: readonly HomeChoice[],
   selectedId: string,
   idPrefix: string,
-  pointer: (id: string) => HomePointer,
+  pointer?: (id: string) => HomePointer,
 ): HomeCard {
   const colors = theme(state);
-  const selected = choices.find(choice => choice.id === selectedId) ?? choices[0]!;
+  const selected = choices.find(choice => choice.id === selectedId) ?? choices[0];
+  if (selected === undefined) {
+    const empty = homeSentence(state, 'Nothing to open yet.', colors.muted);
+    return homePane(state, `${idPrefix}-home-pane`, 'Home', '', empty.length, ...empty);
+  }
   // The card keeps the height of the longest description, so moving between
   // choices never makes it jump.
   const descriptionRows = Math.max(
@@ -153,7 +157,7 @@ export function homeLauncherCard(
       homeRow(state, `${choice.icon}  ${choice.label}`, choice.id === selectedId, {
         id: `${idPrefix}-home-choice-${choice.id}`,
         fg: choice.available ? colors.text : colors.muted,
-        pointer: pointer(choice.id),
+        ...(pointer === undefined ? {} : { pointer: pointer(choice.id) }),
       }),
     ),
     label(state, '', { height: 1 }),
