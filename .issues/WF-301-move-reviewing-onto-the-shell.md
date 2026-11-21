@@ -73,7 +73,29 @@ Each step frame-identical, with the three frozen files only shrinking (view
   (WF-300 decides the grouping). Pointer clicks on the shell's Home wait for
   the input step below.
 
-Remaining: Reviewing itself becomes a screen. Its keyboard, pointer, wheel,
+Then Reviewing joined the shell (2026-11-21):
+
+- `1dd5acb` `ShellSettings` (theme, background, preferences, Configuration)
+  leaves `shell.ts`.
+- `c421d31` Reviewing runs as a screen of the shell: `createReviewingApplication`
+  is `createShell` with one screen whose `extend` (scaffolding, first screen
+  only) receives the terminal, clipboard and theme detection the shell opened.
+  Its loader, model and view are that extension.
+- `ce5960d`, `61301e8`, `76d81b9`, `308b0be` Selection copying, clicks, the
+  Message composer and the render loop are shell parts (`ShellSelection`,
+  `ShellPointer`, `ShellComposer`, `ShellRenderLoop`) that `ReviewingView`
+  composes; the view is 214.7 KB.
+- The shell owns saved preferences; Reviewing reads and saves through it. A
+  failed save says "Settings were not saved" (was "Layout was not saved").
+
+Still in `extend`: the frame composition (Reviewing's header, status line,
+footer table and its own dialog layers), key routing (Reviewing's model holds
+the `?` list, Configuration and `!` state), the wheel and glide, pointer hover,
+and the loader. Next: the shell composes Reviewing's frame through screen hooks
+(header, said, footer, layers) and owns `?`, `c` and `!` for it, then routes
+its keys; then Home rows from `home`.
+
+Remaining before that: Reviewing itself becomes a screen. Its keyboard, pointer, wheel,
 selection and composer wiring leave `ReviewingView`; its dialogs become
 shell-routed layers; its Home rows come from `home`; its loader stays its
 own behind the screen until views can carry it. Then the behaviour tests move
