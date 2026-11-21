@@ -1,5 +1,5 @@
 ---
-id: WF-324
+id: WIN-003
 title: "Concurrent Workspace opens can fail on Windows"
 status: open
 labels:

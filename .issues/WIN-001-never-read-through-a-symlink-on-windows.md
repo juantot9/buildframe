@@ -1,5 +1,5 @@
 ---
-id: WF-322
+id: WIN-001
 title: "Never read through a symlink on Windows"
 status: open
 labels:

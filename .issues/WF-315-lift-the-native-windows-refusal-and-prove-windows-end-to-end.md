@@ -6,7 +6,7 @@ labels:
   - wayfinder:task
 parent: WF-304
 assignee: null
-blocked_by: [WF-305, WF-306, WF-307, WF-308, WF-309, WF-310, WF-311, WF-312, WF-313, WF-314, WF-320, WF-322, WF-323, WF-324, WF-325]
+blocked_by: [WF-305, WF-306, WF-307, WF-308, WF-309, WF-310, WF-311, WF-312, WF-313, WF-314, WF-320, WIN-001, WIN-002, WIN-003, WIN-004]
 created: 2026-11-19
 ---
 
@@ -29,10 +29,10 @@ BuildFrame claims native Windows support, and the `windows` branch merges into
 - [Check the TUI in Windows terminals](./WF-314-check-the-tui-in-windows-terminals.md)
 - [Ctrl+V and right-click do not paste in conhost](./WF-320-paste-on-windows-consoles.md)
   (owner decision, 2026-11-20: a Windows user must be able to paste a Message)
-- [Never read through a symlink on Windows](./WF-322-never-read-through-a-symlink-on-windows.md)
-- [Outside-checkout Context paths on Windows](./WF-323-outside-checkout-context-paths-on-windows.md)
-- [Concurrent Workspace opens can fail on Windows](./WF-324-concurrent-workspace-opens-fail-on-windows.md)
-- [A moved receipt changed during a read was missed on Windows](./WF-325-moved-receipt-change-missed-on-windows.md)
+- [Never read through a symlink on Windows](./WIN-001-never-read-through-a-symlink-on-windows.md)
+- [Outside-checkout Context paths on Windows](./WIN-002-outside-checkout-context-paths-on-windows.md)
+- [Concurrent Workspace opens can fail on Windows](./WIN-003-concurrent-workspace-opens-fail-on-windows.md)
+- [A moved receipt changed during a read was missed on Windows](./WIN-004-moved-receipt-change-missed-on-windows.md)
 
 Also requires
 [A one-line edit in a CRLF-checked-out file shows the whole file rewritten](./WF-288-crlf-files-diff-as-rewritten.md)
@@ -129,12 +129,12 @@ Windows (clean install, round trips).
   on the reference machine ran for the first time. Two that need a FIFO are
   now POSIX-only, and one runs its `chmod 0o000` step on POSIX only. The
   rest are product gaps, each blocking this ticket:
-  [WF-322](./WF-322-never-read-through-a-symlink-on-windows.md) (reads
-  follow symlinks), [WF-323](./WF-323-outside-checkout-context-paths-on-windows.md)
+  [WIN-001](./WIN-001-never-read-through-a-symlink-on-windows.md) (reads
+  follow symlinks), [WIN-002](./WIN-002-outside-checkout-context-paths-on-windows.md)
   (outside-checkout paths joined with `/`),
-  [WF-324](./WF-324-concurrent-workspace-opens-fail-on-windows.md)
+  [WIN-003](./WIN-003-concurrent-workspace-opens-fail-on-windows.md)
   (concurrent opens refused at `lock-registry`) and
-  [WF-325](./WF-325-moved-receipt-change-missed-on-windows.md) (a change
+  [WIN-004](./WIN-004-moved-receipt-change-missed-on-windows.md) (a change
   during a read missed).
 
 ## Verification

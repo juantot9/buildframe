@@ -41,6 +41,9 @@ Built on the `windows` branch, which merges `main` in often. Nothing from it
 lands on `main` until Windows support ships with
 [Lift the native-Windows refusal and prove Windows end to end](./WF-315-lift-the-native-windows-refusal-and-prove-windows-end-to-end.md).
 
+Tickets filed on this branch from 2026-11-22 take `WIN-` ids (`WIN-001`, …),
+so they never collide with the `WF-` numbers `main` keeps assigning.
+
 ## Children and order
 
 Can start now:
@@ -56,11 +59,11 @@ Can start now:
 9. [Connect Codex on Windows](./WF-321-connect-codex-on-windows.md) — the
    Codex adapter came from `main` with the 2026-11-21 rebase and has not run
    on Windows; whether it blocks WF-315 is still to decide
-10. [Never read through a symlink on Windows](./WF-322-never-read-through-a-symlink-on-windows.md)
+10. [Never read through a symlink on Windows](./WIN-001-never-read-through-a-symlink-on-windows.md)
     — no `O_NOFOLLOW` on Windows; found when CI ran with symlinks
-11. [Outside-checkout Context paths on Windows](./WF-323-outside-checkout-context-paths-on-windows.md)
-12. [Concurrent Workspace opens can fail on Windows](./WF-324-concurrent-workspace-opens-fail-on-windows.md)
-13. [A moved receipt changed during a read was missed on Windows](./WF-325-moved-receipt-change-missed-on-windows.md)
+11. [Outside-checkout Context paths on Windows](./WIN-002-outside-checkout-context-paths-on-windows.md)
+12. [Concurrent Workspace opens can fail on Windows](./WIN-003-concurrent-workspace-opens-fail-on-windows.md)
+13. [A moved receipt changed during a read was missed on Windows](./WIN-004-moved-receipt-change-missed-on-windows.md)
 
 Blocked:
 

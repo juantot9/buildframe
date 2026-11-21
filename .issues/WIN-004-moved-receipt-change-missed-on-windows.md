@@ -1,5 +1,5 @@
 ---
-id: WF-325
+id: WIN-004
 title: "A moved receipt changed during a read was missed on Windows"
 status: open
 labels:
