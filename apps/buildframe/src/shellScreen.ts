@@ -4,6 +4,7 @@ import type { WorkspaceCommand, WorkspaceView, WorkspaceViewScope } from '@build
 import { Key, matchesKey, type ReviewingInput, type ReviewingKeySpec } from './reviewingInput.js';
 import type { RenderChild } from './renderTree.js';
 import type { ShellClipboard } from './shellClipboard.js';
+import type { ReviewingPreferences, ReviewingThemeDefinition } from './userConfiguration.js';
 import type { CommandOutcome } from './shellCommands.js';
 import type { ConfigurationRow } from './shellConfiguration.js';
 import type { FrameLook } from './shellFrame.js';
@@ -106,6 +107,16 @@ export interface ScreenSurface {
   readonly clipboard: ShellClipboard;
   /** The terminal's light or dark when the screen opens; later changes arrive through `themeMode`. */
   readonly terminalThemeMode: 'dark' | 'light' | undefined;
+  /** The saved preferences as the shell read them (absent when reading failed), and what to warn about. */
+  readonly preferences: {
+    readonly loaded?: {
+      readonly preferences: ReviewingPreferences;
+      readonly themes: readonly ReviewingThemeDefinition[];
+    };
+    readonly warning?: string;
+  };
+  /** Saves every preference; the shell owns the file and says when a save fails. */
+  savePreferences(preferences: ReviewingPreferences): void;
   /** Leaves the app. */
   quit(): void;
 }
@@ -115,6 +126,8 @@ export interface ScreenExtension {
   start(): Promise<void>;
   stop(): Promise<void>;
   themeMode?(mode: 'dark' | 'light'): void;
+  /** A warning about the screen's settings, for the screen to show. */
+  warn?(sentence: string): void;
 }
 
 /** One row a screen adds to Home, and what choosing it does. */

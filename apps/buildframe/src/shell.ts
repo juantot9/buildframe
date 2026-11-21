@@ -82,6 +82,7 @@ class ShellApplication implements Shell {
   readonly #views: ShellViews;
   readonly #presentation: Look['presentation'];
   readonly #settings: ShellSettings;
+  #loadWarning: string | undefined;
   #checksOpen = false;
   #openingTerminal: Promise<ShellTerminal> | undefined;
   #terminal: ShellTerminal | undefined;
@@ -108,8 +109,13 @@ class ShellApplication implements Shell {
     this.#first = options.first ?? { screen: HOME_SCREEN };
     if (!this.#screens.has(this.#first.screen)) throw new TypeError(`No screen named ${this.#first.screen}`);
     this.#presentation = { ascii: false, noColor: false, ...options.presentation };
-    this.#settings = new ShellSettings(options.userConfiguration ?? createEphemeralUserConfiguration(), (text, tone) =>
-      this.#say(text, tone),
+    this.#settings = new ShellSettings(
+      options.userConfiguration ?? createEphemeralUserConfiguration(),
+      (text, tone) => {
+        const extension = this.#current?.extension;
+        if (extension?.warn === undefined) this.#say(text, tone);
+        else if (!this.#stopped) extension.warn(text);
+      },
     );
     this.#views = new ShellViews(options.workspace, {
       changed: () => this.#render(),
@@ -127,7 +133,7 @@ class ShellApplication implements Shell {
   }
 
   async #start(): Promise<void> {
-    const warning = await this.#settings.load();
+    const warning = (this.#loadWarning = await this.#settings.load());
     if (this.#stopped) return;
     this.#openingTerminal = ShellTerminal.open({
       provided: this.#options.renderer,
@@ -228,6 +234,11 @@ class ShellApplication implements Shell {
         renderer,
         clipboard,
         terminalThemeMode: this.#settings.display.terminalThemeMode,
+        preferences: {
+          ...(this.#settings.loaded === undefined ? {} : { loaded: this.#settings.loaded }),
+          ...(this.#loadWarning === undefined ? {} : { warning: this.#loadWarning }),
+        },
+        savePreferences: preferences => this.#settings.save(preferences),
         quit: () => void this.stop(),
       });
       this.#stack.push(open);

@@ -13,7 +13,6 @@ import type { ReviewIdentity, ReviewSnapshotIdentity } from '@buildframe/workspa
 import { ShellClipboard, terminalFallbackClipboard, type ShellClipboardFactory } from './shellClipboard.js';
 import { createShell } from './shell.js';
 import { defineScreen, type Screen, type ScreenExtension, type ScreenSurface } from './shellScreen.js';
-import { DebouncedSave } from './shellPreferences.js';
 import { executeCommand, semanticError } from './shellCommands.js';
 import { isLiveScope, liveViewIdentity, ShellWatch } from './shellWatch.js';
 import {
@@ -45,11 +44,7 @@ import { ReviewingView } from './reviewingView.js';
 import type { ActiveHomeRoute, ActiveReviewRoute, ActiveRoute, ReviewingSubscriptionScope } from './reviewingRoutes.js';
 import { ShellPulse, type PulseSource } from './shellPulse.js';
 import { ReviewingHighlight } from './reviewingHighlight.js';
-import {
-  createEphemeralUserConfiguration,
-  type ReviewingPreferences,
-  type UserConfiguration,
-} from './userConfiguration.js';
+import { createEphemeralUserConfiguration, type UserConfiguration } from './userConfiguration.js';
 
 export interface ReviewingApplicationOptions {
   /** A connected runtime's closed Workspace Interface. */
@@ -98,20 +93,6 @@ class ReviewingExtension implements ScreenExtension {
   readonly #reviewLoads = new Map<string, Promise<void>>();
   readonly #reviewDiffLoads = new Map<string, Promise<void>>();
   readonly #watch: ShellWatch;
-  readonly #preferencesSave = new DebouncedSave<ReviewingPreferences>(async preferences => {
-    try {
-      const result = await this.#userConfiguration.saveReviewingPreferences(preferences);
-      if (result.status === 'rejected' && !this.#stopped) {
-        this.#model.reportConfigurationWarning(`Layout was not saved: ${result.reason}.`);
-        this.#render();
-      }
-    } catch (error) {
-      if (!this.#stopped) {
-        this.#model.reportConfigurationWarning(`Couldn’t save the layout. ${semanticError(error)}`);
-        this.#render();
-      }
-    }
-  });
   #started = false;
   #stopped = false;
   #diffPrefetchInFlight = false;
@@ -143,14 +124,8 @@ class ReviewingExtension implements ScreenExtension {
   async start(): Promise<void> {
     if (this.#started) return;
     this.#started = true;
-    let configurationWarning: string | undefined;
-    try {
-      const loaded = await this.#userConfiguration.load();
-      this.#model.applyReviewingPreferences(loaded.preferences, loaded.themes);
-      configurationWarning = loaded.warning;
-    } catch (error) {
-      configurationWarning = `Couldn’t read your settings, so defaults are in use. ${semanticError(error)}`;
-    }
+    const { loaded, warning: configurationWarning } = this.#surface.preferences;
+    if (loaded !== undefined) this.#model.applyReviewingPreferences(loaded.preferences, loaded.themes);
     this.#renderer = this.#surface.renderer;
     this.#highlight.attachRenderer(this.#renderer.nativeScene);
     this.#clipboard = this.#surface.clipboard;
@@ -242,12 +217,18 @@ class ReviewingExtension implements ScreenExtension {
       clearTimeout(this.#neighborWarmupTimer);
       this.#neighborWarmupTimer = undefined;
     }
-    await this.#preferencesSave.settle();
     this.#view?.stop();
     this.#view = undefined;
     this.#clipboard = undefined;
     this.#renderer = undefined;
     await this.#highlight.destroy();
+  }
+
+  /** A save of the settings failed. */
+  warn(sentence: string): void {
+    if (this.#stopped) return;
+    this.#model.reportConfigurationWarning(sentence);
+    this.#render();
   }
 
   /** The terminal reported a new light or dark. */
@@ -379,7 +360,7 @@ class ReviewingExtension implements ScreenExtension {
       } else if (effect.type === 'locate-question') {
         void this.#locateQuestion(effect.reviewIdentity, effect.itemIdentity, effect.questionAbsolute);
       } else if (effect.type === 'save-reviewing-preferences') {
-        this.#preferencesSave.schedule(effect.preferences);
+        this.#surface.savePreferences(effect.preferences);
       } else if (effect.type === 'copy-text') {
         void this.#copyText(effect);
       } else if (effect.type === 'load-step-changes' || effect.type === 'load-step-change-diff') {

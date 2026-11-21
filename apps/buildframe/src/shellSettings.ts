@@ -47,6 +47,10 @@ export class ShellSettings {
   readonly #say: (text: string, tone: NoticeTone) => void;
   readonly #save: DebouncedSave<ReviewingPreferences>;
   #preferences: ReviewingPreferences = DEFAULT_REVIEWING_PREFERENCES;
+  /** What was read, when reading worked; a screen that keeps its own copy starts from it. */
+  #loaded:
+    | { readonly preferences: ReviewingPreferences; readonly themes: readonly ReviewingThemeDefinition[] }
+    | undefined;
   #window: ConfigurationWindow | undefined;
 
   constructor(configuration: UserConfiguration, say: (text: string, tone: NoticeTone) => void) {
@@ -70,10 +74,25 @@ export class ShellSettings {
       this.display.reviewingTheme = loaded.preferences.theme;
       this.display.background = loaded.preferences.background;
       this.display.customThemes = loaded.themes;
+      this.#loaded = { preferences: loaded.preferences, themes: loaded.themes };
       return loaded.warning;
     } catch (error) {
       return `Couldn’t read your settings, so defaults are in use. ${semanticError(error)}`;
     }
+  }
+
+  get loaded():
+    | { readonly preferences: ReviewingPreferences; readonly themes: readonly ReviewingThemeDefinition[] }
+    | undefined {
+    return this.#loaded;
+  }
+
+  /** Every preference at once, as a screen that keeps its own copy has them; saved shortly. */
+  save(preferences: ReviewingPreferences): void {
+    this.#preferences = preferences;
+    this.display.reviewingTheme = preferences.theme;
+    this.display.background = preferences.background;
+    this.#save.schedule(preferences);
   }
 
   look(presentation: Look['presentation']): Look {
