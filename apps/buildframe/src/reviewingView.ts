@@ -102,6 +102,7 @@ import {
   statusIcon,
 } from './reviewingFileGlyphs.js';
 import { ShellRoots } from './shellRoots.js';
+import { ShellComposer } from './shellComposer.js';
 import { ShellPointer } from './shellPointer.js';
 import { ShellSelection } from './shellSelection.js';
 import { shellFrame } from './shellFrame.js';
@@ -4973,26 +4974,16 @@ function screen(
   });
 }
 
-const QUESTION_EDITOR_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/gu;
-
-class QuestionTextareaRenderable extends TextareaRenderable {
-  override insertText(text: string): void {
-    // OpenTUI routes ordinary input and decoded, ANSI-free paste through here.
-    super.insertText(text.replace(QUESTION_EDITOR_CONTROL_PATTERN, ''));
-  }
-}
-
 /** OpenTUI implementation private to the deep Reviewing Application Module. */
 export class ReviewingView {
   readonly #model: ReviewingApplicationModel;
   readonly #roots: ShellRoots;
   readonly #onEffects: (effects: readonly ReviewingModelEffect[], inputStartedAt: number) => void;
   readonly #pointer: ShellPointer<ReviewingPointerTarget>;
-  #questionTextarea: TextareaRenderable | undefined;
+  readonly #composer: ShellComposer;
   #discussionPage: DiscussionPage | undefined;
   #contentPageSize: number | undefined;
   readonly #selection: ShellSelection;
-  #synchronizingQuestionTextarea = false;
   #wheelRenderQueued: NodeJS.Immediate | undefined;
   #wheelFramePending = false;
   #wheelRenderDirty = false;
@@ -5150,7 +5141,7 @@ export class ReviewingView {
     const input = reviewingInputFromKeyEvent(event);
     if (input === undefined) return;
     const inputStartedAt = performance.now();
-    const textarea = this.#questionTextarea;
+    const textarea = this.#composer.textarea;
     if (textarea !== undefined && this.#model.state.editor !== undefined) {
       const copyRequested = input.name === 'c' && (input.super || input.ctrl);
       const workflowRequested = input.name === 'f3' || input.name === 'f4';
@@ -5247,7 +5238,7 @@ export class ReviewingView {
   };
 
   readonly #onPaste = (event: PasteEvent): void => {
-    if (this.#questionTextarea !== undefined && this.#model.state.editor !== undefined) {
+    if (this.#composer.textarea !== undefined) {
       // The focused Textarea decodes and strips ANSI from bracketed paste,
       // then removes controls before synchronizing the model-owned draft.
       return;
@@ -5288,6 +5279,21 @@ export class ReviewingView {
     this.#model = model;
     this.#onEffects = onEffects;
     this.#roots = new ShellRoots(renderer, 'reviewing-screen');
+    this.#composer = new ShellComposer(renderer, 'reviewing-question-textarea', {
+      draft: () => this.#model.state.editor,
+      edited: (body, cursor) => this.#model.synchronizeMessageEditor(body, cursor),
+      submit: () => {
+        const inputStartedAt = performance.now();
+        const effects = this.#model.handleInput(
+          { name: 'enter', ctrl: false, alt: false, shift: false, super: false },
+          inputStartedAt,
+        );
+        this.render();
+        this.#onEffects(effects, inputStartedAt);
+      },
+      render: () => this.render(),
+      running: () => this.#started,
+    });
     this.#pointer = new ShellPointer(renderer, {
       refine: (target, event) =>
         target.kind === 'region' && target.region === 'diff'
@@ -5301,92 +5307,6 @@ export class ReviewingView {
       copy: (text, announce) =>
         this.#onEffects([{ type: 'copy-text', source: 'review-selection', text, announce }], performance.now()),
     });
-  }
-
-  #synchronizeQuestionTextarea(): void {
-    if (this.#synchronizingQuestionTextarea) return;
-    const textarea = this.#questionTextarea;
-    const editor = this.#model.state.editor;
-    if (textarea === undefined || editor === undefined) return;
-    const wasEmpty = editor.body.length === 0;
-    const accepted = this.#model.synchronizeMessageEditor(textarea.plainText, textarea.cursorOffset);
-    if (accepted) {
-      // The footer's keys differ for an empty draft ([Esc] close) and a typed
-      // one ([Esc] discard); redraw only when that flips, not on every key.
-      if (wasEmpty !== (editor.body.length === 0)) {
-        queueMicrotask(() => {
-          if (this.#started) this.render();
-        });
-      }
-      return;
-    }
-
-    this.#synchronizingQuestionTextarea = true;
-    textarea.setText(editor.body);
-    if (editor.cursor >= editor.body.length) textarea.gotoBufferEnd();
-    else textarea.cursorOffset = editor.cursor;
-    this.#synchronizingQuestionTextarea = false;
-    queueMicrotask(() => {
-      if (this.#started) this.render();
-    });
-  }
-
-  #submitQuestionTextarea(): void {
-    const textarea = this.#questionTextarea;
-    if (textarea === undefined) return;
-    this.#synchronizeQuestionTextarea();
-    queueMicrotask(() => {
-      if (!this.#started || this.#questionTextarea !== textarea || this.#model.state.editor === undefined) {
-        return;
-      }
-      const inputStartedAt = performance.now();
-      const effects = this.#model.handleInput(
-        {
-          name: 'enter',
-          ctrl: false,
-          alt: false,
-          shift: false,
-          super: false,
-        },
-        inputStartedAt,
-      );
-      this.render();
-      this.#onEffects(effects, inputStartedAt);
-    });
-  }
-
-  #ensureQuestionTextarea(): TextareaRenderable | undefined {
-    const editor = this.#model.state.editor;
-    if (editor === undefined) return undefined;
-    let textarea = this.#questionTextarea;
-    if (textarea === undefined || textarea.isDestroyed) {
-      textarea = new QuestionTextareaRenderable(this.renderer, {
-        id: 'reviewing-question-textarea',
-        width: '100%',
-        height: 2,
-        initialValue: editor.body,
-        wrapMode: 'word',
-        cursorStyle: { style: 'block', blinking: true },
-        keyBindings: [
-          { name: 'return', action: 'submit' },
-          { name: 'kpenter', action: 'submit' },
-          { name: 'linefeed', action: 'submit' },
-        ],
-        onContentChange: () => this.#synchronizeQuestionTextarea(),
-        onCursorChange: () => this.#synchronizeQuestionTextarea(),
-        onSubmit: () => this.#submitQuestionTextarea(),
-      });
-      this.#questionTextarea = textarea;
-      if (editor.cursor >= editor.body.length) textarea.gotoBufferEnd();
-      else textarea.cursorOffset = editor.cursor;
-    } else if (textarea.plainText !== editor.body) {
-      this.#synchronizingQuestionTextarea = true;
-      textarea.setText(editor.body);
-      if (editor.cursor >= editor.body.length) textarea.gotoBufferEnd();
-      else textarea.cursorOffset = editor.cursor;
-      this.#synchronizingQuestionTextarea = false;
-    }
-    return textarea;
   }
 
   start(): void {
@@ -5421,16 +5341,8 @@ export class ReviewingView {
     this.#model.setViewport(this.renderer.width, this.renderer.height);
     const colors = theme(this.#model.state);
     this.renderer.setBackgroundColor(this.#model.state.presentation.noColor ? 'transparent' : colors.background);
-    const editorRemainsOpen = this.#model.state.editor !== undefined;
-    const replaced = this.#roots.retire(() => {
-      // The composer survives the swap: it leaves the old tree before that tree retires.
-      if (editorRemainsOpen && this.#questionTextarea !== undefined && !this.#questionTextarea.isDestroyed) {
-        this.#questionTextarea.blur();
-        this.#questionTextarea.parent?.remove(this.#questionTextarea);
-      }
-    });
-    if (replaced && !editorRemainsOpen) this.#questionTextarea = undefined;
-    const textarea = this.#ensureQuestionTextarea();
+    if (this.#roots.retire(() => this.#composer.detach())) this.#composer.replaced();
+    const textarea = this.#composer.ensure();
     this.#discussionPage = undefined;
     this.#contentPageSize = undefined;
     this.#roots.mount(
@@ -5471,7 +5383,7 @@ export class ReviewingView {
     this.#wheelFramePending = false;
     this.#wheelRenderDirty = false;
     this.#roots.stop();
-    this.#questionTextarea = undefined;
+    this.#composer.stop();
     this.#discussionPage = undefined;
     this.#pointer.cancel();
   }
