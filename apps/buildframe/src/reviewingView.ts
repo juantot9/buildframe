@@ -78,7 +78,6 @@ import {
   displayCellSlice,
   codeRowStarts,
   fitDisplayCellsEnd,
-  fitDisplayCellsStart,
   wrapDisplayCellRows,
 } from './displayCells.js';
 import { reviewingFiletype } from './highlightAssets.js';
@@ -96,11 +95,19 @@ import {
 import { REVIEWING_KEYS, reviewingFooterMode, reviewingHelpMode } from './reviewingKeys.js';
 import { footerSentence, keyList, keysRow, type KeyListItem } from './shellKeys.js';
 import { PaneGlider } from './shellGlide.js';
-import { fileStatus, fileTypeIcon, NERD_ICONS, nerdIcons, statusIcon } from './reviewingFileGlyphs.js';
+import {
+  fileStatus,
+  fileTypeIcon,
+  NERD_ICONS,
+  nerdIcons,
+  statusColoredRow,
+  statusIcon,
+} from './reviewingFileGlyphs.js';
 import { ShellRoots } from './shellRoots.js';
 import { shellFrame } from './shellFrame.js';
 import { agentIndicator, dialogHeight, dialogTop, keyListPanel, shellHeader } from './shellChrome.js';
 import { configurationDialog } from './shellConfiguration.js';
+import { fitPaneDetail, shortDisplayPath, treeName } from './reviewingPathText.js';
 import { reviewingSettings } from './reviewingSettings.js';
 
 export { INDIGO_NIGHT, MATCH_TERMINAL_THEME, QUIET_GRAPHITE, QUIET_PAPER, WARM_CARBON } from './shellLook.js';
@@ -429,56 +436,6 @@ function filePositionDetail(state: ReviewingApplicationState): string {
   return position === undefined ? '' : ` · file ${position.position} of ${position.total}`;
 }
 
-/** The last path segment, keeping a directory's trailing slash; the tree indent shows the rest. */
-function treeName(path: string): string {
-  const trimmed = path.endsWith('/') ? path.slice(0, -1) : path;
-  const name = trimmed.slice(trimmed.lastIndexOf('/') + 1);
-  return path.endsWith('/') ? `${name}/` : name;
-}
-
-function shortDisplayPath(displayPath: string): string {
-  const segments = displayPath.split('/');
-  return segments.slice(-2).join('/');
-}
-
-/**
- * Fits a pane detail such as `since last commit · src/review.ts` into `width`
- * cells without cutting words out of the middle. The file name is the part
- * worth keeping: the path shortens to its name first, then basis words drop
- * (never a leading PAST or composing), then the name loses its start.
- */
-function fitPaneDetail(detail: string, width: number, ellipsis: string): string {
-  if (displayCells(detail) <= width) return detail;
-  const segments = detail.split(' · ');
-  let pathAt = segments.length - 1;
-  for (let index = segments.length - 1; index >= 0; index -= 1) {
-    if (segments[index]!.includes('/')) {
-      pathAt = index;
-      break;
-    }
-  }
-  segments[pathAt] = segments[pathAt]!.replace(/^.*\//u, '');
-  const kept = (segment: string, index: number): boolean =>
-    index === pathAt || (index === 0 && /^(PAST|composing)$/u.test(segment)) || segment === 'loading';
-  const fits = (): boolean => displayCells(segments.join(' · ')) <= width;
-  for (let index = 0; !fits() && index < segments.length;) {
-    if (kept(segments[index]!, index)) index += 1;
-    else segments.splice(index, 1);
-  }
-  const joined = segments.join(' · ');
-  if (displayCells(joined) <= width) return joined;
-  const name = segments.findIndex(segment => segment.includes('.') || segment.includes(':'));
-  const at = name < 0 ? segments.length - 1 : name;
-  const others = displayCells(
-    segments
-      .filter((_, index) => index !== at)
-      .map(segment => `${segment} · `)
-      .join(''),
-  );
-  segments[at] = fitDisplayCellsStart(segments[at]!, Math.max(1, width - others), ellipsis);
-  return fitDisplayCellsEnd(segments.join(' · '), Math.max(1, width), ellipsis);
-}
-
 /**
  * The pane that reads as focused. While a Message is being written its
  * composer lives in the Diff, so the Diff shows focus there even when the
@@ -619,15 +576,28 @@ function filesPane(
       const status = nerdIcons(state)
         ? statusIcon(state, file.status).trim()
         : fileStatus(file.status, state.presentation.ascii);
-      const glyph =
-        status === ''
-          ? fileTypeIcon(state, file.displayPath)
-          : `${status} ${fileTypeIcon(state, file.displayPath)}`.trim();
+      const icon = fileTypeIcon(state, file.displayPath);
+      const fg = selected
+        ? selectionColors(state, 'files').fg
+        : file.status === 'unchanged'
+          ? colors.muted
+          : colors.text;
+      const after = `${status === '' || icon === '' ? icon : ` ${icon}`}  ${treeName(file.displayPath)}${count}${changed}`;
       return label(
         state,
-        `${selected ? (state.presentation.ascii ? '>' : '›') : ' '}${indent} ${glyph}  ${treeName(file.displayPath)}${count}${changed}`,
+        statusColoredRow(
+          state,
+          colors,
+          {
+            before: `${selected ? (state.presentation.ascii ? '>' : '›') : ' '}${indent} `,
+            status: file.status,
+            glyph: status,
+            after,
+          },
+          { fg, bold: selected },
+        ),
         {
-          fg: selected ? selectionColors(state, 'files').fg : file.status === 'unchanged' ? colors.muted : colors.text,
+          fg,
           bg: selected ? selectionColors(state, 'files').bg : colors.surface,
           bold: selected,
           height: 1,
@@ -721,11 +691,22 @@ function shownStepFilesPane(
         ? statusIcon(state, file.change).trim()
         : fileStatus(file.change, state.presentation.ascii);
       const lines = file.lines === undefined ? '' : `  +${file.lines.added} -${file.lines.removed}`;
+      const fg = selected ? selectionColors(state, 'files').fg : colors.text;
       return label(
         state,
-        `${selected ? (state.presentation.ascii ? '>' : '›') : ' '} ${status} ${fileTypeIcon(state, file.path.display)}  ${file.path.display}${lines}`,
+        statusColoredRow(
+          state,
+          colors,
+          {
+            before: `${selected ? (state.presentation.ascii ? '>' : '›') : ' '} `,
+            status: file.change,
+            glyph: status,
+            after: ` ${fileTypeIcon(state, file.path.display)}  ${file.path.display}${lines}`,
+          },
+          { fg, bold: selected },
+        ),
         {
-          fg: selected ? selectionColors(state, 'files').fg : colors.text,
+          fg,
           bg: selected ? selectionColors(state, 'files').bg : colors.surface,
           bold: selected,
           height: 1,
@@ -4327,7 +4308,8 @@ function jumpListOverlay(state: ReviewingApplicationState, bodyHeight: number): 
       list.kind === 'messages' ? items.find(candidate => candidate.reviewMessageIdentity === entry.key) : undefined;
     const badge = item === undefined ? undefined : stateBadge(state, item);
     const tail = badge === undefined ? '' : `  ${badge.glyph} ${badge.word}`;
-    const lead = list.kind === 'files' ? `${marker} ${fileStatus(entry.tail ?? '', ascii)}  ` : `${marker} `;
+    const status = list.kind === 'files' ? fileStatus(entry.tail ?? '', ascii) : '';
+    const lead = list.kind === 'files' ? `${marker} ${status}  ` : `${marker} `;
     // A state word is never cut: the text gives way before it, ending on its own ellipsis.
     const text = fitDisplayCellsEnd(
       entry.text.replaceAll('\n', ' '),
@@ -4343,11 +4325,28 @@ function jumpListOverlay(state: ReviewingApplicationState, bodyHeight: number): 
         flexDirection: 'row',
         backgroundColor: isSelected ? colors.accentSoft : colors.raised,
       },
-      label(state, `${lead}${text}`, {
-        fg: isSelected ? colors.accent : entry.current ? colors.text : colors.muted,
-        bold: isSelected || entry.current,
-        flexShrink: 1,
-      }),
+      label(
+        state,
+        statusColoredRow(
+          state,
+          colors,
+          {
+            before: `${marker} `,
+            status: entry.tail ?? '',
+            glyph: status,
+            after: `${lead.slice(marker.length + 1 + status.length)}${text}`,
+          },
+          {
+            fg: isSelected ? colors.accent : entry.current ? colors.text : colors.muted,
+            bold: isSelected || entry.current,
+          },
+        ),
+        {
+          fg: isSelected ? colors.accent : entry.current ? colors.text : colors.muted,
+          bold: isSelected || entry.current,
+          flexShrink: 1,
+        },
+      ),
       ...(badge === undefined
         ? []
         : [label(state, tail, { fg: toneColor(colors, badge.tone), flexShrink: 0, bold: isSelected })]),

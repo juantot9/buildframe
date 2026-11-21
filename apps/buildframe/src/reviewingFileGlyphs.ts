@@ -1,4 +1,7 @@
+import { RGBA, StyledText, TextAttributes } from '@opentui/core';
+
 import type { ReviewingApplicationState } from './reviewingModel.js';
+import { safeText, type Look, type SemanticTheme, type ThemeColor } from './shellLook.js';
 
 /** What a Files row shows before the name: the change letter and, when chosen, Nerd Font icons. */
 
@@ -55,4 +58,35 @@ export function fileTypeIcon(state: ReviewingApplicationState, displayPath: stri
   if (base === 'package-lock.json' || base.endsWith('.lock')) return NERD_ICONS.fileLock!;
   if (/^\.?git/.test(base)) return NERD_ICONS.fileGit!;
   return NERD_ICONS.file!;
+}
+
+/** A change's colour: new, gone, or otherwise changed. An unchanged file has none. */
+export function statusColor(colors: SemanticTheme, status: string): ThemeColor | undefined {
+  if (status === 'unchanged') return undefined;
+  if (status === 'added') return colors.success;
+  if (status === 'deleted') return colors.danger;
+  return colors.warning;
+}
+
+/**
+ * A file row whose change letter (or icon) takes the change's colour, the
+ * selected row included; the rest of the row keeps the row's colour. The
+ * letter is always there, so the colour only reinforces it.
+ */
+export function statusColoredRow(
+  look: Look,
+  colors: SemanticTheme,
+  row: { readonly before: string; readonly status: string; readonly glyph: string; readonly after: string },
+  rowStyle: { readonly fg: ThemeColor; readonly bold: boolean },
+): string | StyledText {
+  const color = row.glyph === '' || look.presentation.noColor ? undefined : statusColor(colors, row.status);
+  if (color === undefined || color === 'transparent') return `${row.before}${row.glyph}${row.after}`;
+  const ascii = look.presentation.ascii;
+  const attributes = rowStyle.bold ? TextAttributes.BOLD : 0;
+  const fg = rowStyle.fg === 'transparent' ? RGBA.defaultForeground() : RGBA.fromHex(rowStyle.fg);
+  return new StyledText([
+    { __isChunk: true, text: safeText(row.before, ascii), fg, attributes },
+    { __isChunk: true, text: safeText(row.glyph, ascii), fg: RGBA.fromHex(color), attributes },
+    { __isChunk: true, text: safeText(row.after, ascii), fg, attributes },
+  ]);
 }
