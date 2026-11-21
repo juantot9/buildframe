@@ -26,13 +26,18 @@ import {
   DIFF_WINDOW_SIZE,
   HARNESS_INTERACTION_WINDOW_SIZE,
   HOME_WINDOW_SIZE,
+  LIVE_FILE_WINDOW_SIZE,
+  MAX_PROJECTION_ATTEMPTS,
+  MESSAGE_BODY_LIMIT_BYTES,
+  MESSAGE_BODY_WINDOW_BYTES,
   MANIFEST_WINDOW_SIZE,
+  QUESTION_BODY_WINDOW_BYTES,
   QUESTION_WINDOW_SIZE,
+  REVIEW_BASIS_WINDOW_SIZE,
+  REVIEW_MESSAGE_WINDOW_SIZE,
   SEARCH_RESULT_WINDOW_SIZE,
   VERSION_WINDOW_SIZE,
   ReviewingApplicationModel,
-  firstListedFile,
-  manifestFileItems,
   noticeToneOf,
   reviewingSourceKey,
   type HomeMode,
@@ -42,6 +47,7 @@ import {
   type ReviewingPresentation,
   type ReviewViewBundle,
 } from './reviewingModel.js';
+import { firstListedFile, manifestFileItems } from './reviewingFileList.js';
 import { ReviewingView } from './reviewingView.js';
 import { NOTICE_LIFETIME_MS, SPINNER_FRAME_MS } from './reviewingStatus.js';
 import { ReviewingHighlight } from './reviewingHighlight.js';
@@ -50,14 +56,6 @@ import {
   type ReviewingPreferences,
   type UserConfiguration,
 } from './userConfiguration.js';
-
-const QUESTION_BODY_WINDOW_BYTES = 16 * 1024;
-const MESSAGE_BODY_WINDOW_BYTES = 16 * 1024;
-const MESSAGE_BODY_LIMIT_BYTES = 256 * 1024;
-const REVIEW_BASIS_WINDOW_SIZE = 64;
-const REVIEW_MESSAGE_WINDOW_SIZE = 32;
-const LIVE_FILE_WINDOW_SIZE = 64;
-const MAX_PROJECTION_ATTEMPTS = 5;
 
 export interface ReviewingApplicationOptions {
   /** A connected runtime's closed Workspace Interface. */

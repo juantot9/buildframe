@@ -1,4 +1,5 @@
-import { agentConnected, reviewingFiles, type ReviewingApplicationState } from './reviewingModel.js';
+import { agentConnected, type ReviewingApplicationState } from './reviewingModel.js';
+import { reviewingFiles } from './reviewingFileList.js';
 import {
   defineKeyTable,
   type FooterMode,

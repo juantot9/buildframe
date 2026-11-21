@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { reviewFileTreeNodes, type ReviewingFileItem } from '../../src/reviewingModel.js';
+import { reviewFileTreeNodes, type ReviewingFileItem } from '../../src/reviewingFileList.js';
 
 function file(displayPath: string, status: ReviewingFileItem['status']): ReviewingFileItem {
   return {

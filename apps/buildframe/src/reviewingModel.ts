@@ -34,7 +34,6 @@ import type {
   ReviewProjectedAction,
   ReviewProjectedActionKind,
   ReviewProjectedDiffRow,
-  ReviewProjectedFile,
   ReviewProjectedQuestionItem,
   ReviewQuestionLocationView,
   ReviewQuestionsAvailableView,
@@ -57,6 +56,13 @@ import type { ReviewComparisonSelection } from '@buildframe/workspace/workspace-
 import { fitDisplayCellsEnd } from './displayCells.js';
 import { contentWindowContainsLine } from './reviewingContent.js';
 import { Key, matchesKey, printableInput, type ReviewingInput } from './reviewingInput.js';
+import {
+  firstListedFile,
+  reviewFileTreeNodes,
+  reviewingFiles,
+  type ReviewFileTreeNode,
+  type ReviewingFileItem,
+} from './reviewingFileList.js';
 import { routeShellKey, type ShellKeyHost } from './shellInput.js';
 import { dispatchReviewingKey } from './reviewingActions.js';
 import { reasonSentence } from './reviewingReasons.js';
@@ -81,6 +87,14 @@ export const VERSION_WINDOW_SIZE = 64;
 export const SEARCH_RESULT_WINDOW_SIZE = 64;
 /** The Workspace's whole per-Review bound, so every Message of a Review finds its Handoff. */
 export const HARNESS_INTERACTION_WINDOW_SIZE = 128;
+// The Reviewing loader's windows and bounds.
+export const QUESTION_BODY_WINDOW_BYTES: number = 16 * 1024;
+export const MESSAGE_BODY_WINDOW_BYTES: number = 16 * 1024;
+export const MESSAGE_BODY_LIMIT_BYTES: number = 256 * 1024;
+export const REVIEW_BASIS_WINDOW_SIZE = 64;
+export const REVIEW_MESSAGE_WINDOW_SIZE = 32;
+export const LIVE_FILE_WINDOW_SIZE = 64;
+export const MAX_PROJECTION_ATTEMPTS = 5;
 const MESSAGE_MAX_BYTES = 256 * 1024;
 /** Keys that write a Message or move the Review's own files or saved points; a shown step waits for Esc first. */
 
@@ -1016,80 +1030,6 @@ export function diffRow(state: ReviewingApplicationState): ReviewProjectedDiffRo
   return diffView(state)?.window.rows.find(row => row.rowIdentity === state.selectedRowIdentity);
 }
 
-export interface ReviewingFileItem {
-  readonly fileIdentity: string;
-  readonly displayPath: string;
-  readonly pathBytesBase64: string;
-  readonly status: ReviewProjectedFile['status'] | 'unchanged';
-  readonly diffFileIdentity?: string;
-}
-
-export function reviewingFiles(
-  review: ReviewViewBundle | undefined,
-  scope: ReviewingApplicationState['fileScope'],
-): readonly ReviewingFileItem[] {
-  if (review === undefined) return [];
-  if (scope === 'all' && review.source.kind === 'live' && review.liveFiles?.status === 'available') {
-    return review.liveFiles.files.items.map(file => ({
-      fileIdentity: file.fileIdentity,
-      displayPath: file.path.display,
-      pathBytesBase64: file.path.bytesBase64,
-      status: file.status,
-      ...(file.changedFile === undefined ? {} : { diffFileIdentity: file.changedFile.fileIdentity }),
-    }));
-  }
-  return manifestFileItems(review.manifest.manifest.files);
-}
-
-/** Changed files as the Files pane lists them. */
-export function manifestFileItems(
-  files: ReviewViewBundle['manifest']['manifest']['files'],
-): readonly ReviewingFileItem[] {
-  return files.map(file => {
-    const side = file.newSide ?? file.oldSide;
-    if (side === undefined) throw new TypeError('Projected Review file has no side');
-    return {
-      fileIdentity: file.fileIdentity,
-      displayPath: file.displayPath,
-      pathBytesBase64: side.pathBytesBase64,
-      status: file.status,
-      diffFileIdentity: file.fileIdentity,
-    };
-  });
-}
-
-/** One navigable row of the Files tree: a folder node or a file. */
-export type ReviewFileTreeNode =
-  | {
-      readonly kind: 'directory';
-      readonly directory: string;
-      readonly collapsed: boolean;
-      readonly depth: number;
-      /** Flat index of the first file beneath this folder. */
-      readonly flat: number;
-    }
-  | {
-      readonly kind: 'file';
-      readonly file: ReviewingFileItem;
-      readonly flat: number;
-      readonly depth: number;
-    };
-
-interface ReviewFileTreeDirectory {
-  readonly path: string;
-  readonly depth: number;
-  readonly directories: Map<string, ReviewFileTreeDirectory>;
-  readonly files: { readonly file: ReviewingFileItem; readonly flat: number }[];
-  firstFlat: number;
-}
-
-/**
- * Flattens a bounded file window into a neo-tree-style node list. The window
- * may group changed files before unchanged ones, so the tree is assembled by
- * directory rather than by assuming one global path order: every directory
- * appears exactly once, and each level lists changed content before unchanged
- * content in path order.
- */
 /**
  * A first selection lands on the current code: when it would start on deleted
  * lines that are followed by their replacement, it moves to the first added
@@ -1102,77 +1042,6 @@ function preferCurrentSide(rows: readonly ReviewProjectedDiffRow[], index: numbe
     if (row.kind !== 'deletion') break;
   }
   return rows[index];
-}
-
-export function reviewFileTreeNodes(
-  files: readonly ReviewingFileItem[],
-  collapsedDirectories: readonly string[],
-): readonly ReviewFileTreeNode[] {
-  const root: ReviewFileTreeDirectory = {
-    path: '',
-    depth: -1,
-    directories: new Map(),
-    files: [],
-    firstFlat: 0,
-  };
-  const changedDirectories = new Set<string>();
-  files.forEach((file, flat) => {
-    const slash = file.displayPath.lastIndexOf('/');
-    const parts = slash < 0 ? [] : file.displayPath.slice(0, slash).split('/');
-    let current = root;
-    let prefix = '';
-    parts.forEach((segment, depth) => {
-      prefix = `${prefix}${segment}/`;
-      let next = current.directories.get(prefix);
-      if (next === undefined) {
-        next = { path: prefix, depth, directories: new Map(), files: [], firstFlat: flat };
-        current.directories.set(prefix, next);
-      }
-      next.firstFlat = Math.min(next.firstFlat, flat);
-      if (file.status !== 'unchanged') changedDirectories.add(prefix);
-      current = next;
-    });
-    current.files.push({ file, flat });
-  });
-
-  const collapsed = new Set(collapsedDirectories);
-  const nodes: ReviewFileTreeNode[] = [];
-  const emit = (directory: ReviewFileTreeDirectory): void => {
-    type ParentEntry =
-      | { readonly kind: 'directory'; readonly directory: ReviewFileTreeDirectory }
-      | { readonly kind: 'file'; readonly file: ReviewingFileItem; readonly flat: number };
-    const entries: ParentEntry[] = [
-      ...[...directory.directories.values()].map(entry => ({ kind: 'directory' as const, directory: entry })),
-      ...directory.files.map(entry => ({ kind: 'file' as const, file: entry.file, flat: entry.flat })),
-    ];
-    const entryChanged = (entry: ParentEntry): boolean =>
-      entry.kind === 'directory' ? changedDirectories.has(entry.directory.path) : entry.file.status !== 'unchanged';
-    entries.sort((left, right) => {
-      const changedOrder = Number(entryChanged(right)) - Number(entryChanged(left));
-      if (changedOrder !== 0) return changedOrder;
-      const leftPath = left.kind === 'directory' ? left.directory.path : left.file.displayPath;
-      const rightPath = right.kind === 'directory' ? right.directory.path : right.file.displayPath;
-      return leftPath < rightPath ? -1 : leftPath > rightPath ? 1 : 0;
-    });
-    for (const entry of entries) {
-      if (entry.kind === 'file') {
-        nodes.push({ kind: 'file', file: entry.file, flat: entry.flat, depth: directory.depth + 1 });
-        continue;
-      }
-      const child = entry.directory;
-      const isCollapsed = collapsed.has(child.path);
-      nodes.push({
-        kind: 'directory',
-        directory: child.path,
-        collapsed: isCollapsed,
-        depth: child.depth,
-        flat: child.firstFlat,
-      });
-      if (!isCollapsed) emit(child);
-    }
-  };
-  emit(root);
-  return nodes;
 }
 
 export function messageInvocation(
@@ -1218,15 +1087,6 @@ export function messageState(state: ReviewingApplicationState, item: ReviewMessa
     case 'ended-normally':
       return 'no-answer';
   }
-}
-
-/** The first file in the order the Files pane shows them (folders sorted, changed first). */
-export function firstListedFile(
-  files: readonly ReviewingFileItem[],
-  collapsedDirectories: readonly string[],
-): ReviewingFileItem | undefined {
-  const node = reviewFileTreeNodes(files, collapsedDirectories).find(entry => entry.kind === 'file');
-  return node?.kind === 'file' ? node.file : files[0];
 }
 
 function messageItem(state: ReviewingApplicationState): ReviewMessageListItem | undefined {
@@ -1304,6 +1164,11 @@ function messageUnavailableNotice(
 
 export class ReviewingApplicationModel {
   readonly state: ReviewingApplicationState;
+
+  /** The selected Diff row, once it is loaded. */
+  get selectedDiffRow(): ReviewProjectedDiffRow | undefined {
+    return diffRow(this.state);
+  }
   /** Moves typed while a Message saved locally, replayed once it is saved. */
   readonly #heldNavigation: ReviewingInput[] = [];
   /** The HEAD moves already said for the open Review, so a reload never says one twice or swallows it. */

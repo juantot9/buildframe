@@ -1,11 +1,5 @@
-import {
-  diffRow,
-  firstListedFile,
-  reviewingFiles,
-  type ReviewingApplicationModel,
-  type ReviewingApplicationState,
-  type ReviewingModelEffect,
-} from './reviewingModel.js';
+import type { ReviewingApplicationModel, ReviewingApplicationState, ReviewingModelEffect } from './reviewingModel.js';
+import { firstListedFile, reviewingFiles } from './reviewingFileList.js';
 import { Key, type ReviewingInput } from './reviewingInput.js';
 import { dispatchKey, either, onKey, onText, type KeyAction } from './shellKeys.js';
 
@@ -125,7 +119,7 @@ function scrollSideways(model: M, input: ReviewingInput): readonly E[] {
 
 function anchorSide(side: 'old' | 'new') {
   return (model: M): readonly E[] => {
-    const row = diffRow(model.state);
+    const row = model.selectedDiffRow;
     if (side === 'old' ? row?.oldLine !== undefined : row?.newLine !== undefined) model.state.anchorSide = side;
     else if (row !== undefined) {
       model.say(
