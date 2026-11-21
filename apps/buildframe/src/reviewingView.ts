@@ -44,7 +44,6 @@ import {
   rowMessages,
   type LineMessages,
   shownDiff,
-  type ConfigurationSetting,
   type ReviewRegion,
   type ReviewingApplicationModel,
   type ReviewingApplicationState,
@@ -85,7 +84,6 @@ import {
 import { reviewingFiletype } from './highlightAssets.js';
 import type { ReviewingHighlight } from './reviewingHighlight.js';
 import {
-  MATCH_TERMINAL_THEME,
   borderedBox,
   controlPlaneTheme,
   label,
@@ -101,7 +99,9 @@ import { PaneGlider } from './shellGlide.js';
 import { fileStatus, fileTypeIcon, NERD_ICONS, nerdIcons, statusIcon } from './reviewingFileGlyphs.js';
 import { ShellRoots } from './shellRoots.js';
 import { shellFrame } from './shellFrame.js';
-import { agentIndicator, keyListPanel, shellHeader } from './shellChrome.js';
+import { agentIndicator, dialogHeight, dialogTop, keyListPanel, shellHeader } from './shellChrome.js';
+import { configurationDialog } from './shellConfiguration.js';
+import { reviewingSettings } from './reviewingSettings.js';
 
 export { INDIGO_NIGHT, MATCH_TERMINAL_THEME, QUIET_GRAPHITE, QUIET_PAPER, WARM_CARBON } from './shellLook.js';
 
@@ -3279,13 +3279,6 @@ function questionComposerCard(
  * Dialogs are drawn inside the body (between the header rows and the footer),
  * so they are sized and centred against that height, never the terminal's.
  */
-function dialogHeight(bodyHeight: number, preferred: number, minimum: number): number {
-  return Math.max(Math.min(minimum, bodyHeight), Math.min(preferred, bodyHeight));
-}
-
-function dialogTop(bodyHeight: number, height: number): number {
-  return Math.max(0, Math.floor((bodyHeight - height) / 2));
-}
 
 function searchResultLabel(state: ReviewingApplicationState, item: ReviewSearchItem, selected: boolean): string {
   const marker = selected ? (state.presentation.ascii ? '>' : '›') : ' ';
@@ -4798,166 +4791,17 @@ function detailsOverlay(state: ReviewingApplicationState): RenderChild[] {
   ];
 }
 
-/** Every description the Configuration dialog can show, so its height can be fixed to the longest. */
-const CONFIGURATION_DESCRIPTIONS = {
-  theme: {
-    presets: 'Built-in presets and named custom themes.',
-    unreported: 'Your terminal didn’t report its background, so Quiet Graphite (dark) is in use.',
-    matchedLight: 'Quiet Graphite on dark terminals, Quiet Paper on light. Now: Quiet Paper.',
-    matchedDark: 'Quiet Graphite on dark terminals, Quiet Paper on light. Now: Quiet Graphite.',
-  },
-  background: {
-    terminal: 'Use the terminal’s own background; changed lines keep their tint.',
-    theme: 'Use the selected theme background and pane surfaces.',
-  },
-  panes: {
-    all: 'Show the panes this width allows; z switches to code only.',
-    codeOnly: 'Only the Diff, at every width. e lists files, m lists Messages; z shows every pane.',
-  },
-  arrangement: {
-    codeSpotlight: 'Give the Diff most of the terminal; context stays secondary.',
-    reviewNotebook: 'Lead with History and keep the Diff beside it as evidence.',
-    workspace: 'Keep Files, Diff, and History visible side by side.',
-  },
-  icons: {
-    nerd: 'Nerd Font glyphs for folders and file states; needs a patched terminal font.',
-    text: 'Plain text markers that render in every terminal font.',
-  },
-  header: {
-    shown: 'One row with where you are and whether the agent is connected.',
-    hidden: 'Hidden; the agent’s status moves to the end of the history row.',
-  },
-  motion: {
-    smooth: 'Panes glide to their new place when they scroll.',
-    instant: 'Panes jump straight to their new place; best over slow connections.',
-  },
-} as const;
-
 function configurationOverlay(
   state: ReviewingApplicationState,
   bodyHeight: number,
   /** Header rows above the body: the box is centred as if they were body, so hiding the header never moves it. */
   headerRows = 0,
 ): RenderChild[] {
-  const configuration = state.configurationWindow;
-  if (configuration === undefined) return [];
-  // Terminal-default workspace surfaces remain unpainted, but a modal is a
-  // control plane and must replace the cells beneath it to remain legible.
-  const colors = controlPlaneTheme(state);
-  const width = Math.min(68, Math.max(34, state.width - 4));
-  const textWidth = Math.max(1, width - 6);
-  const themeName =
-    state.reviewingTheme.name ??
-    (state.reviewingTheme.inherits === MATCH_TERMINAL_THEME
-      ? 'Match terminal'
-      : state.reviewingTheme.inherits === 'warm-carbon'
-        ? 'Warm Carbon'
-        : state.reviewingTheme.inherits === 'indigo-night'
-          ? 'Indigo Night'
-          : state.reviewingTheme.inherits === 'quiet-graphite'
-            ? 'Quiet Graphite'
-            : state.reviewingTheme.inherits === 'quiet-paper'
-              ? 'Quiet Paper'
-              : 'Custom');
-  const arrangementName =
-    state.arrangement === 'code-spotlight'
-      ? 'Code Spotlight'
-      : state.arrangement === 'review-notebook'
-        ? 'Review Notebook'
-        : 'Workspace';
-  const described = CONFIGURATION_DESCRIPTIONS;
-  const selectedDescription: Record<ConfigurationSetting, string> = {
-    theme:
-      state.reviewingTheme.inherits !== MATCH_TERMINAL_THEME
-        ? described.theme.presets
-        : state.terminalThemeMode === undefined
-          ? described.theme.unreported
-          : state.terminalThemeMode === 'light'
-            ? described.theme.matchedLight
-            : described.theme.matchedDark,
-    background: state.background === 'terminal' ? described.background.terminal : described.background.theme,
-    panes: state.codeOnly ? described.panes.codeOnly : described.panes.all,
-    arrangement:
-      state.arrangement === 'code-spotlight'
-        ? described.arrangement.codeSpotlight
-        : state.arrangement === 'review-notebook'
-          ? described.arrangement.reviewNotebook
-          : described.arrangement.workspace,
-    icons: state.icons === 'nerd' ? described.icons.nerd : described.icons.text,
-    'header-visibility': state.header.visible ? described.header.shown : described.header.hidden,
-    motion: state.motion === 'smooth' ? described.motion.smooth : described.motion.instant,
-  };
-  const row = (setting: ConfigurationSetting, settingLabel: string, value: string): RenderChild => {
-    const selected = configuration.selected === setting;
-    return label(
-      state,
-      `${selected ? (state.presentation.ascii ? '>' : '›') : ' '} ${settingLabel.padEnd(15)}<  ${value}  >`,
-      {
-        id: `reviewing-configuration-${setting}`,
-        fg: selected ? colors.accent : colors.text,
-        bg: selected ? colors.accentSoft : colors.raised,
-        bold: selected,
-        paddingLeft: 1,
-        paddingRight: 1,
-      },
-    );
-  };
-  // Every line of the description sits under the same indent, however it wraps.
-  const descriptionRows = wrapDisplayCellRows(selectedDescription[configuration.selected], textWidth - 2);
-  // The box keeps the height of its longest description, so moving between
-  // settings or changing one never makes it grow, shrink or move.
-  const reservedDescriptionRows = Math.max(
-    descriptionRows.length,
-    ...Object.values(CONFIGURATION_DESCRIPTIONS)
-      .flatMap(variants => Object.values(variants))
-      .map(variant => wrapDisplayCellRows(variant, textWidth - 2).length),
-  );
-  const description = Box(
-    {
-      id: 'reviewing-configuration-description',
-      width: '100%',
-      height: reservedDescriptionRows,
-      flexDirection: 'column',
-    },
-    ...descriptionRows.map(row => label(state, `  ${row}`, { fg: colors.muted })),
-  );
-  const rows: RenderChild[] = [
-    label(state, 'Review display', { fg: colors.text, bold: true }),
-    row('theme', 'Theme', themeName),
-    row('background', 'Background', state.background === 'terminal' ? 'Terminal' : 'Theme'),
-    row('arrangement', 'Arrangement', arrangementName),
-    row('panes', 'Panes', state.codeOnly ? 'Code only' : 'All panes'),
-    row('icons', 'Icons', state.icons === 'nerd' ? 'Nerd Font' : 'Text'),
-    row('header-visibility', 'Header', state.header.visible ? 'Shown' : 'Hidden'),
-    row('motion', 'Scrolling', state.motion === 'smooth' ? 'Smooth' : 'Instant'),
-    label(state, ' ', {}),
-    description,
-  ];
-  // As tall as its content, centred in the body like every other dialog.
-  const height = Math.min(Math.max(1, bodyHeight), rows.length - 1 + reservedDescriptionRows + 2);
-  return [
-    borderedBox(
-      state,
-      {
-        id: 'reviewing-configuration-overlay',
-        position: 'absolute',
-        left: Math.max(0, Math.floor((state.width - width) / 2)),
-        top: Math.max(0, dialogTop(bodyHeight + headerRows, height) - headerRows),
-        width,
-        height,
-        zIndex: 34,
-        flexDirection: 'column',
-        paddingLeft: 2,
-        paddingRight: 2,
-        borderColor: colors.accent,
-        backgroundColor: colors.raised,
-        title: ' Configuration ',
-        titleColor: colors.accent,
-        overflow: 'hidden',
-      },
-      ...rows.slice(0, Math.max(1, height - 2)),
-    ),
-  ];
+  const window = state.configurationWindow;
+  if (window === undefined) return [];
+  // The rows only describe the state here; nothing changes them while drawing.
+  const content = reviewingSettings(state, () => undefined);
+  return configurationDialog(state, window, content, bodyHeight, headerRows, 'reviewing');
 }
 
 function historicalBaseState(state: ReviewingApplicationState): ReviewingApplicationState {

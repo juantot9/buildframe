@@ -17,6 +17,16 @@ export interface HeaderPart {
   readonly fg: ThemeColor;
 }
 
+/** A dialog's height: what it prefers, never below its minimum unless the body is smaller. */
+export function dialogHeight(bodyHeight: number, preferred: number, minimum: number): number {
+  return Math.max(Math.min(minimum, bodyHeight), Math.min(preferred, bodyHeight));
+}
+
+/** A dialog's top row, centring it in the body. */
+export function dialogTop(bodyHeight: number, height: number): number {
+  return Math.max(0, Math.floor((bodyHeight - height) / 2));
+}
+
 /** The agent indicator: ● connected, ○ known but gone, nothing before the first read. */
 export function agentIndicator(state: Look, view: HarnessConnectionView | undefined): HeaderPart | undefined {
   if (view === undefined) return undefined;

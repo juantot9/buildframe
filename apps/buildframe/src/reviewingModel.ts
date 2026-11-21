@@ -64,6 +64,8 @@ import {
   type ReviewingFileItem,
 } from './reviewingFileList.js';
 import { routeShellKey, type ShellKeyHost } from './shellInput.js';
+import { configurationKey } from './shellConfiguration.js';
+import { reviewingSettings } from './reviewingSettings.js';
 import { dispatchReviewingKey } from './reviewingActions.js';
 import { reasonSentence } from './reviewingReasons.js';
 import { outgoingStateSpins, type MessageState, type NoticeTone } from './reviewingStatus.js';
@@ -3088,63 +3090,14 @@ export class ReviewingApplicationModel {
   private handleConfigurationInput(data: ReviewingInput): readonly ReviewingModelEffect[] {
     const window = this.state.configurationWindow;
     if (window === undefined) return [];
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.enter) || data.text === 'c') {
+    const content = reviewingSettings(this.state, codeOnly => this.setCodeOnly(codeOnly));
+    const outcome = configurationKey(window, data, content.rows);
+    if (outcome === 'closed') {
       this.state.configurationWindow = undefined;
       this.say('Settings saved.', 'success');
       return [];
     }
-    if (matchesKey(data, Key.up) || matchesKey(data, Key.down) || data.text === 'j' || data.text === 'k') {
-      const settings: readonly ConfigurationSetting[] = [
-        'theme',
-        'background',
-        'arrangement',
-        'panes',
-        'icons',
-        'header-visibility',
-        'motion',
-      ];
-      const current = settings.indexOf(window.selected);
-      const direction = matchesKey(data, Key.up) || data.text === 'k' ? -1 : 1;
-      window.selected = settings[(current + direction + settings.length) % settings.length]!;
-      return [];
-    }
-    const previous = matchesKey(data, Key.left) || data.text === 'h';
-    const next = matchesKey(data, Key.right) || data.text === 'l';
-    if (!previous && !next) return [];
-    const direction = previous ? -1 : 1;
-    if (window.selected === 'arrangement') {
-      const arrangements: readonly ReviewArrangement[] = ['workspace', 'code-spotlight', 'review-notebook'];
-      const current = Math.max(0, arrangements.indexOf(this.state.arrangement));
-      this.state.arrangement = arrangements[(current + direction + arrangements.length) % arrangements.length]!;
-    } else if (window.selected === 'panes') {
-      this.setCodeOnly(!this.state.codeOnly);
-    } else if (window.selected === 'background') {
-      this.state.background = this.state.background === 'theme' ? 'terminal' : 'theme';
-    } else if (window.selected === 'icons') {
-      this.state.icons = this.state.icons === 'text' ? 'nerd' : 'text';
-    } else if (window.selected === 'motion') {
-      this.state.motion = this.state.motion === 'smooth' ? 'off' : 'smooth';
-    } else if (window.selected === 'header-visibility') {
-      this.state.header = {
-        ...this.state.header,
-        visible: !this.state.header.visible,
-      };
-    } else {
-      const presets: readonly ReviewingThemeDefinition[] = [
-        Object.freeze({ inherits: 'match-terminal', colors: Object.freeze({}) }),
-        Object.freeze({ inherits: 'quiet-graphite', colors: Object.freeze({}) }),
-        Object.freeze({ inherits: 'quiet-paper', colors: Object.freeze({}) }),
-        Object.freeze({ inherits: 'warm-carbon', colors: Object.freeze({}) }),
-        Object.freeze({ inherits: 'indigo-night', colors: Object.freeze({}) }),
-      ];
-      const choices = [...presets, ...this.state.customThemes];
-      const current =
-        this.state.reviewingTheme.name === undefined
-          ? presets.findIndex(preset => preset.inherits === this.state.reviewingTheme.inherits)
-          : choices.findIndex(theme => theme.name === this.state.reviewingTheme.name);
-      const start = current < 0 ? (direction > 0 ? -1 : 0) : current;
-      this.state.reviewingTheme = choices[(start + direction + choices.length) % choices.length]!;
-    }
+    if (outcome !== 'changed') return [];
     this.state.notice = undefined;
     return [this.reviewingPreferencesSaveEffect()];
   }
