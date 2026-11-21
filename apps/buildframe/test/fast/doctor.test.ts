@@ -111,6 +111,8 @@ describe('buildframe doctor', () => {
 
   it('checks no saved data while BuildFrame is not running, and is not an error', async () => {
     const report = await runDoctor(environment(await repository()));
+    // The summary carries the refusal's code when the repository does not open.
+    expect(report.checks.find(check => check.id === 'repository')).toMatchObject({ status: 'ok' });
     expect(report.ok).toBe(true);
     expect(report.checks.find(check => check.id === 'runtime')).toMatchObject({ status: 'note' });
     expect(report.checks.some(check => check.id === 'saved-data')).toBe(false);

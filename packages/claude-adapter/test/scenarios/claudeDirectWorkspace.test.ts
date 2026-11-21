@@ -61,7 +61,8 @@ describe('Claude Direct delivery through the Workspace', () => {
     await writeFile(path.join(checkout, 'review.txt'), 'after\nsame\n');
 
     const opened = await openWorkspaceRuntimeOwner({ startPath: checkout });
-    if (opened.status !== 'ready') throw new Error(`Workspace runtime was rejected: ${opened.diagnostic.code}`);
+    if (opened.status !== 'ready')
+      throw new Error(`Workspace runtime was rejected: ${JSON.stringify(opened.diagnostic)}`);
     const owner = opened.owner;
     owners.add(owner);
     const identity = await owner.workspace.read({ kind: 'workspace.identity' });

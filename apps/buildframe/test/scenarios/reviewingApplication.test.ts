@@ -1221,8 +1221,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
 
   async function open(checkout: string): Promise<WorkspaceRuntimeOwner> {
     const opened = await openWorkspaceRuntimeOwner({ startPath: checkout });
-    expect(opened.status).toBe('ready');
-    if (opened.status !== 'ready') throw new Error('Workspace owner was rejected');
+    if (opened.status !== 'ready') throw new Error(`Owner rejected: ${JSON.stringify(opened.diagnostic)}`);
     owners.add(opened.owner);
     return opened.owner;
   }
