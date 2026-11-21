@@ -95,6 +95,22 @@ to be closed.
 Still to do: the Verification below on macOS and Linux CI and by hand on
 Windows (clean install, round trips).
 
+## After rebasing on `main` (2026-11-21)
+
+- `windows` was rebased onto `main` at `cf81a7e` (force-pushed). `main` had
+  published 0.1.0 for macOS and Linux, so the docs say Windows comes with
+  the next release.
+- `main` brought the Codex adapter, which has not run on Windows:
+  [Connect Codex on Windows](./WF-321-connect-codex-on-windows.md). Until
+  it closes, Windows does not claim Codex; whether it blocks this ticket is
+  still to decide.
+- First CI run with the Windows jobs (run 44840903773, on `f91bb71`, before
+  the rebase): Linux passed. macOS failed one WF-312 test
+  (`findHelper.test.ts`, macOS's `/var` is `/private/var`), fixed. Windows
+  refused every Workspace on the GitHub runner, though all of them open on
+  the reference machine; the tests now print the whole refusal, so the
+  next run says why.
+
 ## Verification
 
 - `pnpm verify` passes on Windows, macOS and Linux.
