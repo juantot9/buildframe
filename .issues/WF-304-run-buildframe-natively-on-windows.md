@@ -53,6 +53,9 @@ Can start now:
 6. [Identify processes and stop the runtime on Windows](./WF-311-identify-processes-and-stop-the-runtime-on-windows.md)
 7. [Package BuildFrame and start the Claude helper on Windows](./WF-312-package-buildframe-and-start-the-claude-helper-on-windows.md)
 8. [Check the TUI in Windows terminals](./WF-314-check-the-tui-in-windows-terminals.md)
+9. [Connect Codex on Windows](./WF-321-connect-codex-on-windows.md) — the
+   Codex adapter came from `main` with the 2026-11-21 rebase and has not run
+   on Windows; whether it blocks WF-315 is still to decide
 
 Blocked:
 
