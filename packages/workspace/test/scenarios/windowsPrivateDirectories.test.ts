@@ -10,7 +10,13 @@ import {
   tightenWindowsDirectory,
   windowsDirectoryPrivacy,
 } from '../../src/privateDirectories.js';
-import { currentUserSid, readOwnerAndAccess, writeProtectedAccess } from '../../src/windowsSecurity.js';
+import {
+  currentUserInSddl,
+  currentUserSid,
+  readOwnerAndAccess,
+  sidInSddl,
+  writeProtectedAccess,
+} from '../../src/windowsSecurity.js';
 
 const roots = new Set<string>();
 
@@ -35,6 +41,28 @@ function widenToUsers(directory: string): void {
 describe.runIf(process.platform === 'win32')('Windows private directories', () => {
   it('reads the user this process runs as', () => {
     expect(currentUserSid()).toMatch(/^S-1-5-21-\d+-\d+-\d+-\d+$/u);
+  });
+
+  it('spells the built-in Administrator as SDDL does, so a directory private to it reads as private', async () => {
+    // GitHub's Windows runners run as this account; its access lists say `LA`, not its SID.
+    const administrator = currentUserSid().replace(/-\d+$/u, '-500');
+    expect(sidInSddl(administrator)).toBe('LA');
+    expect(sidInSddl(currentUserSid())).toBe(currentUserInSddl());
+
+    // The current user stays on the list, or the test could not remove the directory.
+    const directory = await temporaryRoot();
+    const user = currentUserSid();
+    writeProtectedAccess(
+      directory,
+      `D:P(A;OICI;FA;;;${administrator})(A;OICI;FA;;;${user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`,
+    );
+    // Read as the administrator would see it: the user's own entry is not theirs.
+    const access = readOwnerAndAccess(directory)
+      .replace(/^O:[^D]+/u, 'O:LA')
+      .replace(`(A;OICI;FA;;;${currentUserInSddl()})`, '');
+    expect(access).toContain('(A;OICI;FA;;;LA)');
+    expect(accessIsPrivate(access, sidInSddl(administrator))).toBe(true);
+    expect(accessIsPrivate(access, administrator)).toBe(false);
   });
 
   it('protects a new directory and reports it private', async () => {
@@ -65,7 +93,7 @@ describe.runIf(process.platform === 'win32')('Windows private directories', () =
     await mkdir(path.join(directory, 'workspaces', 'wsp_1'), { recursive: true });
     await writeFile(path.join(directory, 'workspaces', 'wsp_1', 'CURRENT'), 'generation\n');
 
-    const userSid = currentUserSid();
+    const userSid = currentUserInSddl();
     for (const inside of [path.join(directory, 'workspaces'), path.join(directory, 'workspaces', 'wsp_1', 'CURRENT')]) {
       const access = readOwnerAndAccess(inside);
       expect(access).not.toMatch(/;(BU|WD|AU)\)/u);

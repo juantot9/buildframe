@@ -142,6 +142,51 @@ export function currentUserSid(): string {
   }
 }
 
+/**
+ * `sid` as SDDL text spells it, which is not always the SID: Windows writes
+ * some accounts as an alias, such as the built-in Administrator (`…-500`) as
+ * `LA`. Found by turning an owner-only descriptor into text.
+ */
+export function sidInSddl(sid: string): string {
+  const native = required();
+  const descriptor = outPointer();
+  check(
+    native,
+    native.advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+      wide(`O:${sid}`),
+      SDDL_REVISION_1,
+      descriptor,
+      0n,
+    ),
+    'ConvertStringSecurityDescriptorToSecurityDescriptorW',
+  );
+  const text = outPointer();
+  try {
+    check(
+      native,
+      native.advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+        pointerIn(descriptor),
+        SDDL_REVISION_1,
+        OWNER_SECURITY_INFORMATION,
+        text,
+        0n,
+      ),
+      'ConvertSecurityDescriptorToStringSecurityDescriptorW',
+    );
+  } finally {
+    native.kernel32.LocalFree(pointerIn(descriptor));
+  }
+  return takeWideString(native, pointerIn(text)).replace(/^O:/u, '');
+}
+
+let userInSddl: string | undefined;
+
+/** This user as SDDL text spells them; compare access lists against this, not the SID. */
+export function currentUserInSddl(): string {
+  userInSddl ??= sidInSddl(currentUserSid());
+  return userInSddl;
+}
+
 /** The owner and access list of `target`, as SDDL (`O:…D:…`). */
 export function readOwnerAndAccess(target: string): string {
   const native = required();

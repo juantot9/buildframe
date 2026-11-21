@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 
 import {
+  currentUserInSddl,
   currentUserSid,
   readOwnerAndAccess,
   windowsSecurityAvailable,
@@ -34,7 +35,8 @@ function privateAccess(userSid: string): string {
  * Whether an owner-and-access SDDL (`O:…D:…`) keeps a directory private: owned
  * by the user (or Administrators), not inheriting its parent's list, and
  * allowing no account but the user, SYSTEM and Administrators. Deny entries
- * only take access away, so they are allowed.
+ * only take access away, so they are allowed. `userSid` is the user as SDDL
+ * spells them (`currentUserInSddl`): the SID, or an alias such as `LA`.
  */
 export function accessIsPrivate(ownerAndAccess: string, userSid: string): boolean {
   const parsed = /^O:(.+?)D:([A-Z]*)((?:\([^()]*\))*)$/u.exec(ownerAndAccess);
@@ -59,7 +61,7 @@ export type WindowsDirectoryPrivacy = 'private' | 'not-private' | 'unverifiable'
 /** Reads whether `directory` is private; `unverifiable` without `node:ffi`. */
 export function windowsDirectoryPrivacy(directory: string): WindowsDirectoryPrivacy {
   if (!windowsSecurityAvailable()) return 'unverifiable';
-  return accessIsPrivate(readOwnerAndAccess(directory), currentUserSid()) ? 'private' : 'not-private';
+  return accessIsPrivate(readOwnerAndAccess(directory), currentUserInSddl()) ? 'private' : 'not-private';
 }
 
 export class DirectoryNotPrivate extends Error {
@@ -75,9 +77,8 @@ export class DirectoryNotPrivate extends Error {
  * proceed unprotected fails closed.
  */
 export function protectWindowsDirectory(directory: string): void {
-  const userSid = currentUserSid();
-  writeProtectedAccess(directory, privateAccess(userSid));
-  if (!accessIsPrivate(readOwnerAndAccess(directory), userSid)) throw new DirectoryNotPrivate(directory);
+  writeProtectedAccess(directory, privateAccess(currentUserSid()));
+  if (!accessIsPrivate(readOwnerAndAccess(directory), currentUserInSddl())) throw new DirectoryNotPrivate(directory);
 }
 
 /**
