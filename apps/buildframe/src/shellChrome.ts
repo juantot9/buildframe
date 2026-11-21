@@ -227,3 +227,28 @@ export function keyListPanel(
     ),
   ];
 }
+
+/** The `!` panel: what the screen's actions can do at the State version shown, one line each. */
+export function actionChecksPanel(look: Look, lines: readonly string[]): RenderChild[] {
+  const colors = theme(look);
+  return [
+    borderedBox(
+      look,
+      {
+        position: 'absolute',
+        left: 1,
+        right: 1,
+        bottom: 0,
+        height: Math.max(3, Math.min(7, lines.length + 2)),
+        zIndex: 10,
+        flexDirection: 'column',
+        paddingLeft: 1,
+        paddingRight: 1,
+        backgroundColor: colors.raised,
+        title: ' Action checks from state ',
+        titleColor: colors.accent,
+      },
+      ...lines.map(line => label(look, line, { fg: colors.text })),
+    ),
+  ];
+}

@@ -105,7 +105,14 @@ import {
 } from './reviewingFileGlyphs.js';
 import { ShellRoots } from './shellRoots.js';
 import { shellFrame } from './shellFrame.js';
-import { agentIndicator, dialogHeight, dialogTop, keyListPanel, shellHeader } from './shellChrome.js';
+import {
+  actionChecksPanel,
+  agentIndicator,
+  dialogHeight,
+  dialogTop,
+  keyListPanel,
+  shellHeader,
+} from './shellChrome.js';
 import { configurationDialog } from './shellConfiguration.js';
 import { fitPaneDetail, shortDisplayPath, treeName } from './reviewingPathText.js';
 import { reviewingSettings } from './reviewingSettings.js';
@@ -4762,32 +4769,14 @@ function continuationChoiceOverlay(state: ReviewingApplicationState): RenderChil
 
 function detailsOverlay(state: ReviewingApplicationState): RenderChild[] {
   if (!state.showDetails) return [];
-  const colors = theme(state);
   const actions = state.screen === 'home' ? (state.home?.actions ?? []) : (state.review?.manifest.actions ?? []);
-  const lines = actions.slice(0, 4).map(action => {
-    const status = action.availability === 'direct' ? 'ready' : 'blocked';
-    return `${actionName(action.kind)}: ${status} at v${action.gateBasis.expectedStateVersion}`;
-  });
-  return [
-    borderedBox(
-      state,
-      {
-        position: 'absolute',
-        left: 1,
-        right: 1,
-        bottom: 0,
-        height: Math.max(3, Math.min(7, lines.length + 2)),
-        zIndex: 10,
-        flexDirection: 'column',
-        paddingLeft: 1,
-        paddingRight: 1,
-        backgroundColor: colors.raised,
-        title: ' Action checks from state ',
-        titleColor: colors.accent,
-      },
-      ...lines.map(line => label(state, line, { fg: colors.text })),
-    ),
-  ];
+  return actionChecksPanel(
+    state,
+    actions.slice(0, 4).map(action => {
+      const status = action.availability === 'direct' ? 'ready' : 'blocked';
+      return `${actionName(action.kind)}: ${status} at v${action.gateBasis.expectedStateVersion}`;
+    }),
+  );
 }
 
 function configurationOverlay(

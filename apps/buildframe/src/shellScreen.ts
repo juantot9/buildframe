@@ -3,6 +3,7 @@ import type { WorkspaceCommand, WorkspaceView, WorkspaceViewScope } from '@build
 import { Key, matchesKey, type ReviewingInput, type ReviewingKeySpec } from './reviewingInput.js';
 import type { RenderChild } from './renderTree.js';
 import type { CommandOutcome } from './shellCommands.js';
+import type { ConfigurationRow } from './shellConfiguration.js';
 import type { FrameLook } from './shellFrame.js';
 import {
   defineKeyTable,
@@ -78,6 +79,10 @@ export interface ScreenDefinition<S, Mode extends string = string> {
   settled?(state: S, command: WorkspaceCommand, outcome: CommandOutcome): ScreenResult;
   /** Esc once nothing the shell owns is open; returns false to leave the screen. */
   escape?(state: S): ScreenResult | false;
+  /** Rows this screen adds to Configuration (`c`) after the theme and background, with every description they can show. */
+  settings?(state: S): { readonly rows: readonly ConfigurationRow[]; readonly descriptions: readonly string[] };
+  /** The `!` panel's lines: what the screen's actions can do at the State version shown. */
+  checks?(state: S): readonly string[];
 }
 
 /** A checked screen, with the key table the shell draws its footer and `?` list from. */

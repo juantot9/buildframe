@@ -15,6 +15,11 @@ import { Key } from '../../src/reviewingInput.js';
 import { label } from '../../src/shellLook.js';
 import { createShell, type Shell } from '../../src/shell.js';
 import { defineScreen } from '../../src/shellScreen.js';
+import {
+  createEphemeralUserConfiguration,
+  type ReviewingPreferences,
+  type UserConfiguration,
+} from '../../src/userConfiguration.js';
 
 /**
  * The shell end to end on a real Workspace: a small two-screen app reads
@@ -98,6 +103,7 @@ const summary = defineScreen<SummaryState, 'idle' | 'reviewing'>({
   receive: (state, views) => {
     state.home = views.home as WorkspaceHomeView;
   },
+  checks: () => ['Start a Review: ready'],
   settled: (state, _command, outcome) => {
     state.starting = false;
     if (outcome.status !== 'answered') return [];
@@ -169,7 +175,10 @@ describe('the shell', () => {
     return opened.owner;
   }
 
-  async function startShell(owner: WorkspaceRuntimeOwner): Promise<{ shell: Shell; terminal: TestRendererSetup }> {
+  async function startShell(
+    owner: WorkspaceRuntimeOwner,
+    userConfiguration: UserConfiguration,
+  ): Promise<{ shell: Shell; terminal: TestRendererSetup }> {
     const terminal = await createTestRenderer({ width: 80, height: 12, exitOnCtrlC: false, kittyKeyboard: true });
     const shell = createShell({
       workspace: owner.workspace,
@@ -177,6 +186,7 @@ describe('the shell', () => {
       first: { screen: 'summary' },
       renderer: terminal.renderer,
       createClipboard: recordingClipboard,
+      userConfiguration,
     });
     cleanups.push(async () => await shell.stop());
     await shell.start();
@@ -195,7 +205,17 @@ describe('the shell', () => {
 
   it('runs a screen: reads its views, runs its commands, follows the Workspace, and quits', async () => {
     const owner = await openWorkspace();
-    const { shell, terminal } = await startShell(owner);
+    const saved: ReviewingPreferences[] = [];
+    const ephemeral = createEphemeralUserConfiguration();
+    const configuration: UserConfiguration = {
+      load: async () => await ephemeral.load(),
+      saveReviewingPreferences: async preferences => {
+        saved.push(preferences);
+        return { status: 'saved' };
+      },
+      readMessageTemplate: async () => await ephemeral.readMessageTemplate(),
+    };
+    const { shell, terminal } = await startShell(owner, configuration);
 
     await shows(terminal, 'Reviews: 0');
     expect(frame(terminal)).toContain('BuildFrame / Summary');
@@ -222,9 +242,21 @@ describe('the shell', () => {
     terminal.mockInput.pressEscape();
     await waitFor(() => !frame(terminal).includes('KEYS'), 'the key list to close');
 
-    // `c` is the shell's, but Configuration has not moved into it yet: it says so.
+    // Configuration is the shell's: the theme and background, saved as they change.
     terminal.mockInput.pressKey('c');
-    await shows(terminal, 'Configuration opens from Reviewing for now.');
+    await shows(terminal, 'Configuration');
+    expect(frame(terminal)).toContain('Background     <  Theme  >');
+    terminal.mockInput.pressKey('j');
+    terminal.mockInput.pressKey('l');
+    await shows(terminal, 'Background     <  Terminal  >');
+    terminal.mockInput.pressEscape();
+    await shows(terminal, 'Settings saved.');
+
+    // `!` shows the screen's action checks; `!` again closes them.
+    terminal.mockInput.pressKey('!');
+    await shows(terminal, 'Start a Review: ready');
+    terminal.mockInput.pressKey('!');
+    await waitFor(() => !frame(terminal).includes('Start a Review: ready'), 'the checks to close');
 
     terminal.mockInput.pressEnter();
     await shows(terminal, 'Opened from summary');
@@ -235,5 +267,6 @@ describe('the shell', () => {
 
     terminal.mockInput.pressKey('q');
     await shell.closed;
+    expect(saved.at(-1)?.background).toBe('terminal');
   });
 });
