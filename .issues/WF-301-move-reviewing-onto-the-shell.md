@@ -95,8 +95,5 @@ and the loader. Next: the shell composes Reviewing's frame through screen hooks
 (header, said, footer, layers) and owns `?`, `c` and `!` for it, then routes
 its keys; then Home rows from `home`.
 
-Remaining before that: Reviewing itself becomes a screen. Its keyboard, pointer, wheel,
-selection and composer wiring leave `ReviewingView`; its dialogs become
-shell-routed layers; its Home rows come from `home`; its loader stays its
-own behind the screen until views can carry it. Then the behaviour tests move
-to renderer-free screen tests.
+Last: the behaviour tests move to renderer-free screen tests; the loader
+stays Reviewing's own until views can carry it.
