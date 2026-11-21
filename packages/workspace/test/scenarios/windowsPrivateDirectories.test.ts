@@ -56,10 +56,10 @@ describe.runIf(process.platform === 'win32')('Windows private directories', () =
       directory,
       `D:P(A;OICI;FA;;;${administrator})(A;OICI;FA;;;${user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`,
     );
-    // Read as the administrator would see it: the user's own entry is not theirs.
-    const access = readOwnerAndAccess(directory)
-      .replace(/^O:[^D]+/u, 'O:LA')
-      .replace(`(A;OICI;FA;;;${currentUserInSddl()})`, '');
+    // Read as the administrator would see it: the user's own entry is not theirs,
+    // unless the user is the administrator (GitHub's runner).
+    let access = readOwnerAndAccess(directory).replace(/^O:[^D]+/u, 'O:LA');
+    if (user !== administrator) access = access.replace(`(A;OICI;FA;;;${currentUserInSddl()})`, '');
     expect(access).toContain('(A;OICI;FA;;;LA)');
     expect(accessIsPrivate(access, sidInSddl(administrator))).toBe(true);
     expect(accessIsPrivate(access, administrator)).toBe(false);
