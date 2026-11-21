@@ -1,7 +1,9 @@
+import type { CliRenderer } from '@opentui/core';
 import type { WorkspaceCommand, WorkspaceView, WorkspaceViewScope } from '@buildframe/workspace';
 
 import { Key, matchesKey, type ReviewingInput, type ReviewingKeySpec } from './reviewingInput.js';
 import type { RenderChild } from './renderTree.js';
+import type { ShellClipboard } from './shellClipboard.js';
 import type { CommandOutcome } from './shellCommands.js';
 import type { ConfigurationRow } from './shellConfiguration.js';
 import type { FrameLook } from './shellFrame.js';
@@ -90,6 +92,29 @@ export interface ScreenDefinition<S, Mode extends string = string> {
   animating?(state: S): boolean;
   /** Moves the screen's spinners one step. */
   advance?(state: S): void;
+  /**
+   * Migration scaffolding (WF-301): a screen that still loads, listens and
+   * draws for itself on the terminal the shell lends it. It shrinks as each
+   * part moves into the shell; only the first screen may have it.
+   */
+  readonly extend?: (surface: ScreenSurface) => ScreenExtension;
+}
+
+/** What the shell lends an extended screen. */
+export interface ScreenSurface {
+  readonly renderer: CliRenderer;
+  readonly clipboard: ShellClipboard;
+  /** The terminal's light or dark when the screen opens; later changes arrive through `themeMode`. */
+  readonly terminalThemeMode: 'dark' | 'light' | undefined;
+  /** Leaves the app. */
+  quit(): void;
+}
+
+/** An extended screen's own lifetime on the lent terminal. */
+export interface ScreenExtension {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  themeMode?(mode: 'dark' | 'light'): void;
 }
 
 /** One row a screen adds to Home, and what choosing it does. */

@@ -1,27 +1,21 @@
 import { type CliRenderer } from '@opentui/core';
 import { decodeBytesBase64 } from '@buildframe/workspace/bytes-base64';
 import type { Workspace, WorkspaceCommand } from '@buildframe/workspace';
-import type { ReviewHarnessInteractionViewScope } from '@buildframe/workspace/harness-interaction';
 import type {
   ReviewLiveFilesView,
   ReviewLiveManifestView,
   ReviewManifestView,
   ReviewQuestionBodyView,
   WorkspaceHomeView,
-  WorkspaceProjectionViewScope,
 } from '@buildframe/workspace/projection';
 import type { ReviewIdentity, ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
 
-import {
-  ShellClipboard,
-  productionClipboard,
-  terminalFallbackClipboard,
-  type ShellClipboardFactory,
-} from './shellClipboard.js';
+import { ShellClipboard, terminalFallbackClipboard, type ShellClipboardFactory } from './shellClipboard.js';
+import { createShell } from './shell.js';
+import { defineScreen, type Screen, type ScreenExtension, type ScreenSurface } from './shellScreen.js';
 import { DebouncedSave } from './shellPreferences.js';
 import { executeCommand, semanticError } from './shellCommands.js';
 import { isLiveScope, liveViewIdentity, ShellWatch } from './shellWatch.js';
-import { ShellTerminal } from './shellTerminal.js';
 import {
   DIFF_WINDOW_SIZE,
   HARNESS_INTERACTION_WINDOW_SIZE,
@@ -40,7 +34,6 @@ import {
   ReviewingApplicationModel,
   noticeToneOf,
   reviewingSourceKey,
-  type HomeMode,
   type ReviewLoadTarget,
   type ReviewSelectionHint,
   type ReviewingModelEffect,
@@ -49,6 +42,7 @@ import {
 } from './reviewingModel.js';
 import { firstListedFile, manifestFileItems } from './reviewingFileList.js';
 import { ReviewingView } from './reviewingView.js';
+import type { ActiveHomeRoute, ActiveReviewRoute, ActiveRoute, ReviewingSubscriptionScope } from './reviewingRoutes.js';
 import { ShellPulse, type PulseSource } from './shellPulse.js';
 import { ReviewingHighlight } from './reviewingHighlight.js';
 import {
@@ -74,40 +68,19 @@ export interface ReviewingApplication {
   stop(): Promise<void>;
 }
 
-interface ActiveHomeRoute {
-  readonly kind: 'home';
-  readonly offset: number;
-  readonly preferredReviewIdentity?: ReviewIdentity;
-  readonly mode?: HomeMode;
-  readonly autoOpenActive?: boolean;
-}
-
-interface ActiveReviewRoute {
-  readonly kind: 'review';
-  readonly target: ReviewLoadTarget;
-  readonly selection?: ReviewSelectionHint;
-  readonly fromSearch?: boolean;
-}
-
-type ActiveRoute = ActiveHomeRoute | ActiveReviewRoute;
-
-type ReviewingSubscriptionScope = WorkspaceProjectionViewScope | ReviewHarnessInteractionViewScope;
-
 class ProjectionVersionsDidNotConverge extends Error {}
 class LiveChangesTemporarilyUnverified extends Error {}
 
-class OpenReviewingApplication implements ReviewingApplication {
-  readonly closed: Promise<void>;
+/** Reviewing on the terminal the shell lends it: its loader, model and view (WF-301 scaffolding). */
+class ReviewingExtension implements ScreenExtension {
   readonly #workspace: Workspace;
-  readonly #providedRenderer: CliRenderer | undefined;
+  readonly #surface: ScreenSurface;
   readonly #userConfiguration: UserConfiguration;
   readonly #model: ReviewingApplicationModel;
   #renderer: CliRenderer | undefined;
   #view: ReviewingView | undefined;
   readonly #highlight: ReviewingHighlight;
-  readonly #createClipboard: ShellClipboardFactory;
   #clipboard: ShellClipboard | undefined;
-  #terminal: ShellTerminal | undefined;
   #unsubscribeFromConnection: (() => void) | undefined;
   #route?: ActiveRoute;
   #routeGeneration = 0;
@@ -143,23 +116,17 @@ class OpenReviewingApplication implements ReviewingApplication {
   #stopped = false;
   #diffPrefetchInFlight = false;
   #diffPrefetchDeclined: string | undefined;
-  #resolveClosed!: () => void;
 
   constructor(
     options: ReviewingApplicationOptions,
-    renderer?: CliRenderer,
+    surface: ScreenSurface,
     createHighlightClient?: ConstructorParameters<typeof ReviewingHighlight>[1],
-    createClipboardService: ShellClipboardFactory = productionClipboard,
   ) {
-    this.closed = new Promise(resolve => {
-      this.#resolveClosed = resolve;
-    });
     this.#workspace = options.workspace;
-    this.#providedRenderer = renderer;
+    this.#surface = surface;
     this.#userConfiguration = options.userConfiguration ?? createEphemeralUserConfiguration();
     this.#model = new ReviewingApplicationModel(options.presentation);
     this.#highlight = new ReviewingHighlight(() => this.#view?.invalidateHighlight(), createHighlightClient);
-    this.#createClipboard = createClipboardService;
     this.#watch = new ShellWatch({
       workspace: this.#workspace,
       current: generation => !this.#stopped && generation === this.#routeGeneration,
@@ -184,22 +151,12 @@ class OpenReviewingApplication implements ReviewingApplication {
     } catch (error) {
       configurationWarning = `Couldn’t read your settings, so defaults are in use. ${semanticError(error)}`;
     }
-    this.#terminal = await ShellTerminal.open({
-      provided: this.#providedRenderer,
-      noColor: this.#model.state.presentation.noColor,
-      host: {
-        attention: attention => this.#workspace.setAttention(attention),
-        themeMode: mode => {
-          if (this.#model.setTerminalThemeMode(mode) && this.#view !== undefined) this.#render();
-        },
-      },
-    });
-    this.#renderer = this.#terminal.renderer;
+    this.#renderer = this.#surface.renderer;
     this.#highlight.attachRenderer(this.#renderer.nativeScene);
-    this.#clipboard = new ShellClipboard(this.#createClipboard, this.#renderer);
+    this.#clipboard = this.#surface.clipboard;
     // Paint the first frame in the terminal's own light/dark so a light
     // terminal never flashes the dark theme; a silent terminal stays dark.
-    this.#model.setTerminalThemeMode(await this.#terminal.listen());
+    this.#model.setTerminalThemeMode(this.#surface.terminalThemeMode);
     this.#view = new ReviewingView(
       this.#renderer,
       this.#model,
@@ -288,22 +245,14 @@ class OpenReviewingApplication implements ReviewingApplication {
     await this.#preferencesSave.settle();
     this.#view?.stop();
     this.#view = undefined;
-    this.#terminal?.stopResizing();
-    const clipboard = this.#clipboard;
     this.#clipboard = undefined;
-    try {
-      await this.#highlight.destroy();
-    } finally {
-      try {
-        await clipboard?.dispose();
-      } finally {
-        const terminal = this.#terminal;
-        this.#terminal = undefined;
-        this.#renderer = undefined;
-        await terminal?.close();
-      }
-    }
-    this.#resolveClosed();
+    this.#renderer = undefined;
+    await this.#highlight.destroy();
+  }
+
+  /** The terminal reported a new light or dark. */
+  themeMode(mode: 'dark' | 'light'): void {
+    if (this.#model.setTerminalThemeMode(mode) && this.#view !== undefined) this.#render();
   }
 
   #render(): void {
@@ -379,7 +328,7 @@ class OpenReviewingApplication implements ReviewingApplication {
   #runEffects(effects: readonly ReviewingModelEffect[]): void {
     for (const effect of effects) {
       if (effect.type === 'stop') {
-        void this.stop();
+        this.#surface.quit();
       } else if (effect.type === 'show-home') {
         this.#showHomeFromEffect({
           kind: 'home',
@@ -1679,8 +1628,31 @@ class OpenReviewingApplication implements ReviewingApplication {
 }
 
 /** Creates the deep v1 Reviewing Application Module over the Workspace Interface. */
+/** Reviewing as the shell's one screen, while it still loads, listens and draws for itself. */
+function reviewingScreen(
+  options: ReviewingApplicationOptions,
+  createHighlightClient?: ConstructorParameters<typeof ReviewingHighlight>[1],
+): Screen<undefined, 'reviewing'> {
+  return defineScreen<undefined, 'reviewing'>({
+    name: 'reviewing',
+    open: () => undefined,
+    title: () => 'Reviewing',
+    mode: () => 'reviewing',
+    modes: { reviewing: {} },
+    keys: [],
+    body: () => [],
+    extend: surface => new ReviewingExtension(options, surface, createHighlightClient),
+  });
+}
+
 export function createReviewingApplication(options: ReviewingApplicationOptions): ReviewingApplication {
-  return new OpenReviewingApplication(options);
+  return createShell({
+    workspace: options.workspace,
+    screens: [reviewingScreen(options)],
+    first: { screen: 'reviewing' },
+    ...(options.presentation === undefined ? {} : { presentation: options.presentation }),
+    ...(options.userConfiguration === undefined ? {} : { userConfiguration: options.userConfiguration }),
+  });
 }
 
 /** @internal Concrete OpenTUI test seam; deliberately absent from package exports. */
@@ -1692,14 +1664,17 @@ export function createReviewingApplicationForTest(
   },
 ): ReviewingApplication {
   const { renderer, createHighlightClient, createClipboardService, ...applicationOptions } = options;
-  return new OpenReviewingApplication(
-    {
-      ...applicationOptions,
-      // Scenario tests read exact geometry right after input; motion is opt-in there.
-      presentation: { reducedMotion: true, ...applicationOptions.presentation },
-    },
+  // Scenario tests read exact geometry right after input; motion is opt-in there.
+  const presentation = { reducedMotion: true, ...applicationOptions.presentation };
+  return createShell({
+    workspace: applicationOptions.workspace,
+    screens: [reviewingScreen({ ...applicationOptions, presentation }, createHighlightClient)],
+    first: { screen: 'reviewing' },
+    presentation,
+    ...(applicationOptions.userConfiguration === undefined
+      ? {}
+      : { userConfiguration: applicationOptions.userConfiguration }),
     renderer,
-    createHighlightClient,
-    createClipboardService ?? terminalFallbackClipboard,
-  );
+    createClipboard: createClipboardService ?? terminalFallbackClipboard,
+  });
 }

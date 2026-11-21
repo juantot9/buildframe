@@ -21,7 +21,7 @@ import { ShellPulse } from './shellPulse.js';
 import { ShellRoots } from './shellRoots.js';
 import { ShellSettings } from './shellSettings.js';
 import { HOME_SCREEN, homeScreen } from './shellHomeScreen.js';
-import { dispatchScreenKey, type Screen, type ScreenEffect } from './shellScreen.js';
+import { dispatchScreenKey, type Screen, type ScreenEffect, type ScreenExtension } from './shellScreen.js';
 import { ShellTerminal } from './shellTerminal.js';
 import { ShellViews } from './shellViews.js';
 import { createEphemeralUserConfiguration, type UserConfiguration } from './userConfiguration.js';
@@ -54,6 +54,8 @@ type ShellEffect = ScreenEffect | { readonly type: 'stop' };
 interface OpenScreen {
   readonly screen: Screen<any, any>;
   readonly state: unknown;
+  /** An extended screen listens and draws for itself (WF-301 scaffolding). */
+  extension?: ScreenExtension;
 }
 
 const ROOT_ID = 'shell';
@@ -136,6 +138,7 @@ class ShellApplication implements Shell {
         },
         themeMode: mode => {
           this.#settings.display.terminalThemeMode = mode;
+          this.#current?.extension?.themeMode?.(mode);
           this.#render();
         },
       },
@@ -171,6 +174,8 @@ class ShellApplication implements Shell {
     const terminal = this.#terminal ?? (await this.#openingTerminal?.catch(() => undefined));
     this.#openingTerminal = undefined;
     try {
+      // An extended screen lets go of the terminal before the shell closes it.
+      for (const open of [...this.#stack].reverse()) await open.extension?.stop();
       this.#clipboard?.cancel();
       this.#views.stop();
       this.#unsubscribeFromConnection?.();
@@ -213,7 +218,23 @@ class ShellApplication implements Shell {
   async #open(name: string, args: unknown): Promise<void> {
     const screen = this.#screens.get(name);
     if (screen === undefined) throw new TypeError(`No screen named ${name}`);
-    this.#stack.push({ screen, state: screen.open(args) });
+    const open: OpenScreen = { screen, state: screen.open(args) };
+    if (screen.extend !== undefined) {
+      if (this.#stack.length > 0) throw new TypeError(`Screen ${name} draws for itself, so it can only be first`);
+      const renderer = this.#terminal?.renderer;
+      const clipboard = this.#clipboard;
+      if (renderer === undefined || clipboard === undefined) return;
+      open.extension = screen.extend({
+        renderer,
+        clipboard,
+        terminalThemeMode: this.#settings.display.terminalThemeMode,
+        quit: () => void this.stop(),
+      });
+      this.#stack.push(open);
+      await open.extension.start();
+      return;
+    }
+    this.#stack.push(open);
     await this.#show();
   }
 
@@ -235,7 +256,8 @@ class ShellApplication implements Shell {
 
   readonly #onKeyPress = (event: KeyEvent): void => {
     const input = reviewingInputFromKeyEvent(event);
-    if (input === undefined || this.#stopped) return;
+    // An extended screen listens for itself.
+    if (input === undefined || this.#stopped || this.#current?.extension !== undefined) return;
     this.#run(routeShellKey(input, this.#keyHost()));
     this.#render();
   };
@@ -353,7 +375,8 @@ class ShellApplication implements Shell {
     const open = this.#current;
     const roots = this.#roots;
     const renderer = this.#terminal?.renderer;
-    if (open === undefined || roots === undefined || renderer === undefined || this.#stopped) return;
+    if (open === undefined || open.extension !== undefined || roots === undefined || renderer === undefined) return;
+    if (this.#stopped) return;
     const { screen, state } = open;
     const look: FrameLook = {
       ...this.#look,
