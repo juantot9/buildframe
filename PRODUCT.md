@@ -18,8 +18,8 @@ changed, ask precise questions anchored to exact lines, and keep a trustworthy
 record of what was asked, what was answered, and what changed in between.
 
 The first public release is a quiet, Reviewing-only `0.1.0` preview for
-developers on macOS, Linux and Windows (see `.issues/WF-287` and
-`.issues/WF-304`). Design for the solo
+developers on macOS and Linux (see `.issues/WF-287`); native Windows follows
+in the next release (`.issues/WF-304`). Design for the solo
 developer first.
 
 ## Product Purpose

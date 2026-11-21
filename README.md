@@ -8,7 +8,8 @@ answer comes back under your Message, together with what it changed in the code.
 Everything stays on your machine. BuildFrame sends a Message only to the agent
 session you connected, exactly as you wrote it.
 
-> **0.1.0 is a preview.** It covers Reviewing only, on macOS, Linux and Windows. Expect
+> **0.1.0 is a preview.** It covers Reviewing only, on macOS and Linux; Windows
+> comes with the next release. Expect
 > rough edges, and please [report them as GitHub issues](https://github.com/juantot9/buildframe/issues)
 > with the output of `buildframe doctor`.
 
@@ -30,8 +31,8 @@ buildframe      # or the shorter: bframe
 
 ### Requirements
 
-- macOS, Linux, or Windows 10/11 on x64 (tested from PowerShell). WSL1 is
-  not supported and WSL2 is not claimed.
+- macOS, Linux, or (from the next release) Windows 10/11 on x64, tested
+  from PowerShell. WSL1 is not supported and WSL2 is not claimed.
 - Node.js 26 (`>=26.4.0 <27.0.0`); CI tests `26.4.0` and the newest 26.x, and
   development runs on `26.5.1`. Its terminal
   interface needs Node 26's FFI, which BuildFrame turns on for itself.
