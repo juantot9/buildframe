@@ -13,31 +13,18 @@ import {
   type ShellClipboardFactory,
 } from './shellClipboard.js';
 import { executeCommand, semanticError } from './shellCommands.js';
-import {
-  configurationDialog,
-  configurationKey,
-  type ConfigurationRow,
-  type ConfigurationWindow,
-} from './shellConfiguration.js';
-import { backgroundRow, DISPLAY_DESCRIPTIONS, themeRow } from './shellDisplaySettings.js';
 import { shellFrame, type FrameLook } from './shellFrame.js';
 import { routeShellKey, type ShellKeyHost } from './shellInput.js';
 import { footerSentence, keyList, keysRow } from './shellKeys.js';
 import { theme, type Look } from './shellLook.js';
-import { DebouncedSave } from './shellPreferences.js';
 import { ShellPulse } from './shellPulse.js';
 import { ShellRoots } from './shellRoots.js';
+import { ShellSettings } from './shellSettings.js';
 import { HOME_SCREEN, homeScreen } from './shellHomeScreen.js';
 import { dispatchScreenKey, type Screen, type ScreenEffect } from './shellScreen.js';
 import { ShellTerminal } from './shellTerminal.js';
 import { ShellViews } from './shellViews.js';
-import {
-  DEFAULT_REVIEWING_PREFERENCES,
-  createEphemeralUserConfiguration,
-  type ReviewingPreferences,
-  type ReviewingThemeDefinition,
-  type UserConfiguration,
-} from './userConfiguration.js';
+import { createEphemeralUserConfiguration, type UserConfiguration } from './userConfiguration.js';
 
 export interface ShellOptions {
   /** A connected runtime's closed Workspace Interface. */
@@ -92,22 +79,7 @@ class ShellApplication implements Shell {
   readonly #stack: OpenScreen[] = [];
   readonly #views: ShellViews;
   readonly #presentation: Look['presentation'];
-  /** The theme and background, changed in place by Configuration. */
-  readonly #display: {
-    reviewingTheme: ReviewingThemeDefinition;
-    background: ReviewingPreferences['background'];
-    customThemes: readonly ReviewingThemeDefinition[];
-    terminalThemeMode: Look['terminalThemeMode'];
-  } = {
-    reviewingTheme: DEFAULT_REVIEWING_PREFERENCES.theme,
-    background: DEFAULT_REVIEWING_PREFERENCES.background,
-    customThemes: [],
-    terminalThemeMode: undefined,
-  };
-  readonly #userConfiguration: UserConfiguration;
-  #preferences: ReviewingPreferences = DEFAULT_REVIEWING_PREFERENCES;
-  readonly #preferencesSave: DebouncedSave<ReviewingPreferences>;
-  #configuration: ConfigurationWindow | undefined;
+  readonly #settings: ShellSettings;
   #checksOpen = false;
   #openingTerminal: Promise<ShellTerminal> | undefined;
   #terminal: ShellTerminal | undefined;
@@ -134,15 +106,9 @@ class ShellApplication implements Shell {
     this.#first = options.first ?? { screen: HOME_SCREEN };
     if (!this.#screens.has(this.#first.screen)) throw new TypeError(`No screen named ${this.#first.screen}`);
     this.#presentation = { ascii: false, noColor: false, ...options.presentation };
-    const configuration = (this.#userConfiguration = options.userConfiguration ?? createEphemeralUserConfiguration());
-    this.#preferencesSave = new DebouncedSave(async preferences => {
-      try {
-        const result = await configuration.saveReviewingPreferences(preferences);
-        if (result.status === 'rejected') this.#say(`Settings were not saved: ${result.reason}.`, 'warning');
-      } catch (error) {
-        this.#say(`Couldn’t save the settings. ${semanticError(error)}`, 'warning');
-      }
-    });
+    this.#settings = new ShellSettings(options.userConfiguration ?? createEphemeralUserConfiguration(), (text, tone) =>
+      this.#say(text, tone),
+    );
     this.#views = new ShellViews(options.workspace, {
       changed: () => this.#render(),
       say: (sentence, tone) => this.#say(sentence, tone),
@@ -159,18 +125,7 @@ class ShellApplication implements Shell {
   }
 
   async #start(): Promise<void> {
-    const configuration = this.#userConfiguration;
-    let warning: string | undefined;
-    try {
-      const loaded = await configuration.load();
-      this.#preferences = loaded.preferences;
-      this.#display.reviewingTheme = loaded.preferences.theme;
-      this.#display.background = loaded.preferences.background;
-      this.#display.customThemes = loaded.themes;
-      warning = loaded.warning;
-    } catch (error) {
-      warning = `Couldn’t read your settings, so defaults are in use. ${semanticError(error)}`;
-    }
+    const warning = await this.#settings.load();
     if (this.#stopped) return;
     this.#openingTerminal = ShellTerminal.open({
       provided: this.#options.renderer,
@@ -180,7 +135,7 @@ class ShellApplication implements Shell {
           if (!this.#stopped) this.#options.workspace.setAttention(attention);
         },
         themeMode: mode => {
-          this.#display.terminalThemeMode = mode;
+          this.#settings.display.terminalThemeMode = mode;
           this.#render();
         },
       },
@@ -194,7 +149,7 @@ class ShellApplication implements Shell {
     if (this.#stopped) return;
     const terminalThemeMode = await terminal.listen();
     if (this.#stopped) return;
-    this.#display.terminalThemeMode = terminalThemeMode;
+    this.#settings.display.terminalThemeMode = terminalThemeMode;
     this.#roots = new ShellRoots(renderer, ROOT_ID);
     this.#roots.start();
     renderer.keyInput.on('keypress', this.#onKeyPress);
@@ -230,47 +185,13 @@ class ShellApplication implements Shell {
       } finally {
         this.#terminal = undefined;
         await terminal?.close();
-        await this.#preferencesSave.settle();
+        await this.#settings.settle();
       }
     }
   }
 
   get #look(): Look {
-    const display = this.#display;
-    return {
-      presentation: this.#presentation,
-      reviewingTheme: display.reviewingTheme,
-      background: display.background,
-      terminalThemeMode: display.terminalThemeMode,
-    };
-  }
-
-  /** Configuration's rows: the theme and background, then the screen's own. */
-  #settings(open: OpenScreen): {
-    readonly rows: readonly ConfigurationRow[];
-    readonly descriptions: readonly string[];
-  } {
-    const own = open.screen.settings?.(open.state);
-    return {
-      rows: [themeRow(this.#display), backgroundRow(this.#display), ...(own?.rows ?? [])],
-      descriptions: [...DISPLAY_DESCRIPTIONS, ...(own?.descriptions ?? [])],
-    };
-  }
-
-  #configure(input: ReviewingInput): readonly ShellEffect[] {
-    const window = this.#configuration;
-    const open = this.#current;
-    if (window === undefined || open === undefined) return [];
-    const outcome = configurationKey(window, input, this.#settings(open).rows);
-    if (outcome === 'closed') {
-      this.#configuration = undefined;
-      this.#say('Settings saved.', 'success');
-    } else if (outcome === 'changed') {
-      const { reviewingTheme: theme, background } = this.#display;
-      this.#preferences = { ...this.#preferences, theme, background };
-      this.#preferencesSave.schedule(this.#preferences);
-    }
-    return [];
+    return this.#settings.look(this.#presentation);
   }
 
   get #current(): OpenScreen | undefined {
@@ -338,12 +259,15 @@ class ShellApplication implements Shell {
         ),
       keyList: { open: this.#keyListOpen, show: open => (this.#keyListOpen = open) },
       configuration: {
-        open: this.#configuration !== undefined,
+        open: this.#settings.open,
         show: () => {
-          this.#configuration = { selected: 'theme' };
+          this.#settings.show();
           this.#checksOpen = false;
         },
-        input: input => this.#configure(input),
+        input: input => {
+          this.#settings.key(input, open?.screen.settings?.(open.state));
+          return [];
+        },
       },
       details: {
         open: this.#checksOpen,
@@ -454,16 +378,7 @@ class ShellApplication implements Shell {
         ...screen.body(state, look, height),
         ...(this.#checksOpen ? actionChecksPanel(look, screen.checks?.(state) ?? []) : []),
         ...(this.#keyListOpen ? keyListPanel(look, keyList(screen.table, mode, state), height, screen.name) : []),
-        ...(this.#configuration === undefined
-          ? []
-          : configurationDialog(
-              look,
-              this.#configuration,
-              { title: 'Display', ...this.#settings(open) },
-              height,
-              0,
-              screen.name,
-            )),
+        ...this.#settings.dialog(look, screen.settings?.(state), height, screen.name),
       ],
       said:
         said === undefined
