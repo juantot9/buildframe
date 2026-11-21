@@ -1,5 +1,4 @@
 import {
-  MouseButton,
   StyledText,
   TextareaRenderable,
   type CliRenderer,
@@ -103,6 +102,7 @@ import {
   statusIcon,
 } from './reviewingFileGlyphs.js';
 import { ShellRoots } from './shellRoots.js';
+import { ShellPointer } from './shellPointer.js';
 import { ShellSelection } from './shellSelection.js';
 import { shellFrame } from './shellFrame.js';
 import {
@@ -4987,13 +4987,7 @@ export class ReviewingView {
   readonly #model: ReviewingApplicationModel;
   readonly #roots: ShellRoots;
   readonly #onEffects: (effects: readonly ReviewingModelEffect[], inputStartedAt: number) => void;
-  #pointerGesture:
-    | {
-        readonly target: ReviewingPointerTarget;
-        readonly x: number;
-        readonly y: number;
-      }
-    | undefined;
+  readonly #pointer: ShellPointer<ReviewingPointerTarget>;
   #questionTextarea: TextareaRenderable | undefined;
   #discussionPage: DiscussionPage | undefined;
   #contentPageSize: number | undefined;
@@ -5152,35 +5146,6 @@ export class ReviewingView {
     return undefined;
   }
 
-  readonly #beginPointerTarget = (target: ReviewingPointerTarget, event: MouseEvent): void => {
-    if (event.button !== MouseButton.LEFT) return;
-    const exactTarget =
-      target.kind === 'region' && target.region === 'diff'
-        ? (this.#diffPointerTargetAt(event.x, event.y) ?? target)
-        : target;
-    this.#pointerGesture = { target: exactTarget, x: event.x, y: event.y };
-    event.stopPropagation();
-  };
-
-  readonly #finishPointerTarget = (event: MouseEvent): void => {
-    if (event.button !== MouseButton.LEFT) return;
-    const gesture = this.#pointerGesture;
-    this.#pointerGesture = undefined;
-    if (gesture === undefined) return;
-    event.stopPropagation();
-    const horizontalTravel = Math.abs(gesture.x - event.x);
-    const verticalTravel = Math.abs(gesture.y - event.y);
-    // A physical click can wobble by a couple of terminal cells. Preserve a
-    // deliberate longer drag for text selection, but make one ordinary click
-    // both clear any old selection and activate the target pressed by the user.
-    if (horizontalTravel > 2 || verticalTravel > 2) return;
-    this.renderer.clearSelection();
-    // Retired presented trees now remain alive through the replacement frame,
-    // so activation can be synchronous. Deferring this local transition to a
-    // microtask made exact Diff clicks trail the next terminal input event.
-    this.#activatePointerTarget(gesture.target);
-  };
-
   readonly #onKeyPress = (event: KeyEvent): void => {
     const input = reviewingInputFromKeyEvent(event);
     if (input === undefined) return;
@@ -5323,11 +5288,16 @@ export class ReviewingView {
     this.#model = model;
     this.#onEffects = onEffects;
     this.#roots = new ShellRoots(renderer, 'reviewing-screen');
+    this.#pointer = new ShellPointer(renderer, {
+      refine: (target, event) =>
+        target.kind === 'region' && target.region === 'diff'
+          ? (this.#diffPointerTargetAt(event.x, event.y) ?? target)
+          : target,
+      activate: target => this.#activatePointerTarget(target),
+    });
     this.#selection = new ShellSelection(renderer, {
       copying: () => this.#started && this.#model.state.editor === undefined,
-      selected: () => {
-        this.#pointerGesture = undefined;
-      },
+      selected: () => this.#pointer.cancel(),
       copy: (text, announce) =>
         this.#onEffects([{ type: 'copy-text', source: 'review-selection', text, announce }], performance.now()),
     });
@@ -5469,8 +5439,8 @@ export class ReviewingView {
         textarea,
         {
           highlight: this.highlight,
-          begin: this.#beginPointerTarget,
-          finish: this.#finishPointerTarget,
+          begin: this.#pointer.begin,
+          finish: this.#pointer.finish,
           move: this.#movePointer,
           synchronizePaneScroll: this.#synchronizePaneScroll,
           wheelPane: this.#wheelPane,
@@ -5503,7 +5473,7 @@ export class ReviewingView {
     this.#roots.stop();
     this.#questionTextarea = undefined;
     this.#discussionPage = undefined;
-    this.#pointerGesture = undefined;
+    this.#pointer.cancel();
   }
 }
 
