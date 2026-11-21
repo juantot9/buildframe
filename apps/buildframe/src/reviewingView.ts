@@ -103,6 +103,7 @@ import {
 } from './reviewingFileGlyphs.js';
 import { ShellRoots } from './shellRoots.js';
 import { ShellComposer } from './shellComposer.js';
+import { ShellRenderLoop } from './shellRenderLoop.js';
 import { ShellPointer } from './shellPointer.js';
 import { ShellSelection } from './shellSelection.js';
 import { shellFrame } from './shellFrame.js';
@@ -4984,10 +4985,7 @@ export class ReviewingView {
   #discussionPage: DiscussionPage | undefined;
   #contentPageSize: number | undefined;
   readonly #selection: ShellSelection;
-  #wheelRenderQueued: NodeJS.Immediate | undefined;
-  #wheelFramePending = false;
-  #wheelRenderDirty = false;
-  #rendering = false;
+  readonly #loop: ShellRenderLoop;
   #started = false;
 
   readonly #captureDiscussionPage = (page: DiscussionPage): void => {
@@ -5010,34 +5008,6 @@ export class ReviewingView {
     layout: ReviewingPaneScrollLayout,
   ): ReviewingPaneScrollState => this.#glider.glide(region, this.#model.synchronizePaneScroll(region, layout));
 
-  readonly #onWheelRenderFrame = (): void => {
-    this.#wheelFramePending = false;
-    if (this.#wheelRenderDirty) this.#scheduleWheelRender();
-  };
-
-  /**
-   * Model input remains lossless, while expensive whole-tree replacement is
-   * coalesced across one terminal input burst and capped at one per presented
-   * frame. This prevents rapid wheel input from building and retaining dozens
-   * of superseded render trees before OpenTUI can publish one of them.
-   */
-  #scheduleWheelRender(): void {
-    this.#wheelRenderDirty = true;
-    if (this.#wheelRenderQueued !== undefined || this.#wheelFramePending || !this.#started) return;
-    this.#wheelRenderQueued = setImmediate(() => {
-      this.#wheelRenderQueued = undefined;
-      if (!this.#started || !this.#wheelRenderDirty) return;
-      this.#wheelRenderDirty = false;
-      this.render();
-      if (!this.#started) return;
-      // render() registers retired-tree cleanup before this listener. On the
-      // frame, cleanup therefore runs before another replacement can retire
-      // the tree whose hit grid was just presented.
-      this.#wheelFramePending = true;
-      this.renderer.once('frame', this.#onWheelRenderFrame);
-    });
-  }
-
   readonly #wheelPane = (region: ReviewRegion, event: MouseEvent): void => {
     const direction = event.scroll?.direction;
     if (direction !== 'up' && direction !== 'down') return;
@@ -5047,7 +5017,7 @@ export class ReviewingView {
     const inputStartedAt = performance.now();
     const rows = this.#glider.wheelRows(region, event.scroll?.delta, inputStartedAt);
     const effects = this.#model.handlePaneWheel(region, direction === 'up' ? -1 : 1, rows);
-    this.#scheduleWheelRender();
+    this.#loop.renderSoon();
     this.#onEffects(effects, inputStartedAt);
   };
 
@@ -5251,23 +5221,6 @@ export class ReviewingView {
 
   readonly #onResize = (): void => this.render();
 
-  #highlightDirty = false;
-  invalidateHighlight(): void {
-    if (!this.#started) return;
-    this.#highlightDirty = true;
-    this.renderer.requestRender();
-  }
-
-  readonly #onHighlightFrame = (): void => {
-    if (!this.#highlightDirty || !this.#started) return;
-    // Do not replace a tree underneath an active native text selection.
-    if (this.renderer.getSelection()?.isDragging) return;
-    // Finish the presented frame's hit-grid/retired-tree cleanup first.
-    queueMicrotask(() => {
-      if (this.#started && this.#highlightDirty) this.render();
-    });
-  };
-
   constructor(
     readonly renderer: CliRenderer,
     model: ReviewingApplicationModel,
@@ -5279,6 +5232,7 @@ export class ReviewingView {
     this.#model = model;
     this.#onEffects = onEffects;
     this.#roots = new ShellRoots(renderer, 'reviewing-screen');
+    this.#loop = new ShellRenderLoop(renderer, () => this.#renderNow());
     this.#composer = new ShellComposer(renderer, 'reviewing-question-textarea', {
       draft: () => this.#model.state.editor,
       edited: (body, cursor) => this.#model.synchronizeMessageEditor(body, cursor),
@@ -5309,6 +5263,10 @@ export class ReviewingView {
     });
   }
 
+  invalidateHighlight(): void {
+    this.#loop.invalidate();
+  }
+
   start(): void {
     if (this.#started) return;
     this.#started = true;
@@ -5317,27 +5275,15 @@ export class ReviewingView {
     this.renderer.keyInput.on('paste', this.#onPaste);
     this.#selection.start();
     this.renderer.on('resize', this.#onResize);
-    this.renderer.on('frame', this.#onHighlightFrame);
+    this.#loop.start();
     this.render();
   }
 
   render(): void {
-    // Layout callbacks can request a replacement while a VNode is mounting.
-    // The in-progress tree already reads the current synchronous model state;
-    // dropping that nested replacement leaves one unambiguous root owner.
-    if (this.#rendering) return;
-    this.#rendering = true;
-    try {
-      this.#renderNow();
-    } finally {
-      this.#rendering = false;
-    }
+    this.#loop.render();
   }
 
   #renderNow(): void {
-    // Any immediate render already includes the latest queued wheel state.
-    this.#wheelRenderDirty = false;
-    this.#highlightDirty = false;
     this.#model.setViewport(this.renderer.width, this.renderer.height);
     const colors = theme(this.#model.state);
     this.renderer.setBackgroundColor(this.#model.state.presentation.noColor ? 'transparent' : colors.background);
@@ -5375,13 +5321,8 @@ export class ReviewingView {
     this.renderer.keyInput.off('paste', this.#onPaste);
     this.#selection.stop();
     this.renderer.off('resize', this.#onResize);
-    this.renderer.off('frame', this.#onHighlightFrame);
-    this.renderer.off('frame', this.#onWheelRenderFrame);
-    if (this.#wheelRenderQueued !== undefined) clearImmediate(this.#wheelRenderQueued);
+    this.#loop.stop();
     this.#glider.stop();
-    this.#wheelRenderQueued = undefined;
-    this.#wheelFramePending = false;
-    this.#wheelRenderDirty = false;
     this.#roots.stop();
     this.#composer.stop();
     this.#discussionPage = undefined;
