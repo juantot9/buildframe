@@ -22,6 +22,31 @@ Not investigated yet. Candidates: the change check compares file metadata
 that Windows updates lazily or with coarser precision, or the test's change
 lands outside the window it means to hit on a slower runner.
 
+## Cause (2026-11-22)
+
+The read compares the file's `dev`, `ino`, mode, size, `mtimeNs` and
+`ctimeNs` before and after (`sameStat` in `legacyReviewSource.ts`). The
+test's mutations after the first are the same size (`changing-1`,
+`changing-2`, …), so only the timestamps can show the change, and NTFS
+stamps them from the system clock tick. On the reference machine, 1,177 of
+2,000 quick same-size rewrites left size, `mtimeNs` and `ctimeNs` all
+unchanged (probe: rewrite through one handle, `fstat` through another).
+
+So the product can miss a change during a read on Windows: a same-size
+rewrite within one clock tick. Linux has the same gap in principle (file
+times come from a coarse clock) but far less often; it never failed there.
+The same before-and-after comparison guards the content window in
+`workspaceEvidence/repositoryContent.ts`.
+
+Options, for the owner:
+
+- Keep the metadata check and write the limit down (WF-304: differences are
+  written down, not hidden); make the test change the size each time so it
+  tests the retry path deterministically.
+- Read twice and compare digests where a torn read matters. Receipts are
+  small, so the cost is one more bounded read; the saved bytes and
+  diagnostics stay the same on every platform.
+
 ## Work
 
 - Find what the moved-receipt read compares before and after, and whether

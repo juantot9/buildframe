@@ -3,6 +3,7 @@ import { lstat, open, readFile, readlink, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { decodeBytesBase64, encodeBytesBase64 } from './bytesBase64.js';
+import { outsideChild, outsideSelection, outsideUnder } from './outsidePaths.js';
 import { sha256 } from './sha256.js';
 import type { GitInspectionContext } from './gitProcess.js';
 import { enumerateIndex, enumerateUntracked } from './workspaceEvidence/enumeration.js';
@@ -144,7 +145,7 @@ export function normalizeContextSourceSelections(
       ) {
         throw new TypeError('Outside-checkout selections carry one absolute host path');
       }
-      const absolute = Buffer.from(selection.absolutePath, 'utf8');
+      const absolute = outsideSelection(selection.absolutePath);
       if (absolute.byteLength === 0 || absolute.byteLength > MAX_CONTEXT_ABSOLUTE_PATH_BYTES) {
         throw new TypeError('Outside-checkout absolute paths are bounded');
       }
@@ -497,7 +498,7 @@ async function walkOutsideDirectory(
   for (const entry of sortedDirentNames(entries)) {
     if (atCandidateLimit(accumulator, limits)) return;
     const name = entry.name;
-    const absolute = Buffer.concat([absolutePrefix, SLASH, name]);
+    const absolute = outsideChild(absolutePrefix, name);
     const pathHex = absolute.toString('hex');
     if (accumulator.byPath.has(pathHex)) continue;
     if (entry.isDirectory()) {
@@ -701,8 +702,7 @@ async function resolveContextCandidates(
       );
     }
   }
-  // Inclusion origins follow selection intent: every candidate beneath a directory
-  // selection (or equal to a file selection) carries that selection's origin.
+  // A candidate beneath a directory selection, or equal to a file one, carries its origin.
   for (const [pathHex, candidate] of accumulator.byPath) {
     const origins = new Set<number>(candidate.origins);
     const relative = Buffer.from(pathHex, 'hex');
@@ -714,7 +714,7 @@ async function resolveContextCandidates(
         }
         const candidateAbsolute = Buffer.from(candidate.absolutePath ?? '', 'utf8');
         const selected = selection.absolute!;
-        if (selection.kind === 'outside-directory' && pathUnderPrefix(candidateAbsolute, selected)) {
+        if (selection.kind === 'outside-directory' && outsideUnder(candidateAbsolute, selected)) {
           origins.add(selection.origin);
         }
         continue;
@@ -990,9 +990,9 @@ async function capturedContextBytesStillMatch(
 }
 
 /**
- * Expands one closed context capture request into immutable exact bytes per candidate,
- * re-deriving the manifest facts and exact admitted bytes before publishing. Optional
- * admission policy is supplied by the semantic owner and cannot broaden source reads.
+ * Expands one closed context capture request into exact immutable bytes per candidate,
+ * re-deriving manifest facts and admitted bytes before publishing. Optional admission
+ * policy comes from the semantic owner and cannot broaden source reads.
  */
 export async function readContextSourceCapture(
   checkout: string,

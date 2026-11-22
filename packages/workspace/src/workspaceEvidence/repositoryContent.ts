@@ -1,7 +1,7 @@
 import { constants, type BigIntStats } from 'node:fs';
-import { open } from 'node:fs/promises';
 
 import type { CurrentRepositoryFileContent } from './contracts.js';
+import { openUnfollowed } from './openUnfollowed.js';
 
 const WINDOW_LINES = 512;
 const CONTEXT_LINES = 128;
@@ -98,9 +98,7 @@ export async function readRepositoryContentWindow(
   maximumWindowBytes: number,
   anchorLine = 1,
 ): Promise<CurrentRepositoryFileContent> {
-  const handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(
-    () => undefined,
-  );
+  const handle = await openUnfollowed(filename, constants.O_NONBLOCK);
   if (handle === undefined) return { status: 'unavailable' };
   try {
     const before = await handle.stat({ bigint: true });

@@ -5,7 +5,7 @@ status: open
 labels:
   - wayfinder:task
 parent: WF-304
-assignee: null
+assignee: juanan
 blocked_by: []
 created: 2026-11-22
 ---
@@ -33,6 +33,20 @@ never ran it.
   path handling goes in a new file beside it, and the edit there moves out
   at least as much as it adds.
 - Keep macOS and Linux bytes, Context records and identities unchanged.
+
+## Progress (2026-11-22)
+
+- Decision (default, for the owner to confirm): outside-checkout paths are
+  the host's absolute paths. On Windows a selection is normalized once
+  (`path.win32.normalize`: `/` to `\`, repeated separators), children are
+  joined with `\` and containment checks `\` (a drive root such as `C:\`
+  already ends with it). Case is not folded: `C:\X` and `c:\x` stay two
+  selections, which can only duplicate candidates, never reach beyond a
+  selection. macOS and Linux keep a selection's exact bytes and `/`.
+- The rule lives in `outsidePaths.ts`; `contextEvidence.ts` only calls it
+  (70,317 → 70,298 bytes, comments tightened to fit).
+- `outsidePaths.test.ts` covers both spellings on every platform.
+- Still to see: the Windows CI job (the scenario needs symlinks).
 
 ## Verification
 

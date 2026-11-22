@@ -5,7 +5,7 @@ status: open
 labels:
   - wayfinder:task
 parent: WF-304
-assignee: null
+assignee: juanan
 blocked_by: []
 created: 2026-11-22
 ---
@@ -42,6 +42,21 @@ reads the link's target and reports it `available`.
   and Linux unchanged.
 - Look for other no-follow assumptions on Windows (`O_NOFOLLOW`, `lstat`
   followed by a path-based open).
+
+## Progress (2026-11-22)
+
+- `workspaceEvidence/openUnfollowed.ts` opens both readers' files. With
+  `O_NOFOLLOW` (macOS, Linux) it opens exactly as before. Without it
+  (Windows) the path must not be a link before the open, and the handle must
+  be the same file (`dev`, `ino`) after it.
+- `openUnfollowed.test.ts` runs that Windows path on every platform: a
+  junction is refused on the reference machine (no privilege needed), a
+  file symlink wherever symlinks work (CI), and a path that became another
+  file between the check and the open is refused.
+- No other reader of checkout content opens by path: `readFile`,
+  `createReadStream` and `O_NOFOLLOW` appear nowhere else in the evidence
+  and context code.
+- Still to see: the Windows CI job, where symlinks work.
 
 ## Verification
 

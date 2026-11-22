@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { constants as fsConstants, type Stats } from 'node:fs';
-import { lstat, open, readFile, readlink, realpath } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { encodeBytesBase64 } from '../bytesBase64.js';
 import { prepareGitInspectionContext, type GitInspectionContext } from '../gitProcess.js';
@@ -17,6 +17,7 @@ import type {
 } from './contracts.js';
 import { inspectGitObjects, readGitObjects, runGit } from './inspection.js';
 import type { FileDraft, GitObjectMetadata, SideDraft, StreamResult } from './internalTypes.js';
+import { openUnfollowed } from './openUnfollowed.js';
 import { FULL_OBJECT_ID_PATTERN, splitBuffer } from './utils.js';
 
 export { decorateAttributes } from './attributes.js';
@@ -131,7 +132,7 @@ export async function streamRegularFile(
   maximumBytes: number,
   retain: boolean,
 ): Promise<StreamResult> {
-  const handle = await open(filename, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW).catch(() => undefined);
+  const handle = await openUnfollowed(filename);
   if (handle === undefined) return { status: 'failed' };
   return await new Promise<StreamResult>(resolve => {
     const hash = createHash('sha256');

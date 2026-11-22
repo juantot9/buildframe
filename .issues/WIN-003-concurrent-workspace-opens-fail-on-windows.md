@@ -5,7 +5,7 @@ status: open
 labels:
   - wayfinder:task
 parent: WF-304
-assignee: null
+assignee: juanan
 blocked_by: []
 created: 2026-11-22
 ---
@@ -37,6 +37,27 @@ same Workspace at the same moment.
   existing attempts), the way WF-308 retries renames.
 - `workspaceIdentity.ts` is frozen: the Windows rule goes in a new file, and
   the edit there moves out at least as much as it adds.
+
+## Progress (2026-11-22)
+
+- Reproduced on the reference machine: rounds of concurrent opens of one
+  repository in one process were refused at `lock-registry` 2 times in 600
+  opens four at a time, and 8 in 800 eight at a time.
+- Traced (wrapping `fs/promises`, no source change): `mkdir` of the lock
+  directory, `readdir` of it and `readFile` of an owner record failed with
+  `EPERM` while another contender was removing them. Plain `unlink` and
+  `rmdir` in Node remove the name at once on Windows 11, so something else
+  holds a handle without delete sharing (likely antivirus); not confirmed.
+- The registry lock moved out of the frozen `workspaceIdentity.ts`
+  (38,700 → 28,722 bytes) into `registryLock.ts`, with `BootstrapProblem`
+  in `bootstrapProblem.ts`. On Windows, `EPERM` from creating the lock
+  directory, listing it, or reading or removing an owner record now waits
+  and retries within the existing attempts. macOS and Linux are unchanged.
+- After the change: 4,400 concurrent opens (widths 4, 8 and 16), all ready;
+  the trace still shows the `EPERM`s, now waited out.
+- `registryLock.test.ts` injects one `EPERM` into the lock's `mkdir` and
+  into an owner `readFile`: Windows enters the lock, macOS and Linux still
+  refuse. Both fail with the Windows rule disabled.
 
 ## Verification
 
