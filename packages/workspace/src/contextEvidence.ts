@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, open, readFile, readlink, readdir } from 'node:fs/promises';
+import { lstat, open, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { decodeBytesBase64, encodeBytesBase64 } from './bytesBase64.js';
+import { readLinkTarget as readSymlinkTarget } from './linkTarget.js';
 import { outsideChild, outsideSelection, outsideUnder } from './outsidePaths.js';
 import { sha256 } from './sha256.js';
 import type { GitInspectionContext } from './gitProcess.js';
@@ -890,14 +891,6 @@ function candidateFactsFingerprint(candidate: ContextSourceCandidate): string {
 async function readWholeFile(absolute: Buffer): Promise<Buffer | undefined> {
   try {
     return await readFile(absolute);
-  } catch {
-    return undefined;
-  }
-}
-
-async function readSymlinkTarget(absolute: Buffer): Promise<Buffer | undefined> {
-  try {
-    return (await readlink(absolute, { encoding: 'buffer' })) as Buffer;
   } catch {
     return undefined;
   }

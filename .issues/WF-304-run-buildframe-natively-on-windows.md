@@ -64,6 +64,7 @@ Can start now:
 11. [Outside-checkout Context paths on Windows](./WIN-002-outside-checkout-context-paths-on-windows.md)
 12. [Concurrent Workspace opens can fail on Windows](./WIN-003-concurrent-workspace-opens-fail-on-windows.md)
 13. [A moved receipt changed during a read was missed on Windows](./WIN-004-moved-receipt-change-missed-on-windows.md)
+14. [Symlink targets as Git records them on Windows](./WIN-005-symlink-targets-as-git-records-them-on-windows.md)
 
 Blocked:
 

@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { Stats } from 'node:fs';
-import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { encodeBytesBase64 } from '../bytesBase64.js';
 import { prepareGitInspectionContext, type GitInspectionContext } from '../gitProcess.js';
+import { readLinkTarget } from '../linkTarget.js';
 import { deepFreeze } from '../recordCodec.js';
 import { sha256 } from '../sha256.js';
 import type {
@@ -197,22 +198,18 @@ export async function streamRegularFile(
 export async function readWorkingSide(side: SideDraft, maximumBytes: number): Promise<StreamResult> {
   if (side.workingPath === undefined) return { status: 'failed' };
   if (side.kind === 'symlink') {
-    try {
-      const target = await readlink(side.workingPath, { encoding: 'buffer' });
-      if (target.byteLength > maximumBytes) return { status: 'limit' };
-      const bytes = Buffer.from(target);
-      const base = {
-        status: 'read' as const,
-        bytesRead: bytes.byteLength,
-        digest: sha256(bytes),
-        classification: contentClassification(bytes),
-      };
-      // Raw target bytes are structural symlink evidence. recordSideBytes still
-      // honors capturePlanned for the separately windowed side content.
-      return { ...base, content: bytes };
-    } catch {
-      return { status: 'failed' };
-    }
+    const bytes = await readLinkTarget(side.workingPath);
+    if (bytes === undefined) return { status: 'failed' };
+    if (bytes.byteLength > maximumBytes) return { status: 'limit' };
+    const base = {
+      status: 'read' as const,
+      bytesRead: bytes.byteLength,
+      digest: sha256(bytes),
+      classification: contentClassification(bytes),
+    };
+    // Target bytes (as Git records them) are structural symlink evidence.
+    // recordSideBytes still honors capturePlanned for the windowed side content.
+    return { ...base, content: bytes };
   }
   if (side.kind !== 'regular') return { status: 'failed' };
   const result = await streamRegularFile(side.workingPath, maximumBytes, side.capturePlanned);

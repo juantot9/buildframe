@@ -6,7 +6,7 @@ labels:
   - wayfinder:task
 parent: WF-304
 assignee: null
-blocked_by: [WF-305, WF-306, WF-307, WF-308, WF-309, WF-310, WF-311, WF-312, WF-313, WF-314, WF-320, WIN-001, WIN-002, WIN-003, WIN-004]
+blocked_by: [WF-305, WF-306, WF-307, WF-308, WF-309, WF-310, WF-311, WF-312, WF-313, WF-314, WF-320, WIN-001, WIN-002, WIN-003, WIN-004, WIN-005]
 created: 2026-11-19
 ---
 
@@ -33,6 +33,7 @@ BuildFrame claims native Windows support, and the `windows` branch merges into
 - [Outside-checkout Context paths on Windows](./WIN-002-outside-checkout-context-paths-on-windows.md)
 - [Concurrent Workspace opens can fail on Windows](./WIN-003-concurrent-workspace-opens-fail-on-windows.md)
 - [A moved receipt changed during a read was missed on Windows](./WIN-004-moved-receipt-change-missed-on-windows.md)
+- [Symlink targets as Git records them on Windows](./WIN-005-symlink-targets-as-git-records-them-on-windows.md)
 
 Also requires
 [A one-line edit in a CRLF-checked-out file shows the whole file rewritten](./WF-288-crlf-files-diff-as-rewritten.md)
@@ -136,6 +137,13 @@ Windows (clean install, round trips).
   (concurrent opens refused at `lock-registry`) and
   [WIN-004](./WIN-004-moved-receipt-change-missed-on-windows.md) (a change
   during a read missed).
+- Fifth run (45053375627, on `fcd6660`) and sixth (45057917403, on
+  `17fe10a`): macOS and Linux pass. A symlink case that also made a FIFO
+  is split so its symlink part runs on Windows, which found
+  [WIN-005](./WIN-005-symlink-targets-as-git-records-them-on-windows.md)
+  (link targets kept `\`). WIN-004 still fails some runs. The shell
+  scenario timed out once with no message; its waits now end before the
+  test bound and name what they waited for.
 
 ## Verification
 
