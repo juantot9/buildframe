@@ -3,15 +3,10 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { openUnfollowed } from '../../src/workspaceEvidence/openUnfollowed.js';
+import { openIfSame, openUnfollowed } from '../../src/workspaceEvidence/openUnfollowed.js';
 import { itWithSymlinks } from '../platformCases.js';
-
-vi.mock('node:fs/promises', async importOriginal => {
-  const actual = await importOriginal<typeof import('node:fs/promises')>();
-  return { ...actual, lstat: vi.fn(actual.lstat) };
-});
 
 let root: string;
 
@@ -20,12 +15,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  vi.mocked(fs.lstat).mockClear();
   await fs.rm(root, { recursive: true, force: true });
 });
 
-async function contentOf(filename: string, noFollow: number | undefined): Promise<string | undefined> {
-  const handle = await openUnfollowed(Buffer.from(filename), 0, noFollow);
+async function contentOf(opening: Promise<fs.FileHandle | undefined>): Promise<string | undefined> {
+  const handle = await opening;
   if (handle === undefined) return undefined;
   try {
     return await handle.readFile('utf8');
@@ -41,16 +35,18 @@ const modes = [
 ];
 
 describe.each(modes)('opening without following links (%s)', (_name, noFollow) => {
+  const read = async (name: string) => await contentOf(openUnfollowed(Buffer.from(path.join(root, name)), 0, noFollow));
+
   it('reads a regular file and refuses a missing one', async () => {
     await fs.writeFile(path.join(root, 'file.txt'), 'content');
-    expect(await contentOf(path.join(root, 'file.txt'), noFollow)).toBe('content');
-    expect(await contentOf(path.join(root, 'absent.txt'), noFollow)).toBeUndefined();
+    expect(await read('file.txt')).toBe('content');
+    expect(await read('absent.txt')).toBeUndefined();
   });
 
   itWithSymlinks('refuses a symlink to a file', async () => {
     await fs.writeFile(path.join(root, 'target.txt'), 'target');
     await fs.symlink(path.join(root, 'target.txt'), path.join(root, 'link.txt'), 'file');
-    expect(await contentOf(path.join(root, 'link.txt'), noFollow)).toBeUndefined();
+    expect(await read('link.txt')).toBeUndefined();
   });
 });
 
@@ -64,11 +60,10 @@ describe('opening without following links on Windows', () => {
   it('refuses the open when the path became another file after the check', async () => {
     await fs.writeFile(path.join(root, 'checked.txt'), 'checked');
     await fs.writeFile(path.join(root, 'opened.txt'), 'opened');
-    // The check sees one file; by the open, the path holds another.
-    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-    vi.mocked(fs.lstat).mockImplementationOnce(
-      async () => await actual.lstat(path.join(root, 'checked.txt'), { bigint: true }),
-    );
-    expect(await contentOf(path.join(root, 'opened.txt'), undefined)).toBeUndefined();
+    const checked = await fs.lstat(path.join(root, 'checked.txt'), { bigint: true });
+    const opened = await fs.lstat(path.join(root, 'opened.txt'), { bigint: true });
+    // The check saw `checked.txt`; by the open, the path holds `opened.txt`.
+    expect(await contentOf(openIfSame(Buffer.from(path.join(root, 'opened.txt')), checked))).toBeUndefined();
+    expect(await contentOf(openIfSame(Buffer.from(path.join(root, 'opened.txt')), opened))).toBe('opened');
   });
 });

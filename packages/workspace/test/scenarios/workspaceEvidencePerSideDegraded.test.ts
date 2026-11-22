@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -10,7 +9,6 @@ import {
   capturedText,
   completeManifest,
   createCheckout,
-  execFileAsync,
   fileAt,
   git,
   gitWithInput,
@@ -19,7 +17,7 @@ import {
 } from './workspaceEvidenceScenarios.js';
 import type { Workspace } from '../../src/index.js';
 import { WorkspaceEvidence } from '../../src/workspaceEvidence/index.js';
-import { itOnPosix, itWithSymlinks } from '../platformCases.js';
+import { itWithSymlinks } from '../platformCases.js';
 
 installWorkspaceEvidenceHygiene();
 
@@ -109,128 +107,66 @@ describe('per-side degraded Workspace Evidence', () => {
     });
   });
 
-  itWithSymlinks(
-    'captures raw symlink targets, special-entry facts, generated evidence, and binary bytes independently',
-    async () => {
-      const { root, checkout } = await createCheckout({ commit: true });
-      await writeFile(path.join(checkout, '.gitattributes'), '*.generated linguist-generated\n');
-      await mkdir(path.join(root, 'outside-a'));
-      await mkdir(path.join(root, 'outside-b'));
-      await symlink('../outside-a', path.join(checkout, 'link'));
-      await writeFile(path.join(checkout, 'special.pipe'), 'regular before\n');
-      await writeFile(path.join(checkout, 'code.generated'), 'before\n');
-      await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([1, 0, 2]));
-      await writeFile(path.join(checkout, 'unrenderable.txt'), Buffer.from([0xc3, 0x28]));
-      await git(checkout, 'add', '.');
-      await git(checkout, 'commit', '-qm', 'degradation basis');
+  // Special entries (FIFOs, sockets) are in workspaceEvidenceSpecialEntries.test.ts.
+  itWithSymlinks('captures raw symlink targets, generated evidence, and binary bytes independently', async () => {
+    const { root, checkout } = await createCheckout({ commit: true });
+    await writeFile(path.join(checkout, '.gitattributes'), '*.generated linguist-generated\n');
+    await mkdir(path.join(root, 'outside-a'));
+    await mkdir(path.join(root, 'outside-b'));
+    await symlink('../outside-a', path.join(checkout, 'link'));
+    await writeFile(path.join(checkout, 'code.generated'), 'before\n');
+    await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([1, 0, 2]));
+    await writeFile(path.join(checkout, 'unrenderable.txt'), Buffer.from([0xc3, 0x28]));
+    await git(checkout, 'add', '.');
+    await git(checkout, 'commit', '-qm', 'degradation basis');
 
-      await rm(path.join(checkout, 'link'));
-      await symlink('../outside-b', path.join(checkout, 'link'));
-      await rm(path.join(checkout, 'special.pipe'));
-      await execFileAsync('/usr/bin/mkfifo', [path.join(checkout, 'special.pipe')]);
-      await writeFile(path.join(checkout, 'code.generated'), 'after\n');
-      await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([3, 0, 4]));
-      await writeFile(path.join(checkout, 'unrenderable.txt'), Buffer.from([0xe2, 0x28]));
+    await rm(path.join(checkout, 'link'));
+    await symlink('../outside-b', path.join(checkout, 'link'));
+    await writeFile(path.join(checkout, 'code.generated'), 'after\n');
+    await writeFile(path.join(checkout, 'binary.bin'), Buffer.from([3, 0, 4]));
+    await writeFile(path.join(checkout, 'unrenderable.txt'), Buffer.from([0xe2, 0x28]));
 
-      const opened = await openWorkspace(checkout);
-      const captured = await capture(opened.workspace);
-      expect(captured.status).toBe('captured');
-      if (captured.status !== 'captured') return;
-      expect(captured.verification.state).toBe('current');
-      const files = await completeManifest(opened.workspace, captured.evidenceIdentity);
+    const opened = await openWorkspace(checkout);
+    const captured = await capture(opened.workspace);
+    expect(captured.status).toBe('captured');
+    if (captured.status !== 'captured') return;
+    expect(captured.verification.state).toBe('current');
+    const files = await completeManifest(opened.workspace, captured.evidenceIdentity);
 
-      const link = fileAt(files, 'link');
-      expect(link.newSide).toMatchObject({
-        kind: 'symlink',
-        gitMode: '120000',
-        symlinkTarget: {
-          byteLength: Buffer.byteLength('../outside-b'),
-          bytesBase64: Buffer.from('../outside-b').toString('base64'),
-        },
-      });
-      expect(await capturedText(opened.workspace, captured.evidenceIdentity, link, 'new')).toBe('../outside-b');
-
-      const special = fileAt(files, 'special.pipe');
-      expect(special).toMatchObject({
-        status: 'type-changed',
-        newSide: {
-          kind: 'special',
-          gitMode: '000000',
-          byteLength: null,
-          contentAvailability: 'unavailable',
-          specialEntry: { kind: 'fifo', content: 'not-applicable' },
-        },
-      });
-      expect(special.newSide?.contentIdentity).toBeUndefined();
-      expect(fileAt(files, 'code.generated').newSide?.generated).toEqual({
-        classification: 'generated',
-        source: 'git-attribute',
-        attribute: 'linguist-generated',
-      });
-      expect(fileAt(files, 'binary.bin').newSide?.classification).toBe('binary');
-      expect(fileAt(files, 'unrenderable.txt').newSide?.classification).toBe('unrenderable');
-
-      await writeFile(path.join(root, 'outside-b', 'irrelevant'), 'target mutation\n');
-      await expect(
-        opened.workspace.read({
-          kind: 'workspace.current-changes.verify',
-          evidenceIdentity: captured.evidenceIdentity,
-        }),
-      ).resolves.toMatchObject({ verification: { state: 'current' } });
-      await rm(path.join(checkout, 'special.pipe'));
-      await writeFile(path.join(checkout, 'special.pipe'), 'regular again\n');
-      await expect(
-        opened.workspace.read({
-          kind: 'workspace.current-changes.verify',
-          evidenceIdentity: captured.evidenceIdentity,
-        }),
-      ).resolves.toMatchObject({ verification: { state: 'stale' } });
-    },
-  );
-
-  // Needs a FIFO or a Unix socket file, which Windows checkouts cannot hold.
-  itOnPosix('records a working socket kind without inventing content', async () => {
-    const { checkout } = await createCheckout({ commit: true });
-    const socketPath = path.join(checkout, 'service.socket');
-    await writeFile(socketPath, 'tracked placeholder\n');
-    await git(checkout, 'add', 'service.socket');
-    await git(checkout, 'commit', '-qm', 'socket basis');
-    await rm(socketPath);
-    const server = createServer();
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(socketPath, resolve);
+    const link = fileAt(files, 'link');
+    expect(link.newSide).toMatchObject({
+      kind: 'symlink',
+      gitMode: '120000',
+      symlinkTarget: {
+        byteLength: Buffer.byteLength('../outside-b'),
+        bytesBase64: Buffer.from('../outside-b').toString('base64'),
+      },
     });
-    try {
-      const opened = await openWorkspace(checkout);
-      const evidence = new WorkspaceEvidence({
-        workspaceIdentity: opened.workspaceIdentity,
-        canonicalCheckout: opened.canonicalCheckout,
-      });
-      const captured = await evidence.read({
-        kind: 'workspace.current-changes.capture',
-      });
-      expect(captured.status).toBe('captured');
-      if (captured.status !== 'captured') return;
-      const files = await completeManifest(evidence as unknown as Workspace, captured.evidenceIdentity);
-      expect(fileAt(files, 'service.socket').newSide).toMatchObject({
-        kind: 'special',
-        byteLength: null,
-        contentAvailability: 'unavailable',
-        contentLimitation: 'unsupported-file-kind',
-        specialEntry: { kind: 'socket', content: 'not-applicable' },
-      });
-      await expect(
-        evidence.read({
-          kind: 'workspace.current-changes.verify',
-          evidenceIdentity: captured.evidenceIdentity,
-        }),
-      ).resolves.toMatchObject({ verification: { state: 'current' } });
-    } finally {
-      await new Promise<void>((resolve, reject) => {
-        server.close(error => (error === undefined ? resolve() : reject(error)));
-      });
-    }
+    expect(await capturedText(opened.workspace, captured.evidenceIdentity, link, 'new')).toBe('../outside-b');
+    expect(fileAt(files, 'code.generated').newSide?.generated).toEqual({
+      classification: 'generated',
+      source: 'git-attribute',
+      attribute: 'linguist-generated',
+    });
+    expect(fileAt(files, 'binary.bin').newSide?.classification).toBe('binary');
+    expect(fileAt(files, 'unrenderable.txt').newSide?.classification).toBe('unrenderable');
+
+    await writeFile(path.join(root, 'outside-b', 'irrelevant'), 'target mutation\n');
+    await expect(
+      opened.workspace.read({
+        kind: 'workspace.current-changes.verify',
+        evidenceIdentity: captured.evidenceIdentity,
+      }),
+    ).resolves.toMatchObject({ verification: { state: 'current' } });
+    // Retargeting the link itself is a change.
+    await rm(path.join(checkout, 'link'));
+    await symlink('../outside-a', path.join(checkout, 'link'));
+    await expect(
+      opened.workspace.read({
+        kind: 'workspace.current-changes.verify',
+        evidenceIdentity: captured.evidenceIdentity,
+      }),
+    ).resolves.toMatchObject({ verification: { state: 'stale' } });
   });
 
   it('records skip-worktree absence as intentional rather than deletion', async () => {

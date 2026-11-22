@@ -181,8 +181,10 @@ async function git(directory: string, ...arguments_: string[]): Promise<void> {
   await execFileAsync(await resolveGitExecutable(), ['-C', directory, ...arguments_]);
 }
 
+// A clock deadline, inside the 90s test bound, so a miss says what it waited for
+// (Windows timers tick at ~15.6ms, so counted 10ms polls overran it).
 async function waitFor(predicate: () => boolean, what: string): Promise<void> {
-  for (let attempt = 0; attempt < 6_000; attempt += 1) {
+  for (const deadline = Date.now() + 30_000; Date.now() < deadline;) {
     if (predicate()) return;
     await new Promise(resolve => setTimeout(resolve, 10));
   }
