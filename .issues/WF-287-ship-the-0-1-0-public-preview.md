@@ -258,33 +258,26 @@ Nothing else from WF-050's candidate gate list is required for 0.1.0.
     The aaf4c5d pack and its audit fixes, install checks and registry notes
     are in [docs/releases/0.1.0-superseded-packs.md](../docs/releases/0.1.0-superseded-packs.md).
 
-    **Repacked 2026-11-20 from 5079c68; this is the pack to publish**
-    (owner decision 2026-11-20). The owner had moved off the aaf4c5d pack:
-    on 2026-11-17 to a pack from f7e4ac7 (CLI `47979831…`, Pi `51e438df…`,
-    never recorded here), and on 2026-11-18 11:59 to a pack from 5079c68,
-    which is what runs globally on Node 26.13.1 and 26.5.1. 5079c68 adds
-    commit visibility, code-only `z`, the calm footer, OpenTUI 0.9.1 and the
-    connector kit (WF-293), and has no OpenCode or Codex; those ship in
-    0.2.0. A clean-worktree `pnpm release:assemble` + `npm pack` of 5079c68
-    is byte-identical to the installed pack. On 5079c68, `pnpm verify` (556
-    tests, both smokes), `risk:state`, `risk:runtime`, `risk:pi` (Pi 1.5.0)
-    and `risk:dogfood` pass. The Claude plugin is unchanged from 5079c68 to
-    main, so the marketplace serves the matching plugin. The aaf4c5d and
-    f7e4ac7 packs are superseded. The owner extended the gate to two
-    weeks on this pack (2026-11-21): it ends 2026-12-02. SHA-256 (in `~/buildframe-dev-5079c68/`):
-    - `buildframe-cli-0.1.0.tgz`
-      `c0d1ab781375845a6a72e4e1749087aa76a80a453d5b92b3108026c32d4ccfd0`
-    - `buildframe-pi-0.1.0.tgz`
-      `382e4f69c9102145c71eeca9becbbbf582f4e353ad4c597c8506ce8ac0dc0152`
+    The 5079c68 pack (2026-11-20) and its Linux clean-install check are in
+    the same note; superseded.
 
-    Gate check 2, Linux half: passed 2026-11-21 on this pack, as a fresh
-    non-root user in stock `node` Docker images (Debian 13, git 2.47.3):
-    Node 26.4.0 and 26.13.1 on arm64, and 26.13.1 on x86_64. Each run
-    installed the CLI tarball in 8–12 s and got `buildframe`, `bframe` and
-    `buildframe-claude-helper`. `--version`, `--help`, `doctor` and
-    `doctor --json` ran clean, and `buildframe` opened Home in a scratch
-    repository. `pi install` of the Pi tarball into Pi 1.5.0 succeeded. The
-    fresh macOS account half is the owner's.
+    **Repacked 2026-11-23 from 9ddd22d; the current candidate** (owner
+    decision 2026-11-23: the improvements since go into 0.1.0). Over 5079c68
+    it adds the shell work (WF-301), coloured file change letters, `/`
+    finding every file's path when all files are shown, `f` explaining
+    itself on fixed Reviews, and — because it packs `main` — the OpenCode
+    package and Codex mode in the CLI (WF-295, WF-303). `pnpm verify` (626
+    tests, both smokes) passes on 9ddd22d in a clean worktree. The Claude
+    plugin is unchanged since 5079c68. Installed globally on Node 26.13.1
+    and 26.5.1, and as the Pi package, from `~/buildframe-dev-9ddd22d/`.
+    The gate's checks (a period of real use, clean installs on macOS and
+    Linux, round trips) run again on this pack. SHA-256:
+    - `buildframe-cli-0.1.0.tgz`
+      `0d399953b5504cb3b57922ae3e257ddff75fb75470a12580ef70def15e2a55e1`
+    - `buildframe-pi-0.1.0.tgz`
+      `48205da3cd8e93b129bbeafaf7764fbc1ffe2f5a21962d5d90ca53bbf8cc5974`
+    - `buildframe-opencode-0.1.0.tgz`
+      `b7959507c319147e65e1293462d75b56cc95cd160d9cb22bc5dcf6986af01222`
 
 Order: 1 → (2, 3, 4) → 5 → 7 → 8 → 9 → 6 → 10. Child 9 must land before
 child 6's CI, and both before child 10.
