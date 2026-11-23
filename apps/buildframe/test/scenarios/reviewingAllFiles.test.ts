@@ -93,6 +93,7 @@ describe('every file, and searching it', () => {
     expect(frame()).toContain('Paths of every file, and added or removed text in the saved Snapshot.');
     type('config');
     await shows('src/config.ts  · unchanged');
+    expect(frame()).toContain('1 match ');
     expect(frame()).toContain('Unchanged here; Enter opens the file.');
     terminal.mockInput.pressEnter();
     await shows('src/config.ts is unchanged versus this basis.');

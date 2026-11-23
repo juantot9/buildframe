@@ -2056,7 +2056,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     // corresponding working-tree file has drifted to a different identity.
     terminal.pressKey('u', { ctrl: true });
     terminal.send('second.txt');
-    await waitForOutput(terminal, '1 matches');
+    await waitForOutput(terminal, '1 match');
     await writeFile(path.join(created.checkout, 'second.txt'), 'drifted second\n');
     const openSearchCheckpoint = terminal.checkpoint();
     terminal.send('\r');

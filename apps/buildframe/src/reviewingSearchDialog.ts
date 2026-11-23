@@ -76,7 +76,7 @@ export function searchBody(state: ReviewingApplicationState, bodyHeight: number)
           ? 'Searching the exact Snapshot...'
           : 'Searching the exact Snapshot…'
         : search.view?.status === 'available'
-          ? `${search.view.totalResults} matches`
+          ? `${search.view.totalResults} ${search.view.totalResults === 1 ? 'match' : 'matches'}`
           : 'Type a file path or changed text.',
       { fg: search.loading ? colors.warning : colors.muted },
     ),
