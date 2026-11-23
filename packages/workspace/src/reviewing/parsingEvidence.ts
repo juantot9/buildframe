@@ -9,7 +9,6 @@ import {
   type CurrentChangesComparisonBasis,
   type CurrentChangesManifestSummary,
   type EvidenceContentIdentity,
-  type EvidencePath,
   type GitObjectIdentity,
   type ReviewComparedState,
   type ReviewComparisonBasis,
@@ -26,7 +25,10 @@ import type { ReviewQuestionAnchor, ReviewQuestionWholeFileAnchor } from './cont
 import type { ReviewSnapshotIdentity } from './identities.js';
 import { ReviewingStateProblem } from './internalTypes.js';
 import { ANCHOR_LINE_MAX_BYTES, DIFF_ROW_ID_PATTERN, FILE_ID_PATTERN } from './limits.js';
+import { parseEvidencePath } from './parsingEvidencePath.js';
 import { parseEvidenceScopeMembership } from './parsingScopeMembership.js';
+
+export { parseEvidencePath } from './parsingEvidencePath.js';
 import { decodeReviewingBytesBase64, recordIdentity } from './utils.js';
 
 export function parseEvidenceContentIdentity(value: unknown): EvidenceContentIdentity {
@@ -53,21 +55,6 @@ export function parseGitObjectIdentity(value: unknown): GitObjectIdentity {
     throw new ReviewingStateProblem();
   }
   return { algorithm: value.algorithm, value: value.value };
-}
-
-export function parseEvidencePath(value: unknown): EvidencePath {
-  if (
-    !isRecord(value) ||
-    !hasOnlyKeys(value, ['bytesBase64', 'display']) ||
-    typeof value.bytesBase64 !== 'string' ||
-    typeof value.display !== 'string'
-  ) {
-    throw new ReviewingStateProblem();
-  }
-  if (decodeReviewingBytesBase64(value.bytesBase64).byteLength === 0) {
-    throw new ReviewingStateProblem();
-  }
-  return { bytesBase64: value.bytesBase64, display: value.display };
 }
 
 export function parseCurrentChangeSide(value: unknown): CurrentChangeSide {

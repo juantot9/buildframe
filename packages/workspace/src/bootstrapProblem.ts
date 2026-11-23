@@ -1,4 +1,7 @@
-import type { WorkspaceAuthorityUnavailableDiagnostic, WorkspaceBootstrapDiagnostic } from './workspaceBootstrapDiagnostics.js';
+import type {
+  WorkspaceAuthorityUnavailableDiagnostic,
+  WorkspaceBootstrapDiagnostic,
+} from './workspaceBootstrapDiagnostics.js';
 
 /** A Workspace bootstrap refusal, carrying the diagnostic the caller reports. */
 export class BootstrapProblem extends Error {

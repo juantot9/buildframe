@@ -1,13 +1,13 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { resolveGitExecutable } from '../../src/gitProcess.js';
-import { installWorkspaceProjectionHygiene, open, started } from './workspaceProjectionScenarios.js';
+import { installWorkspaceProjectionHygiene, open, roots, started } from './workspaceProjectionScenarios.js';
 
 installWorkspaceProjectionHygiene();
 
@@ -16,18 +16,12 @@ const git = async (checkout: string, ...args: string[]): Promise<void> => {
   await run(await resolveGitExecutable(), ['-C', checkout, ...args]);
 };
 
+// The hygiene closes each owner before removing its folder (and restores the
+// State home): Windows cannot delete the State database while it is open.
 describe('Review search over every repository file', () => {
-  const roots: string[] = [];
-  const stateHome = process.env.XDG_STATE_HOME;
-  afterEach(async () => {
-    for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
-    if (stateHome === undefined) delete process.env.XDG_STATE_HOME;
-    else process.env.XDG_STATE_HOME = stateHome;
-  });
-
   it('matches the paths of unchanged files only when asked for the live changes', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'buildframe-search-all-'));
-    roots.push(root);
+    roots.add(root);
     const checkout = path.join(root, 'checkout');
     await mkdir(path.join(checkout, 'src'), { recursive: true });
     process.env.XDG_STATE_HOME = path.join(root, 'state');

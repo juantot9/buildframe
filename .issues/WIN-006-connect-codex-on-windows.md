@@ -1,5 +1,5 @@
 ---
-id: WF-321
+id: WIN-006
 title: "Connect Codex on Windows"
 status: open
 labels:
@@ -9,6 +9,9 @@ assignee: null
 blocked_by: []
 created: 2026-11-21
 ---
+
+Filed as WF-321 on 2026-11-21; renamed WIN-006 on 2026-11-23 when `main`
+assigned WF-321 to other work.
 
 ## Finding
 

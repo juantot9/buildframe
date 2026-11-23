@@ -32,14 +32,14 @@ describe.skipIf(process.platform === 'win32')('Workspace Identity directory dura
     const originalSync = fileHandlePrototype.sync;
     await probeHandle.close();
     await rm(probeFile);
-    const syncFault = vi
-      .spyOn(fileHandlePrototype, 'sync')
-      .mockImplementation(async function (this: typeof probeHandle): Promise<void> {
-        if ((await this.stat()).isDirectory()) {
-          throw new Error('injected marker directory sync failure');
-        }
-        await originalSync.call(this);
-      });
+    const syncFault = vi.spyOn(fileHandlePrototype, 'sync').mockImplementation(async function (
+      this: typeof probeHandle,
+    ): Promise<void> {
+      if ((await this.stat()).isDirectory()) {
+        throw new Error('injected marker directory sync failure');
+      }
+      await originalSync.call(this);
+    });
 
     expect(await bootstrapWorkspace({ startPath: repository })).toEqual({
       status: 'rejected',
@@ -87,17 +87,17 @@ describe.skipIf(process.platform === 'win32')('Workspace Identity directory dura
     await probeHandle.close();
     await rm(probeFile);
     let directorySyncs = 0;
-    const syncFault = vi
-      .spyOn(fileHandlePrototype, 'sync')
-      .mockImplementation(async function (this: typeof probeHandle): Promise<void> {
-        if ((await this.stat()).isDirectory()) {
-          directorySyncs += 1;
-          if (directorySyncs === 2) {
-            throw new Error('injected registry directory sync failure');
-          }
+    const syncFault = vi.spyOn(fileHandlePrototype, 'sync').mockImplementation(async function (
+      this: typeof probeHandle,
+    ): Promise<void> {
+      if ((await this.stat()).isDirectory()) {
+        directorySyncs += 1;
+        if (directorySyncs === 2) {
+          throw new Error('injected registry directory sync failure');
         }
-        await originalSync.call(this);
-      });
+      }
+      await originalSync.call(this);
+    });
 
     expect(await bootstrapWorkspace({ startPath: repository })).toEqual({
       status: 'rejected',

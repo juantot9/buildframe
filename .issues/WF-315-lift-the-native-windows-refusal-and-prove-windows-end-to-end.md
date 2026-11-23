@@ -106,7 +106,7 @@ Windows (clean install, round trips).
   published 0.1.0 for macOS and Linux, so the docs say Windows comes with
   the next release.
 - `main` brought the Codex adapter, which has not run on Windows:
-  [Connect Codex on Windows](./WF-321-connect-codex-on-windows.md). Until
+  [Connect Codex on Windows](./WIN-006-connect-codex-on-windows.md). Until
   it closes, Windows does not claim Codex; whether it blocks this ticket is
   still to decide.
 - First CI run with the Windows jobs (run 44840903773, on `f91bb71`, before
@@ -144,6 +144,17 @@ Windows (clean install, round trips).
   (link targets kept `\`). WIN-004 still fails some runs. The shell
   scenario timed out once with no message; its waits now end before the
   test bound and name what they waited for.
+- Seventh run (45072386168, on `efdf166`): all six jobs pass, the first
+  green run with the Windows jobs.
+
+## After rebasing on `main` (2026-11-23)
+
+- `windows` was rebased onto `main` at `5707a81` (force-pushed). `main` had
+  reused WF-321 for other work, so Connect Codex on Windows is now
+  [WIN-006](./WIN-006-connect-codex-on-windows.md).
+- `main`'s new import-loop check found one from WF-288
+  (`parsingEvidence` ↔ `parsingScopeMembership`); `parseEvidencePath` now
+  has its own file. The registry lock reuses `main`'s `workspaceLockOwner.ts`.
 
 ## Verification
 

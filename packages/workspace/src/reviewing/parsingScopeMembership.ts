@@ -1,7 +1,7 @@
 import { hasOnlyKeys, isRecord } from '../recordCodec.js';
 import type { EvidencePath, EvidenceScopeMembership } from '../workspaceEvidence/index.js';
 import { ReviewingStateProblem } from './internalTypes.js';
-import { parseEvidencePath } from './parsingEvidence.js';
+import { parseEvidencePath } from './parsingEvidencePath.js';
 import { decodeReviewingBytesBase64 } from './utils.js';
 export function validScopeMembershipPath(value: EvidencePath): boolean {
   const bytes = decodeReviewingBytesBase64(value.bytesBase64);

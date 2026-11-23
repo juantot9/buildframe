@@ -42,7 +42,8 @@ lands on `main` until Windows support ships with
 [Lift the native-Windows refusal and prove Windows end to end](./WF-315-lift-the-native-windows-refusal-and-prove-windows-end-to-end.md).
 
 Tickets filed on this branch from 2026-11-22 take `WIN-` ids (`WIN-001`, …),
-so they never collide with the `WF-` numbers `main` keeps assigning.
+so they never collide with the `WF-` numbers `main` keeps assigning. The one
+earlier collision, this branch's WF-321, is now WIN-006.
 
 ## Children and order
 
@@ -56,15 +57,15 @@ Can start now:
 6. [Identify processes and stop the runtime on Windows](./WF-311-identify-processes-and-stop-the-runtime-on-windows.md)
 7. [Package BuildFrame and start the Claude helper on Windows](./WF-312-package-buildframe-and-start-the-claude-helper-on-windows.md)
 8. [Check the TUI in Windows terminals](./WF-314-check-the-tui-in-windows-terminals.md)
-9. [Connect Codex on Windows](./WF-321-connect-codex-on-windows.md) — the
+9. [Connect Codex on Windows](./WIN-006-connect-codex-on-windows.md) — the
    Codex adapter came from `main` with the 2026-11-21 rebase and has not run
    on Windows; whether it blocks WF-315 is still to decide
 10. [Never read through a symlink on Windows](./WIN-001-never-read-through-a-symlink-on-windows.md)
     — no `O_NOFOLLOW` on Windows; found when CI ran with symlinks
-11. [Outside-checkout Context paths on Windows](./WIN-002-outside-checkout-context-paths-on-windows.md)
-12. [Concurrent Workspace opens can fail on Windows](./WIN-003-concurrent-workspace-opens-fail-on-windows.md)
+11. [Outside-checkout Context paths on Windows](./WIN-002-outside-checkout-context-paths-on-windows.md) — closed 2026-11-23
+12. [Concurrent Workspace opens can fail on Windows](./WIN-003-concurrent-workspace-opens-fail-on-windows.md) — closed 2026-11-23
 13. [A moved receipt changed during a read was missed on Windows](./WIN-004-moved-receipt-change-missed-on-windows.md)
-14. [Symlink targets as Git records them on Windows](./WIN-005-symlink-targets-as-git-records-them-on-windows.md)
+14. [Symlink targets as Git records them on Windows](./WIN-005-symlink-targets-as-git-records-them-on-windows.md) — closed 2026-11-23
 
 Blocked:
 
