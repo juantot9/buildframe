@@ -5,7 +5,7 @@ import {
   type CapturedReviewSnapshot,
   type ReviewSnapshotPayload,
 } from '../reviewing/index.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 import type { ReviewSearchSnippet } from './contracts.js';
 import { ProjectionRecordsInvalid } from './internalTypes.js';
 import { MAX_REVIEW_SEARCH_SNIPPET_BYTES } from './limits.js';

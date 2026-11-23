@@ -62,7 +62,7 @@ import {
   type EvidencePath,
   type ReviewCommitGraphRow,
 } from '../workspaceEvidence/index.js';
-import type { WorkspaceAttention, WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceAttention, WorkspaceIdentity } from '../baseTypes.js';
 import {
   commitMovedBetween,
   historyPointKey,

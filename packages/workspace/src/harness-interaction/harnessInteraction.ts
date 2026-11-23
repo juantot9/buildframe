@@ -57,7 +57,7 @@ import {
   type ReviewSnapshotPayload,
 } from '../reviewing/index.js';
 import { evidencePath, WorkspaceEvidence, type CurrentChangedFile } from '../workspaceEvidence/index.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 import type {
   AskPiReviewQuestionCommand,
   CommitDirectReviewHandoffCommand,

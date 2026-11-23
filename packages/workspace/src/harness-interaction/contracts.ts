@@ -12,7 +12,7 @@ import type {
   ReviewSnapshotIdentity,
 } from '../reviewing/index.js';
 import type { CurrentChangedFile } from '../workspaceEvidence/index.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 
 declare const harnessAttachmentIdentityBrand: unique symbol;
 declare const harnessCompatibilityIdentityBrand: unique symbol;

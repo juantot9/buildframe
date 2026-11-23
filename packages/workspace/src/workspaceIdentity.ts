@@ -32,8 +32,9 @@ import {
 import type {
   WorkspaceAuthorityUnavailableDiagnostic,
   WorkspaceBootstrapDiagnostic,
-  WorkspaceIdentity,
-} from './workspace.js';
+} from './workspaceBootstrapDiagnostics.js';
+import type { WorkspaceIdentity } from './baseTypes.js';
+import { LOCK_OWNER_FORMAT_VERSION, objectRecord, parseLockOwner, type LockOwner } from './workspaceLockOwner.js';
 
 const execFileAsync = promisify(execFile);
 const MARKER_FILE_NAME = 'neoflow-workspace-identity.json';
@@ -46,7 +47,6 @@ const REGISTRY_LOCK_ATTEMPTS = 100;
 const REGISTRY_LOCK_DELAY_MS = 20;
 const EMPTY_REGISTRY_LOCK_STALE_MS = 60_000;
 const PROCESS_IDENTITY_TIMEOUT_MS = 30_000;
-const LOCK_OWNER_FORMAT_VERSION = 1;
 const LOCK_OWNER_FILE_PATTERN = /^owner-([0-9a-f-]{36})\.json$/u;
 const GIT_DIRECTORY_IDENTITY_PATTERN = /^fs:[0-9]+:[0-9]+:[0-9]+$/u;
 const WORKSPACE_ID_PATTERN = /^wsp_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -71,12 +71,6 @@ interface RegistryRegistration {
 
 interface Registry {
   readonly registrations: readonly RegistryRegistration[];
-}
-
-interface LockOwner {
-  readonly pid: number;
-  readonly nonce: string;
-  readonly processIdentity: string | undefined;
 }
 
 interface ResolvedWorkspaceIdentity {
@@ -560,35 +554,6 @@ async function inspectProcess(pid: number): Promise<ProcessInspection> {
   return { status: 'running', identity: undefined };
 }
 
-function parseLockOwner(content: string, expectedNonce: string): LockOwner | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    return undefined;
-  }
-
-  const record = objectRecord(parsed);
-  if (
-    !record ||
-    record.formatVersion !== LOCK_OWNER_FORMAT_VERSION ||
-    typeof record.pid !== 'number' ||
-    !Number.isSafeInteger(record.pid) ||
-    record.pid <= 0 ||
-    record.nonce !== expectedNonce ||
-    (record.processIdentity !== undefined &&
-      (typeof record.processIdentity !== 'string' || record.processIdentity.length === 0))
-  ) {
-    return undefined;
-  }
-
-  return {
-    pid: record.pid,
-    nonce: expectedNonce,
-    processIdentity: typeof record.processIdentity === 'string' ? record.processIdentity : undefined,
-  };
-}
-
 async function removeOwnerAndLockDirectory(
   lockDirectory: string,
   ownerFile: string,
@@ -806,12 +771,6 @@ async function withRegistryLock<T>(stateDirectory: string, requestedPath: string
   } finally {
     await releaseRegistryLock(lockDirectory, ownerFile);
   }
-}
-
-function objectRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 }
 
 function parseMarker(content: string): Marker | undefined {

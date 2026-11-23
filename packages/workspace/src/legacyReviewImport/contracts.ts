@@ -6,7 +6,7 @@ import type {
   LegacyReviewSourceUnavailableReason,
 } from '../legacyReviewSource.js';
 import type { ReviewIdentity, ReviewQuestionDraftIdentity, ReviewSnapshotIdentity } from '../reviewing/index.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 
 export const MAX_LEGACY_REVIEW_IMPORT_OCCURRENCES: number = 4_096;
 

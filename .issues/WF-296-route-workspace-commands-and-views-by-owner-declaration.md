@@ -64,7 +64,9 @@ accepted command announce the new State version through one path.
   from those lists: 25 command kinds, 53 view kinds, 14 subscription kinds. A
   kind claimed twice fails at construction; an unknown kind is refused as
   "Unknown Workspace … kind". Adding a domain now means one `kinds.ts` and
-  one line per table. Owners absent from a Workspace opened without State
+  one line per table for routing; the owner's construction, its public types
+  in `workspaceContracts.ts` and, if it has live views, `#publishCommitted`
+  change too (corrected 2026-11-23, audit X-03). Owners absent from a Workspace opened without State
   refuse with "requires the runtime-owned writer", as before.
 - One publish path, `#publishCommitted`: Reviewing and Legacy import commits
   are announced by the Workspace after an accepted result; Harness

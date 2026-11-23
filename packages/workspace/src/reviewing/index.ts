@@ -5,7 +5,7 @@ import type { LegacyReviewImportOwner } from '../legacyReviewImport/index.js';
 import { deepFreeze } from '../recordCodec.js';
 import { sha256 } from '../sha256.js';
 import { WorkspaceEvidence, reviewComparisonUsesExactResolution } from '../workspaceEvidence/index.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 
 import {
   occurrenceIdentity,

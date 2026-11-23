@@ -15,7 +15,7 @@ import type {
   StateWorkerRequest,
   StateWorkerResponse,
 } from './authoritativeStateProtocol.js';
-import type { WorkspaceIdentity } from './workspace.js';
+import type { WorkspaceIdentity } from './baseTypes.js';
 
 export type {
   AuthoritativeStateErrorCode,

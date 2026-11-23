@@ -1,4 +1,4 @@
-import type { WorkspaceIdentity } from './workspace.js';
+import type { WorkspaceIdentity } from './baseTypes.js';
 
 /** Why a Workspace could not be opened; every expected bootstrap failure is one of these. */
 export interface UnsupportedPlatformDiagnostic {

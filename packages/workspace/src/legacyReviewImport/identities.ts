@@ -1,4 +1,4 @@
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 import type {
   LegacyReviewCandidateDecisionIdentity,
   LegacyReviewCandidatePromotionIdentity,

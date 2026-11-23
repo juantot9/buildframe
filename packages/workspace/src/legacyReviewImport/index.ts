@@ -10,7 +10,7 @@ import {
 } from '../legacyReviewSource.js';
 import { deepFreeze, hasOnlyKeys, isRecord } from '../recordCodec.js';
 import { sha256 } from '../sha256.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 
 import {
   LEGACY_ID_WINDOW_BYTES,

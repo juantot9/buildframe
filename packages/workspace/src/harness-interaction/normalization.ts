@@ -7,7 +7,7 @@ import type {
   ReviewIdentity,
 } from '../reviewing/index.js';
 import { sha256 } from '../sha256.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 import type {
   AskPiReviewQuestionCommand,
   CommitDirectReviewHandoffCommand,

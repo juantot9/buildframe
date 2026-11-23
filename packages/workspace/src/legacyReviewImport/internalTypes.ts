@@ -7,7 +7,7 @@ import type {
   LegacyReviewSourceRequest,
 } from '../legacyReviewSource.js';
 import type { ReviewIdentity, ReviewQuestionDraftIdentity, ReviewSnapshotIdentity } from '../reviewing/index.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 import type {
   LegacyReviewCandidateDecisionIdentity,
   LegacyReviewCandidatePromotionIdentity,

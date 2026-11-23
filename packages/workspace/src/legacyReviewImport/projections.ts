@@ -1,6 +1,6 @@
 import type { LegacyReviewAnnotation, LegacyReviewBatchReceipt } from '../legacyReviewSource.js';
 import { deepFreeze, textDecoder } from '../recordCodec.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 import type {
   LegacyReviewQueueCandidateDecision,
   LegacyReviewQueueCandidateDisclosure,

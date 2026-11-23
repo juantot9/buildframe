@@ -2,7 +2,7 @@ import { encodeBytesBase64 } from '../bytesBase64.js';
 import { GitInspectionError } from '../gitProcess.js';
 import { deepFreeze } from '../recordCodec.js';
 import { sha256 } from '../sha256.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 import {
   stage,
   type CurrentChangeSide,

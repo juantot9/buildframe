@@ -6,7 +6,7 @@ import {
   type LegacyReviewSourceMetadata,
 } from '../legacyReviewSource.js';
 import { hasOnlyKeys, isRecord, safeVersion } from '../recordCodec.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 import { MAX_LEGACY_REVIEW_IMPORT_OCCURRENCES } from './contracts.js';
 import {
   legacyReviewCandidateDecisionIdentity,

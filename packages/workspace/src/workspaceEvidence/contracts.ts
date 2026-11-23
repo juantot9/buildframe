@@ -11,7 +11,7 @@ import type {
   ContextSourceResolutionView,
 } from '../contextEvidence.js';
 import { deepFreeze } from '../recordCodec.js';
-import type { WorkspaceIdentity } from '../workspace.js';
+import type { WorkspaceIdentity } from '../baseTypes.js';
 
 export const MEBIBYTE: number = 1024 * 1024;
 
