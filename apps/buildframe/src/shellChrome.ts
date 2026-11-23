@@ -252,3 +252,9 @@ export function actionChecksPanel(look: Look, lines: readonly string[]): RenderC
     ),
   ];
 }
+
+/** The first visible row that keeps the selected one centred, without running past either end. */
+export function centeredStart(selected: number, offset: number, count: number, visible: number): number {
+  const local = Math.max(0, Math.min(selected - offset, Math.max(0, count - 1)));
+  return Math.max(0, Math.min(local - Math.floor(visible / 2), Math.max(0, count - visible)));
+}

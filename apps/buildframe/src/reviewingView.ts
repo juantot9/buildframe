@@ -16,11 +16,11 @@ import type {
   ReviewProjectedDiffRow,
   ReviewProjectedQuestionItem,
   ReviewProjectedQuestionTarget,
-  ReviewSearchItem,
   WorkspaceHomeReviewItem,
 } from '@buildframe/workspace/projection';
 
-import { reviewLiveContentLines } from './reviewingContent.js';
+import { decodeDiffRow, reviewLiveContentLines } from './reviewingContent.js';
+import { searchBody } from './reviewingSearchDialog.js';
 import { Box, h, type RenderChild, type RenderNode } from './renderTree.js';
 import { reviewingInputFromKeyEvent, reviewingInputFromPasteEvent } from './reviewingInput.js';
 import {
@@ -94,7 +94,7 @@ import { ShellComposer } from './shellComposer.js';
 import { ShellRenderLoop } from './shellRenderLoop.js';
 import { ShellPointer } from './shellPointer.js';
 import { ShellSelection } from './shellSelection.js';
-import { agentIndicator, dialogHeight, dialogTop, shellHeader } from './shellChrome.js';
+import { agentIndicator, centeredStart, dialogHeight, dialogTop, shellHeader } from './shellChrome.js';
 import { composeFrame, type FrameScreen, type ShellLayers } from './shellCompose.js';
 import { messageOutcomeLabel, questionStateLabel, responseSize, stateBadge } from './reviewingMessageWords.js';
 import { homeLauncherCard, homePane, homeRow, homeSentence, type HomeCard } from './shellHome.js';
@@ -123,11 +123,6 @@ function richLabel(
     options.fg,
   );
   return label(state, codeWidth === undefined ? highlighted : clippedCode(state, highlighted, codeWidth), options);
-}
-
-function centeredStart(selected: number, offset: number, count: number, visible: number): number {
-  const local = Math.max(0, Math.min(selected - offset, Math.max(0, count - 1)));
-  return Math.max(0, Math.min(local - Math.floor(visible / 2), Math.max(0, count - visible)));
 }
 
 interface ReviewPointerInteraction {
@@ -512,10 +507,9 @@ function filesPane(
   const colors = theme(state);
   const review = state.review;
   const files = reviewingFiles(review, state.fileScope);
-  const source =
-    state.fileScope === 'all' && review?.liveFiles?.status === 'available'
-      ? review.liveFiles.files
-      : review?.manifest.manifest;
+  // "All" only when every file is really listed: a fixed Review has its changed files alone.
+  const allShown = state.fileScope === 'all' && review?.liveFiles?.status === 'available';
+  const source = allShown ? review.liveFiles.files : review?.manifest.manifest;
   const sourceOffset = source?.offset ?? 0;
   const sourceTotal = source === undefined ? 0 : 'total' in source ? source.total : source.totalFiles;
   const bodyHeight = Math.max(1, viewportHeight - 4);
@@ -639,10 +633,10 @@ function filesPane(
       state,
       'files',
       'Files',
-      `${state.loading?.region === 'files' ? state.loading.label : state.fileScope === 'changed' ? 'Changed' : 'All'}${balancedSibling(state, 'files')}`,
+      `${state.loading?.region === 'files' ? state.loading.label : allShown ? 'All' : 'Changed'}${balancedSibling(state, 'files')}`,
       column.span,
     ),
-    label(state, `${sourceTotal} ${state.fileScope === 'changed' ? 'changed' : 'repository'} files`, {
+    label(state, `${sourceTotal} ${allShown ? 'repository' : 'changed'} files`, {
       fg: colors.muted,
       height: 1,
       paddingLeft: 1,
@@ -750,12 +744,6 @@ function shownStepFilesPane(
     ),
     column.body,
   );
-}
-
-function decodeDiffRow(row: ReviewProjectedDiffRow, ascii: boolean): string {
-  const decoded = decodeBytesBase64(row.text.bytesBase64).toString('utf8');
-  const suffix = row.text.truncated ? ' [source row truncated]' : '';
-  return safeText(`${decoded}${suffix}`, ascii, true).replaceAll('\n', ' ');
 }
 
 function questionFileLabel(state: ReviewingApplicationState, item: ReviewProjectedQuestionItem): string {
@@ -3177,88 +3165,6 @@ function questionComposerCard(
  * Dialogs are drawn inside the body (between the header rows and the footer),
  * so they are sized and centred against that height, never the terminal's.
  */
-
-function searchResultLabel(state: ReviewingApplicationState, item: ReviewSearchItem, selected: boolean): string {
-  const marker = selected ? (state.presentation.ascii ? '>' : '›') : ' ';
-  if (item.kind === 'file') return `${marker} ${item.displayPath}`;
-  const line = item.change === 'addition' ? item.newLine : item.oldLine;
-  const snippet = decodeBytesBase64(item.snippet.bytesBase64).toString('utf8').replaceAll('\n', ' ');
-  return `${marker} ${item.change === 'addition' ? '+' : '-'} ${item.displayPath}:${line ?? '?'}  ${snippet}`;
-}
-
-function searchBody(state: ReviewingApplicationState, bodyHeight: number): RenderChild {
-  const colors = theme(state);
-  const search = state.search;
-  if (search === undefined) return Box({});
-  const cursor = state.presentation.ascii ? '|' : '▏';
-  const query = `${search.query.slice(0, search.cursor)}${cursor}${search.query.slice(search.cursor)}`;
-  const results = search.view?.status === 'available' ? search.view.results : [];
-  // Telescope-style floating window over the review, not a full-screen mode.
-  // Its frame stays fixed while results and previews change; recentering a
-  // differently sized box on every async preview reads as a close/reopen.
-  const width = Math.min(88, Math.max(44, state.width - 12));
-  const height = dialogHeight(bodyHeight, 22, 6);
-  const innerHeight = Math.max(1, height - 2);
-  const changingContentRows = Math.max(1, innerHeight - 3);
-  const visible = Math.max(1, Math.floor(changingContentRows * 0.6));
-  const previewCapacity = Math.max(0, changingContentRows - visible - 1);
-  const selectedLocal = Math.max(
-    0,
-    results.findIndex(item => item.resultIdentity === search.selectedResultIdentity),
-  );
-  const start = centeredStart(selectedLocal, 0, results.length, visible);
-  const preview = search.preview?.status === 'available' ? search.preview.window.rows.slice(0, previewCapacity) : [];
-  return borderedBox(
-    state,
-    {
-      id: 'reviewing-search',
-      position: 'absolute',
-      left: Math.max(0, Math.floor((state.width - width) / 2)),
-      top: dialogTop(bodyHeight, height),
-      width,
-      height,
-      zIndex: 28,
-      flexDirection: 'column',
-      paddingLeft: 1,
-      paddingRight: 1,
-      overflow: 'hidden',
-      borderColor: colors.accent,
-      backgroundColor: colors.raised,
-      title: ' Search this Review ',
-      titleColor: colors.accent,
-      titleAlignment: 'center',
-    },
-    label(state, 'File paths and added or removed text in the saved Snapshot.', { fg: colors.muted }),
-    label(state, `/ ${query}`, { fg: colors.accent, bold: true }),
-    label(
-      state,
-      search.loading
-        ? state.presentation.ascii
-          ? 'Searching the exact Snapshot...'
-          : 'Searching the exact Snapshot…'
-        : search.view?.status === 'available'
-          ? `${search.view.totalResults} matches`
-          : 'Type a file path or changed text.',
-      { fg: search.loading ? colors.warning : colors.muted },
-    ),
-    ...results.slice(start, start + visible).map(item =>
-      label(state, searchResultLabel(state, item, item.resultIdentity === search.selectedResultIdentity), {
-        fg: item.resultIdentity === search.selectedResultIdentity ? colors.accent : colors.text,
-        bg: item.resultIdentity === search.selectedResultIdentity ? colors.accentSoft : colors.raised,
-      }),
-    ),
-    ...(results.length === 0 || previewCapacity === 0
-      ? []
-      : [label(state, 'Preview', { fg: colors.text, bold: true })]),
-    ...(previewCapacity === 0
-      ? []
-      : preview.map(row =>
-          label(state, decodeDiffRow(row, state.presentation.ascii), {
-            fg: row.kind === 'addition' ? colors.success : row.kind === 'deletion' ? colors.danger : colors.code,
-          }),
-        )),
-  );
-}
 
 /** One row of pane tabs for the one-pane layout, so the hidden panes stay discoverable. */
 function linearPaneStrip(state: ReviewingApplicationState, interaction: ReviewPointerInteraction): RenderChild {

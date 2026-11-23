@@ -152,7 +152,6 @@ import type {
   ReviewQuestionLocationViewRequest,
   ReviewQuestionsView,
   ReviewQuestionsViewRequest,
-  ReviewSearchItem,
   ReviewSearchPreviewView,
   ReviewSearchPreviewViewRequest,
   ReviewSearchView,
@@ -192,7 +191,6 @@ import {
   manifestWindowIdentity,
   permanentProjectionRecordFailure,
   safeInteger,
-  searchSnippet,
   snapshotLiveChangesIdentity,
 } from './utils.js';
 import { normalizeRequest } from './normalization.js';
@@ -212,6 +210,8 @@ import {
   snapshotBlockers,
   textPreview,
 } from './views.js';
+import { layLiveChanges } from './liveFileList.js';
+import { matchReviewSearch } from './reviewSearch.js';
 
 export { WORKSPACE_PROJECTION_VERSION } from './limits.js';
 export type {
@@ -2785,6 +2785,43 @@ export class WorkspaceProjection {
     };
   }
 
+  /** Every repository file with the current Review's live changes laid over it, or why there is none. */
+  async #liveFileList(
+    entry: ReviewIndexEntry,
+    index: LoadedIndex,
+    liveChangesIdentity: string,
+  ): Promise<
+    | { readonly status: 'available'; readonly live: LiveCaptureEntry; readonly files: ReviewLiveFileItem[] }
+    | {
+        readonly status: Exclude<ReviewLiveFilesView['status'], 'available' | 'not-found'>;
+        readonly reason: Extract<
+          ReviewLiveFilesView,
+          { readonly status: Exclude<ReviewLiveFilesView['status'], 'available'> }
+        >['reason'];
+      }
+  > {
+    if (entry.reviewIdentity !== index.payload.currentReviewIdentity) {
+      return { status: 'fixed', reason: 'review-not-current' };
+    }
+    const snapshot = await this.#snapshot(entry, index.stateVersion);
+    if (snapshot.comparison !== undefined) return { status: 'fixed', reason: 'fixed-comparison' };
+    const live = await this.#verifiedLiveChanges(entry.reviewIdentity);
+    if (live === undefined) return { status: 'unavailable', reason: 'inspection-failed' };
+    if (live.liveChangesIdentity !== liveChangesIdentity) return { status: 'moved', reason: 'live-changes-moved' };
+    let listing = this.#repositoryFiles.get(live);
+    if (listing === undefined) {
+      listing = this.#evidence.readCurrentRepositoryFiles();
+      this.#repositoryFiles.set(live, listing);
+      listing.catch(() => this.#repositoryFiles.delete(live));
+    }
+    const repository = await listing;
+    if (repository.status !== 'available') {
+      this.#repositoryFiles.delete(live);
+      return { status: 'unavailable', reason: repository.reason };
+    }
+    return { status: 'available', live, files: layLiveChanges(repository.files, live.projection.files) };
+  }
+
   async #liveFiles(
     request: ReviewLiveFilesViewRequest,
     index: LoadedIndex,
@@ -2806,55 +2843,9 @@ export class WorkspaceProjection {
       reason,
     });
     if (entry === undefined) return unavailable('not-found', 'review-not-found');
-    if (entry.reviewIdentity !== index.payload.currentReviewIdentity) {
-      return unavailable('fixed', 'review-not-current');
-    }
-    const snapshot = await this.#snapshot(entry, index.stateVersion);
-    if (snapshot.comparison !== undefined) return unavailable('fixed', 'fixed-comparison');
-    const live = await this.#verifiedLiveChanges(entry.reviewIdentity);
-    if (live === undefined) return unavailable('unavailable', 'inspection-failed');
-    if (live.liveChangesIdentity !== request.liveChangesIdentity) {
-      return unavailable('moved', 'live-changes-moved');
-    }
-    let listing = this.#repositoryFiles.get(live);
-    if (listing === undefined) {
-      listing = this.#evidence.readCurrentRepositoryFiles();
-      this.#repositoryFiles.set(live, listing);
-      listing.catch(() => this.#repositoryFiles.delete(live));
-    }
-    const repository = await listing;
-    if (repository.status !== 'available') {
-      this.#repositoryFiles.delete(live);
-      return unavailable('unavailable', repository.reason);
-    }
-
-    const byPath = new Map<string, ReviewLiveFileItem>();
-    for (const file of repository.files) {
-      byPath.set(file.path.bytesBase64, {
-        fileIdentity: file.fileIdentity,
-        path: file.path,
-        status: 'unchanged',
-      });
-    }
-    for (const captured of live.projection.files) {
-      const selected = captured.newSide ?? captured.oldSide;
-      if (selected === undefined) throw new ProjectionRecordsInvalid();
-      const changedFile = projectedFile(captured);
-      byPath.set(selected.path.bytesBase64, {
-        fileIdentity: captured.fileIdentity,
-        path: selected.path,
-        status: captured.status,
-        changedFile,
-      });
-    }
-    const all = [...byPath.values()].sort((left, right) => {
-      const changedOrder = Number(right.status !== 'unchanged') - Number(left.status !== 'unchanged');
-      if (changedOrder !== 0) return changedOrder;
-      return Buffer.compare(
-        Buffer.from(left.path.bytesBase64, 'base64'),
-        Buffer.from(right.path.bytesBase64, 'base64'),
-      );
-    });
+    const listed = await this.#liveFileList(entry, index, request.liveChangesIdentity);
+    if (listed.status !== 'available') return unavailable(listed.status, listed.reason);
+    const { live, files: all } = listed;
     const items = all.slice(request.offset, request.offset + request.limit);
     const next = request.offset + items.length;
     return {
@@ -3399,43 +3390,15 @@ export class WorkspaceProjection {
     }
     const snapshot = await this.#snapshot(entry, index.stateVersion);
     const searchIndex = await this.#searchIndex(entry, snapshot, index.stateVersion);
-    const query = request.query.toLowerCase();
-    const results: ReviewSearchItem[] = [];
-    let totalResults = 0;
-    const admit = (item: ReviewSearchItem): void => {
-      if (totalResults >= request.offset && results.length < request.limit) {
-        results.push(item);
-      }
-      totalResults += 1;
-    };
-    for (const file of searchIndex.files) {
-      if (file.normalizedPath.includes(query)) {
-        admit({
-          kind: 'file',
-          resultIdentity: `file:${file.fileIdentity}`,
-          fileIdentity: file.fileIdentity,
-          fileAbsolute: file.fileAbsolute,
-          displayPath: file.displayPath,
-        });
-      }
-      for (const change of file.changes) {
-        const matchAt = change.normalizedText.indexOf(query);
-        if (matchAt < 0) continue;
-        admit({
-          kind: 'change',
-          resultIdentity: `change:${change.rowIdentity}`,
-          fileIdentity: change.fileIdentity,
-          fileAbsolute: change.fileAbsolute,
-          displayPath: change.displayPath,
-          rowIdentity: change.rowIdentity,
-          rowAbsolute: change.rowAbsolute,
-          change: change.change,
-          ...(change.oldLine === undefined ? {} : { oldLine: change.oldLine }),
-          ...(change.newLine === undefined ? {} : { newLine: change.newLine }),
-          snippet: searchSnippet(change.text, matchAt, request.query.length),
-        });
-      }
-    }
+    const listed =
+      request.liveChangesIdentity === undefined
+        ? undefined
+        : await this.#liveFileList(entry, index, request.liveChangesIdentity);
+    const { results, totalResults } = matchReviewSearch(
+      searchIndex,
+      listed?.status === 'available' ? listed.files : [],
+      request,
+    );
     const next = request.offset + results.length;
     return {
       kind: 'review.search',

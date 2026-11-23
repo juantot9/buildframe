@@ -65,6 +65,7 @@ import {
 import { routeShellKey, type ShellKeyHost } from './shellInput.js';
 import { configurationKey } from './shellConfiguration.js';
 import { reviewingSettings } from './reviewingSettings.js';
+import { searchResultTarget } from './reviewingSearchOpen.js';
 import { shortHash, headMoveSentence } from './reviewingHeadMoves.js';
 import { homeLauncherOptions, homeSelectionAvailable, type ExtraHomeRow } from './reviewingHomeRows.js';
 import { dispatchReviewingKey } from './reviewingActions.js';
@@ -606,6 +607,8 @@ export type ReviewingModelEffect =
       readonly reviewIdentity: ReviewIdentity;
       readonly query: string;
       readonly offset: number;
+      /** With every file shown, the paths of unchanged files match too. */
+      readonly liveChangesIdentity?: string;
     }
   | {
       readonly type: 'preview-search-result';
@@ -5064,7 +5067,17 @@ export class ReviewingApplicationModel {
       return [];
     }
     search.loading = true;
-    return [{ type: 'search-review', reviewIdentity, query, offset }];
+    const source = this.state.review?.source;
+    const allFiles = this.state.fileScope === 'all' && source?.kind === 'live';
+    return [
+      {
+        type: 'search-review',
+        reviewIdentity,
+        query,
+        offset,
+        ...(allFiles ? { liveChangesIdentity: source.liveChangesIdentity } : {}),
+      },
+    ];
   }
 
   private requestSearchPreview(): readonly ReviewingModelEffect[] {
@@ -5075,8 +5088,9 @@ export class ReviewingApplicationModel {
     // Keep the currently rendered preview until its replacement arrives.
     // A transient loading row makes rapid search navigation visually noisy.
     search.previewResultIdentity = result?.resultIdentity;
-    search.previewLoading = result !== undefined;
-    if (result === undefined || reviewIdentity === undefined) return [];
+    // An unchanged file has no change to preview; the dialog says so.
+    search.previewLoading = result !== undefined && result.kind !== 'unchanged-file';
+    if (result === undefined || reviewIdentity === undefined || !search.previewLoading) return [];
     return [
       {
         type: 'preview-search-result',
@@ -5111,30 +5125,10 @@ export class ReviewingApplicationModel {
       const review = this.state.review;
       if (review === undefined || searchView?.status !== 'available') return [];
       this.state.search = undefined;
-      this.state.focus = result.kind === 'file' ? 'files' : 'diff';
+      this.state.focus = result.kind === 'change' ? 'diff' : 'files';
+      if (result.kind === 'unchanged-file') this.state.fileScope = 'all';
       this.setLoading('Opening search result', this.state.focus);
-      return [
-        {
-          type: 'show-review',
-          target: {
-            reviewIdentity: review.manifest.header.reviewIdentity,
-            // Search results and previews address the immutable saved Snapshot.
-            // Opening that same source preserves the result's file/row identities
-            // even when the working tree has moved since the search was indexed.
-            reviewSnapshotIdentity: searchView.reviewSnapshotIdentity as ReviewSnapshotIdentity,
-            manifestOffset: Math.floor(result.fileAbsolute / MANIFEST_WINDOW_SIZE) * MANIFEST_WINDOW_SIZE,
-            fileIdentity: result.fileIdentity,
-            diffOffset:
-              result.kind === 'change' ? Math.floor(result.rowAbsolute / DIFF_WINDOW_SIZE) * DIFF_WINDOW_SIZE : 0,
-            questionOffset: review.questions.list.offset,
-          },
-          selection: {
-            fileIdentity: result.fileIdentity,
-            ...(result.kind === 'change' ? { rowAbsolute: result.rowAbsolute } : { rowAbsolute: 0 }),
-          },
-          fromSearch: true,
-        },
-      ];
+      return [{ type: 'show-review', ...searchResultTarget(review, searchView, result), fromSearch: true }];
     }
     if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
       if (search.view?.status !== 'available' || search.view.results.length === 0) return [];

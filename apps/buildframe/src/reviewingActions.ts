@@ -56,6 +56,12 @@ function chooseReviewPoint(model: M): readonly E[] {
 
 function toggleFileScope(model: M): readonly E[] {
   const state = model.state;
+  // Every file exists only for live changes; a fixed Review has its changed files alone.
+  if (state.review?.source.kind !== 'live') {
+    state.fileScope = 'changed';
+    model.say('Only changed files here: every file shows on live changes, in the Current Review.', 'info');
+    return [];
+  }
   const currentPath = reviewingFiles(state.review, state.fileScope).find(
     file => file.fileIdentity === state.selectedFileIdentity,
   )?.pathBytesBase64;

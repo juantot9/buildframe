@@ -331,7 +331,7 @@ export class ReviewingExtension implements ScreenExtension {
       } else if (effect.type === 'preview-comparison') {
         this.#scheduleComparisonPreview(effect.selection);
       } else if (effect.type === 'search-review') {
-        this.#scheduleReviewSearch(effect.reviewIdentity, effect.query, effect.offset);
+        this.#scheduleReviewSearch(effect);
       } else if (effect.type === 'preview-search-result') {
         this.#scheduleSearchPreview(effect);
       } else if (effect.type === 'inspect-review-message') {
@@ -1364,28 +1364,23 @@ export class ReviewingExtension implements ScreenExtension {
     }
   }
 
-  #scheduleReviewSearch(reviewIdentity: ReviewIdentity, query: string, offset: number): void {
+  #scheduleReviewSearch(effect: Extract<ReviewingModelEffect, { readonly type: 'search-review' }>): void {
     const sequence = ++this.#reviewSearchSequence;
-    if (this.#reviewSearchTimer !== undefined) {
-      clearTimeout(this.#reviewSearchTimer);
-    }
+    if (this.#reviewSearchTimer !== undefined) clearTimeout(this.#reviewSearchTimer);
     this.#reviewSearchTimer = setTimeout(() => {
       this.#reviewSearchTimer = undefined;
-      void this.#searchReview(reviewIdentity, query, offset, sequence);
+      void this.#searchReview(effect, sequence);
     }, 80);
   }
 
-  async #searchReview(reviewIdentity: ReviewIdentity, query: string, offset: number, sequence: number): Promise<void> {
+  async #searchReview(
+    { type: _effect, ...search }: Extract<ReviewingModelEffect, { readonly type: 'search-review' }>,
+    sequence: number,
+  ): Promise<void> {
     try {
-      const view = await this.#workspace.read({
-        kind: 'review.search',
-        reviewIdentity,
-        query,
-        offset,
-        limit: SEARCH_RESULT_WINDOW_SIZE,
-      });
+      const view = await this.#workspace.read({ kind: 'review.search', ...search, limit: SEARCH_RESULT_WINDOW_SIZE });
       if (this.#stopped || sequence !== this.#reviewSearchSequence) return;
-      const effects = this.#model.applyReviewSearch(view, query);
+      const effects = this.#model.applyReviewSearch(view, search.query);
       this.#render();
       this.#runEffects(effects);
     } catch (error) {

@@ -167,6 +167,12 @@ function normalizeSearchRequest(request: Record<string, unknown>, value: unknown
   ) {
     throw new TypeError('Invalid bounded Review search query');
   }
+  if (
+    request.liveChangesIdentity !== undefined &&
+    (typeof request.liveChangesIdentity !== 'string' || !LIVE_CHANGES_ID_PATTERN.test(request.liveChangesIdentity))
+  ) {
+    throw new TypeError('Invalid Live Changes identity');
+  }
   assertWindow(request.offset as number, request.limit as number, MAX_REVIEW_SEARCH_RESULTS, 'Review search');
   return value as ReviewSearchViewRequest;
 }
