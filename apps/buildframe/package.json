@@ -42,7 +42,7 @@
     "@buildframe/codex-adapter-source": "workspace:*",
     "@buildframe/local-runtime": "workspace:*",
     "@buildframe/workspace": "workspace:*",
-    "@opentui/core": "0.9.1",
+    "@opentui/core": "0.9.7",
     "@tree-sitter-grammars/tree-sitter-yaml": "0.7.1",
     "tree-sitter-bash": "0.25.1",
     "tree-sitter-c": "0.24.1",
