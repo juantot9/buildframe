@@ -128,10 +128,23 @@ export class ShellSettings {
     }
   }
 
-  dialog(look: SizedLook, screen: ScreenSettings | undefined, bodyHeight: number, idPrefix: string): RenderChild[] {
+  dialog(
+    look: SizedLook,
+    screen: ScreenSettings | undefined,
+    bodyHeight: number,
+    headerRows: number,
+    idPrefix: string,
+  ): RenderChild[] {
     const window = this.#window;
     if (window === undefined) return [];
-    return configurationDialog(look, window, { title: 'Display', ...this.#content(screen) }, bodyHeight, 0, idPrefix);
+    return configurationDialog(
+      look,
+      window,
+      { title: 'Display', ...this.#content(screen) },
+      bodyHeight,
+      headerRows,
+      idPrefix,
+    );
   }
 
   /** Saves what is waiting and resolves once every save has finished. */

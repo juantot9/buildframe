@@ -3,9 +3,8 @@ import type { Workspace, WorkspaceCommand } from '@buildframe/workspace';
 import type { HarnessConnectionView } from '@buildframe/workspace/harness-interaction';
 
 import { reviewingInputFromKeyEvent, type ReviewingInput } from './reviewingInput.js';
-import { noticeGlyph, noticeStatusTone, type NoticeTone } from './reviewingStatus.js';
+import type { NoticeTone } from './reviewingStatus.js';
 import { Box } from './renderTree.js';
-import { actionChecksPanel, agentIndicator, keyListPanel, shellHeader } from './shellChrome.js';
 import {
   ShellClipboard,
   productionClipboard,
@@ -13,10 +12,10 @@ import {
   type ShellClipboardFactory,
 } from './shellClipboard.js';
 import { executeCommand, semanticError } from './shellCommands.js';
-import { shellFrame, type FrameLook } from './shellFrame.js';
+import type { FrameLook } from './shellFrame.js';
 import { routeShellKey, type ShellKeyHost } from './shellInput.js';
-import { footerSentence, keyList, keysRow } from './shellKeys.js';
 import { theme, type Look } from './shellLook.js';
+import { composeFrame } from './shellCompose.js';
 import { ShellPulse } from './shellPulse.js';
 import { ShellRoots } from './shellRoots.js';
 import { ShellSettings } from './shellSettings.js';
@@ -395,31 +394,13 @@ class ShellApplication implements Shell {
       height: renderer.height,
       layout: renderer.width >= 100 ? 'wide' : 'narrow',
     };
-    const mode = screen.mode(state);
     const said = this.#said;
-    const glyph = said === undefined ? '' : noticeGlyph(said.tone, look.presentation.ascii);
-    const frame = shellFrame(look, {
-      idPrefix: screen.name,
-      header: shellHeader(
-        look,
-        screen.name,
-        `BuildFrame / ${screen.title(state)}`,
-        undefined,
-        agentIndicator(look, this.#connection),
-      ),
-      context: screen.context?.(state, look) ?? [],
-      body: height => [
-        ...screen.body(state, look, height),
-        ...(this.#checksOpen ? actionChecksPanel(look, screen.checks?.(state) ?? []) : []),
-        ...(this.#keyListOpen ? keyListPanel(look, keyList(screen.table, mode, state), height, screen.name) : []),
-        ...this.#settings.dialog(look, screen.settings?.(state), height, screen.name),
-      ],
-      said:
-        said === undefined
-          ? { text: '', tone: 'muted' }
-          : { text: glyph === '' ? said.text : `${glyph} ${said.text}`, tone: noticeStatusTone(said.tone) },
-      idleSentence: footerSentence(screen.table, mode, state),
-      keysRow: width => keysRow(screen.table, mode, state, width),
+    const frame = composeFrame(look, screen, state, {
+      said,
+      checksOpen: this.#checksOpen,
+      keyListOpen: this.#keyListOpen,
+      settings: this.#settings,
+      connection: this.#connection,
     });
     renderer.setBackgroundColor(look.presentation.noColor ? 'transparent' : theme(look).background);
     roots.retire(() => undefined);

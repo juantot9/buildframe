@@ -35,7 +35,6 @@ import {
   shownFilePosition,
   jumpListRows,
   type JumpListRow,
-  messageState,
   messagesOnLines,
   messagesPaneName,
   pickableBases,
@@ -52,15 +51,7 @@ import {
   noticeToneOf,
 } from './reviewingModel.js';
 import { reviewFileTreeNodes, reviewingFiles } from './reviewingFileList.js';
-import {
-  messageBadge,
-  noticeGlyph,
-  noticeStatusTone,
-  outgoingBadge,
-  spinnerGlyph,
-  type StatusBadge,
-  type StatusTone,
-} from './reviewingStatus.js';
+import { noticeGlyph, noticeStatusTone, outgoingBadge, spinnerGlyph, type StatusTone } from './reviewingStatus.js';
 
 import {
   ReviewingScrollRenderable,
@@ -106,7 +97,6 @@ import { ShellComposer } from './shellComposer.js';
 import { ShellRenderLoop } from './shellRenderLoop.js';
 import { ShellPointer } from './shellPointer.js';
 import { ShellSelection } from './shellSelection.js';
-import { shellFrame } from './shellFrame.js';
 import {
   actionChecksPanel,
   agentIndicator,
@@ -116,6 +106,8 @@ import {
   shellHeader,
 } from './shellChrome.js';
 import { configurationDialog } from './shellConfiguration.js';
+import { composeFrame, type FrameScreen, type ShellLayers } from './shellCompose.js';
+import { messageOutcomeLabel, questionStateLabel, responseSize, stateBadge } from './reviewingMessageWords.js';
 import { homeLauncherCard, homePane, homeRow, homeSentence, type HomeCard, type HomeChoice } from './shellHome.js';
 import { fitPaneDetail, shortDisplayPath, treeName } from './reviewingPathText.js';
 import { reviewingSettings } from './reviewingSettings.js';
@@ -782,60 +774,6 @@ function questionFileLabel(state: ReviewingApplicationState, item: ReviewProject
   );
 }
 
-function invocationLifecycleLabel(status: string): string {
-  switch (status) {
-    case 'awaiting-start':
-      return 'Waiting to start';
-    case 'active':
-      return 'Active';
-    case 'rejected':
-      return 'Did not start';
-    case 'ended-normally':
-      return 'Turn ended—no complete Response captured';
-    case 'failed':
-      return 'Failed';
-    case 'interrupted':
-      return 'Interrupted';
-    case 'unresolved':
-      return 'Outcome unknown';
-    default:
-      return 'Not sent yet';
-  }
-}
-
-function stateBadge(state: ReviewingApplicationState, item: ReviewMessageListItem): StatusBadge {
-  return messageBadge(messageState(state, item), state.animationFrame, state.presentation.ascii);
-}
-
-/** One sentence for a Message without a Response: what is happening and, if stuck, what to do. */
-function messageOutcomeLabel(state: ReviewingApplicationState, item: ReviewMessageListItem): string {
-  const agent = agentName(state);
-  const lowerAgent = agent === 'The agent' ? 'the agent' : agent;
-  const badge = stateBadge(state, item);
-  switch (messageState(state, item)) {
-    case 'answered':
-      return `${badge.glyph} Answered.`;
-    case 'working':
-      return `${badge.glyph} ${agent} is working on it. Press x to interrupt.`;
-    case 'stopping':
-      return `${badge.glyph} Asked ${lowerAgent} to stop; waiting for it.`;
-    case 'waiting':
-      return `${badge.glyph} Waiting for ${lowerAgent} to start.`;
-    case 'interrupted':
-      return `${badge.glyph} Interrupted before it finished. Press r to send it again.`;
-    case 'failed':
-      return `${badge.glyph} ${agent} reported an error; its window has the details. Press r to send it again.`;
-    case 'not-sent':
-      return `${badge.glyph} ${agent} didn’t take this Message. Press r to send it again.`;
-    case 'unknown':
-      return `${badge.glyph} BuildFrame never heard back about this Message. Check ${lowerAgent}, or press r to send it again.`;
-    case 'no-answer':
-      return `${badge.glyph} The turn ended without a reply. Press r to send it again.`;
-    case 'not-loaded':
-      return `${badge.glyph} BuildFrame hasn’t loaded what happened to this Message.`;
-  }
-}
-
 /** "12 files · 3 Messages"; Questions appear only for Reviews made before Messages. */
 function homeReviewCounts(item: WorkspaceHomeReviewItem, separator: string): string {
   return [
@@ -843,28 +781,6 @@ function homeReviewCounts(item: WorkspaceHomeReviewItem, separator: string): str
     plural(item.messages, 'Message'),
     ...(item.questions > 0 ? [plural(item.questions, 'Question')] : []),
   ].join(separator);
-}
-
-function questionStateLabel(state: ReviewingApplicationState, item: ReviewProjectedQuestionItem): string {
-  if (item.kind === 'question-draft') return `historical draft r${item.revision}`;
-  if (item.response !== undefined) return 'Response captured';
-  if (item.historicalDisposition !== undefined) return `historical ${item.historicalDisposition}`;
-  if (state.review === undefined) return 'Not sent to the agent';
-  const handoff = state.review.harnessInteraction.handoffs.find(
-    candidate => candidate.reviewBatchIdentity === item.reviewBatchIdentity,
-  );
-  if (handoff === undefined) return 'Not sent to the agent';
-  const invocation = state.review.harnessInteraction.invocations.find(
-    candidate => candidate.handoffIdentity === handoff.handoffIdentity,
-  );
-  if (invocation === undefined) return 'Not sent to the agent';
-  return invocationLifecycleLabel(invocation.status);
-}
-
-function responseSize(item: ReviewProjectedQuestionItem): string | undefined {
-  if (item.kind !== 'question' || item.response === undefined) return undefined;
-  const bytes = item.response.body.totalByteLength;
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KiB`;
 }
 
 function questionLocation(state: ReviewingApplicationState, item: ReviewProjectedQuestionItem): string {
@@ -4889,34 +4805,111 @@ function reviewingHeader(
   );
 }
 
+/** One render's facts: the state, what is presented (a historical dialog shows its base), and the view's parts. */
+interface ReviewingFrame {
+  readonly state: ReviewingApplicationState;
+  readonly presented: ReviewingApplicationState;
+  readonly textarea: TextareaRenderable | undefined;
+  readonly interaction: ReviewPointerInteraction;
+  /** The pointer as the body sees it: inert while a historical dialog covers it. */
+  readonly body: ReviewPointerInteraction;
+  readonly onDiscussionPage: (page: DiscussionPage) => void;
+  readonly onContentPage: (pageSize: number) => void;
+}
+
+function frameTrail(presented: ReviewingApplicationState): string | undefined {
+  const reviewHeader = presented.review?.manifest.header;
+  if (presented.screen === 'home') {
+    return presented.homeMode === 'history'
+      ? 'Previous Reviews'
+      : presented.homeMode === 'comparison'
+        ? 'Review a commit or range'
+        : undefined;
+  }
+  return `${
+    reviewHeader?.retention === 'current' ||
+    (reviewHeader === undefined && presented.pendingReviewShell?.retention === 'current')
+      ? 'Current Review'
+      : 'Previous Review'
+  }${reviewHeader?.historicalOutcome === undefined ? '' : ` / Historical ${reviewHeader.historicalOutcome}`}`;
+}
+
+/** Reviewing as the shell's frame draws it: its own header, status line, footer and dialogs. */
+const REVIEWING_FRAME: FrameScreen<ReviewingFrame> = {
+  name: 'reviewing',
+  title: () => '',
+  mode: frame => reviewingFooterMode(frame.state),
+  header: frame => reviewingHeader(frame.presented, frameTrail(frame.presented)),
+  context: frame => [
+    ...reviewRetentionContext(frame.presented, frame.interaction),
+    ...homeContextRow(frame.presented),
+    ...statusCondition(frame.presented),
+  ],
+  said: frame =>
+    statusLine(
+      frame.state.historicalDialog !== undefined && frame.state.notice !== undefined ? frame.state : frame.presented,
+    ),
+  // The footer is always the same two rows: what is being said (or what this
+  // mode means), then the keys. Neither row moves or swaps with the mode.
+  footer: ({ state }) => ({
+    sentence: footerSentence(REVIEWING_KEYS, reviewingFooterMode(state), state),
+    keysRow: width => keysRow(REVIEWING_KEYS, reviewingFooterMode(state), state, width),
+  }),
+  keyList: ({ presented }) => keyList(REVIEWING_KEYS, reviewingHelpMode(presented), presented),
+  mouseMove: frame => frame.body.move,
+  body: ({ state, presented, textarea, interaction, body, onDiscussionPage, onContentPage }, _look, height) => [
+    presented.screen === 'loading' || presented.screen === 'failed'
+      ? label(
+          presented,
+          presented.screen === 'failed'
+            ? (presented.failure ?? presented.notice ?? 'The Reviewing surface could not open.')
+            : (presented.loading?.label ?? (state.presentation.ascii ? 'Loading...' : 'Loading…')),
+          {
+            fg: presented.screen === 'failed' ? theme(presented).danger : theme(presented).warning,
+            paddingLeft: 3,
+            height: 3,
+          },
+        )
+      : presented.screen === 'home'
+        ? homeBody(presented, interaction)
+        : presented.review === undefined && presented.pendingReviewShell !== undefined
+          ? pendingReviewBody(presented)
+          : reviewBody(presented, textarea, body, onDiscussionPage, onContentPage, height),
+  ],
+  layers: ({ state, presented, interaction, onDiscussionPage }, _look, height, headerHeight) => [
+    ...detailsOverlay(presented),
+    ...(presented.actionLookupOpen
+      ? keyListPanel(presented, keyList(REVIEWING_KEYS, reviewingHelpMode(presented), presented), height, 'reviewing')
+      : []),
+    ...configurationOverlay(presented, height, headerHeight),
+    ...continuationChoiceOverlay(presented),
+    ...(state.search !== undefined ? [searchBody(state, height)] : []),
+    ...basisPickerOverlay(state, interaction, height),
+    ...jumpListOverlay(state, height),
+    ...messageCommitGateOverlay(state, height),
+    ...messagePreviewOverlay(state, height),
+    ...historicalDialogOverlay(state, height, interaction, onDiscussionPage),
+  ],
+};
+
+/** The shell's own layers stay closed while Reviewing still draws its own `?`, `c` and `!`. */
+const NO_SHELL_LAYERS: ShellLayers = {
+  said: undefined,
+  checksOpen: false,
+  keyListOpen: false,
+  settings: undefined,
+  connection: undefined,
+};
+
 function screen(
   state: ReviewingApplicationState,
-  questionTextarea: TextareaRenderable | undefined,
+  textarea: TextareaRenderable | undefined,
   interaction: ReviewPointerInteraction,
   onDiscussionPage: (page: DiscussionPage) => void,
   onContentPage: (pageSize: number) => void,
 ): RenderNode {
   const presented = historicalBaseState(state);
-  const colors = theme(presented);
-  const statusState = state.historicalDialog !== undefined && state.notice !== undefined ? state : presented;
-  const reviewHeader = presented.review?.manifest.header;
-  const trail =
-    presented.screen === 'home'
-      ? presented.homeMode === 'history'
-        ? 'Previous Reviews'
-        : presented.homeMode === 'comparison'
-          ? 'Review a commit or range'
-          : undefined
-      : `${
-          reviewHeader?.retention === 'current' ||
-          (reviewHeader === undefined && presented.pendingReviewShell?.retention === 'current')
-            ? 'Current Review'
-            : 'Previous Review'
-        }${reviewHeader?.historicalOutcome === undefined ? '' : ` / Historical ${reviewHeader.historicalOutcome}`}`;
-  const header = reviewingHeader(presented, trail);
-  const retention = [...reviewRetentionContext(presented, interaction), ...homeContextRow(presented)];
-  const conditions = statusCondition(presented);
-  const baseInteraction: ReviewPointerInteraction =
+  const body: ReviewPointerInteraction =
     state.historicalDialog === undefined
       ? interaction
       : {
@@ -4926,53 +4919,12 @@ function screen(
           move: event => event.stopPropagation(),
           wheelPane: (_region, event) => event.stopPropagation(),
         };
-  return shellFrame(presented, {
-    idPrefix: 'reviewing',
-    header,
-    context: [...retention, ...conditions],
-    said: statusLine(statusState),
-    // The footer is always the same two rows: what is being said (or what this
-    // mode means), then the keys. Neither row moves or swaps with the mode.
-    idleSentence: footerSentence(REVIEWING_KEYS, reviewingFooterMode(state), state),
-    keysRow: width => keysRow(REVIEWING_KEYS, reviewingFooterMode(state), state, width),
-    onMouseMove: baseInteraction.move,
-    body: contentHeight => [
-      presented.screen === 'loading' || presented.screen === 'failed'
-        ? label(
-            presented,
-            presented.screen === 'failed'
-              ? (presented.failure ?? presented.notice ?? 'The Reviewing surface could not open.')
-              : (presented.loading?.label ?? (state.presentation.ascii ? 'Loading...' : 'Loading…')),
-            {
-              fg: presented.screen === 'failed' ? colors.danger : colors.warning,
-              paddingLeft: 3,
-              height: 3,
-            },
-          )
-        : presented.screen === 'home'
-          ? homeBody(presented, interaction)
-          : presented.review === undefined && presented.pendingReviewShell !== undefined
-            ? pendingReviewBody(presented)
-            : reviewBody(presented, questionTextarea, baseInteraction, onDiscussionPage, onContentPage, contentHeight),
-      ...detailsOverlay(presented),
-      ...(presented.actionLookupOpen
-        ? keyListPanel(
-            presented,
-            keyList(REVIEWING_KEYS, reviewingHelpMode(presented), presented),
-            contentHeight,
-            'reviewing',
-          )
-        : []),
-      ...configurationOverlay(presented, contentHeight, header.height),
-      ...continuationChoiceOverlay(presented),
-      ...(state.search !== undefined ? [searchBody(state, contentHeight)] : []),
-      ...basisPickerOverlay(state, interaction, contentHeight),
-      ...jumpListOverlay(state, contentHeight),
-      ...messageCommitGateOverlay(state, contentHeight),
-      ...messagePreviewOverlay(state, contentHeight),
-      ...historicalDialogOverlay(state, contentHeight, interaction, onDiscussionPage),
-    ],
-  });
+  return composeFrame(
+    presented,
+    REVIEWING_FRAME,
+    { state, presented, textarea, interaction, body, onDiscussionPage, onContentPage },
+    NO_SHELL_LAYERS,
+  );
 }
 
 /** OpenTUI implementation private to the deep Reviewing Application Module. */
