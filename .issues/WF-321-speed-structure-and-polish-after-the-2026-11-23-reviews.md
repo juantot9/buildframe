@@ -31,6 +31,13 @@ Each step is measured or frame-checked, verified, and committed on its own.
    the file for every 64-row window.
 4. Gate the 2 s idle check so the idle runtime stops spawning ~70 Git
    processes per 20 s.
+5. Owner request 2026-11-23: the Files pane loads every file at once and
+   scrolls as one list, instead of 64-file windows the app pages through.
+   The Workspace allows larger reads; the stored 64-file records stay.
+
+Done: A1 (`f6f1f7d`): saved-Snapshot reads 147 → 1 ms with a live
+subscription. Tried and reverted for A2: starting the watcher on plain live
+reads made a read right after an edit miss it.
 
 ## C. Ready for Planning and more connectors
 
