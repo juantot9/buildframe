@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import type { ClipboardService } from '@opentui/core';
+import type { ClipboardService, KeyEvent } from '@opentui/core';
 import { createTestRenderer, type TestRendererSetup } from '@opentui/core/testing';
 import type { WorkspaceHomeView } from '@buildframe/workspace/projection';
 import { openWorkspaceRuntimeOwner, type WorkspaceRuntimeOwner } from '@buildframe/workspace/runtime';
@@ -12,7 +12,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { resolveGitExecutable } from '../../../../packages/workspace/src/gitProcess.js';
 import { Key } from '../../src/reviewingInput.js';
+import { Box, Text } from '../../src/renderTree.js';
 import { label } from '../../src/shellLook.js';
+import { ShellRoots } from '../../src/shellRoots.js';
 import { createShell, type Shell } from '../../src/shell.js';
 import { defineScreen } from '../../src/shellScreen.js';
 import {
@@ -143,6 +145,38 @@ const details = defineScreen<{ readonly from: string }, 'main'>({
   body: (state, look) => [label(look, `Opened ${state.from}`)],
 });
 
+/** A screen that still listens and draws for itself, as Reviewing does (WF-301 scaffolding). */
+const board = defineScreen<undefined, 'main'>({
+  name: 'board',
+  open: () => undefined,
+  title: () => 'Board',
+  mode: () => 'main',
+  modes: { main: {} },
+  keys: [],
+  body: () => [],
+  extend: surface => {
+    const roots = new ShellRoots(surface.renderer, 'board-screen');
+    const onKey = (event: KeyEvent): void => {
+      if (event.name === 'o') surface.open('details', 'from the board');
+      if (event.name === 'q') surface.quit();
+    };
+    const listen = (): void => {
+      roots.start();
+      surface.renderer.keyInput.on('keypress', onKey);
+      roots.retire(() => undefined);
+      roots.mount(
+        Box({ id: 'board-screen', width: '100%', height: '100%' }, Text({ content: 'The board draws itself.' })),
+      );
+      roots.present();
+    };
+    const quiet = (): void => {
+      surface.renderer.keyInput.off('keypress', onKey);
+      roots.stop();
+    };
+    return { start: async () => listen(), stop: async () => quiet(), pause: quiet, resume: listen };
+  },
+});
+
 async function git(directory: string, ...arguments_: string[]): Promise<void> {
   await execFileAsync(await resolveGitExecutable(), ['-C', directory, ...arguments_]);
 }
@@ -200,11 +234,12 @@ describe('the shell', () => {
     owner: WorkspaceRuntimeOwner,
     userConfiguration: UserConfiguration = createEphemeralUserConfiguration(),
     first: { readonly screen: string } | 'home' = { screen: 'summary' },
+    screens: Parameters<typeof createShell>[0]['screens'] = [summary, details],
   ): Promise<{ shell: Shell; terminal: TestRendererSetup }> {
     const terminal = await createTestRenderer({ width: 80, height: 12, exitOnCtrlC: false, kittyKeyboard: true });
     const shell = createShell({
       workspace: owner.workspace,
-      screens: [summary, details],
+      screens,
       ...(first === 'home' ? {} : { first }),
       renderer: terminal.renderer,
       createClipboard: recordingClipboard,
@@ -316,6 +351,25 @@ describe('the shell', () => {
     // Back on Home, its rows are read again at the new State version.
     terminal.mockInput.pressEscape();
     await shows(terminal, 'Summary of Reviews (1)');
+
+    terminal.mockInput.pressKey('q');
+    await shell.closed;
+  });
+
+  it('pauses a screen that draws for itself while another opens over it, and resumes it on Esc', async () => {
+    const owner = await openWorkspace();
+    const { shell, terminal } = await startShell(owner, undefined, { screen: 'board' }, [board, details]);
+
+    await shows(terminal, 'The board draws itself.');
+    terminal.mockInput.pressKey('o');
+    await shows(terminal, 'Opened from the board');
+    expect(frame(terminal)).not.toContain('The board draws itself.');
+
+    // The paused board doesn't hear keys meant for the screen over it.
+    terminal.mockInput.pressKey('o');
+    terminal.mockInput.pressEscape();
+    await shows(terminal, 'The board draws itself.');
+    expect(frame(terminal)).not.toContain('Opened from the board');
 
     terminal.mockInput.pressKey('q');
     await shell.closed;

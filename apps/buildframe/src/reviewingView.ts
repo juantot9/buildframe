@@ -82,7 +82,7 @@ import {
   toneColor,
 } from './shellLook.js';
 import { REVIEWING_KEYS, reviewingFooterMode, reviewingHelpMode } from './reviewingKeys.js';
-import { footerSentence, keyList, keysRow, type KeyListItem } from './shellKeys.js';
+import { footerSentence, keyList, keysRow } from './shellKeys.js';
 import { PaneGlider } from './shellGlide.js';
 import {
   fileStatus,
@@ -5205,7 +5205,8 @@ export class ReviewingView {
   }
 
   render(): void {
-    this.#loop.render();
+    // Paused under another screen, Reviewing keeps its state but draws nothing.
+    if (this.#started) this.#loop.render();
   }
 
   #renderNow(): void {
@@ -5254,17 +5255,4 @@ export class ReviewingView {
     this.#discussionPage = undefined;
     this.#pointer.cancel();
   }
-}
-
-/** The keys row, `?` entries and idle sentence for a state, as the footer and `?` list draw them. */
-export function reviewingKeysRow(state: ReviewingApplicationState, width: number): string {
-  return keysRow(REVIEWING_KEYS, reviewingFooterMode(state), state, width);
-}
-
-export function reviewingKeyList(state: ReviewingApplicationState): readonly KeyListItem[] {
-  return keyList(REVIEWING_KEYS, reviewingHelpMode(state), state);
-}
-
-export function reviewingFooterSentence(state: ReviewingApplicationState): string | undefined {
-  return footerSentence(REVIEWING_KEYS, reviewingFooterMode(state), state);
 }

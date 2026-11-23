@@ -231,10 +231,12 @@ class ShellApplication implements Shell {
     if (screen === undefined) throw new TypeError(`No screen named ${name}`);
     const open: OpenScreen = { screen, state: screen.open(args) };
     if (screen.extend !== undefined) {
-      if (this.#stack.length > 0) throw new TypeError(`Screen ${name} draws for itself, so it can only be first`);
+      if (this.#stack.some(other => other.screen === screen)) throw new TypeError(`Screen ${name} is already open`);
       const renderer = this.#terminal?.renderer;
       const clipboard = this.#clipboard;
       if (renderer === undefined || clipboard === undefined) return;
+      this.#current?.extension?.pause?.();
+      this.#yieldTerminal();
       open.extension = screen.extend({
         renderer,
         clipboard,
@@ -253,14 +255,21 @@ class ShellApplication implements Shell {
           settings: this.#settings,
           connection: undefined,
         }),
+        open: (screen, args) => this.#run([{ type: 'open', screen, ...(args === undefined ? {} : { args }) }]),
         quit: () => void this.stop(),
       });
       this.#stack.push(open);
       await open.extension.start();
       return;
     }
+    this.#current?.extension?.pause?.();
     this.#stack.push(open);
     await this.#show();
+  }
+
+  /** An extended screen draws its own tree: the shell's leaves the terminal. */
+  #yieldTerminal(): void {
+    if (this.#roots?.retire(() => undefined) === true) this.#roots.present();
   }
 
   /** Shows the top screen afresh: its own subscriptions, its views read. */
@@ -329,7 +338,12 @@ class ShellApplication implements Shell {
         if (result !== false) return result ?? [];
         if (this.#stack.length > 1) {
           this.#stack.pop();
-          void this.#show();
+          const back = this.#current?.extension;
+          if (back === undefined) void this.#show();
+          else {
+            this.#yieldTerminal();
+            back.resume?.();
+          }
         }
         return [];
       },

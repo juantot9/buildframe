@@ -10,7 +10,7 @@ import type {
 } from '@buildframe/workspace/projection';
 import type { ReviewIdentity, ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
 
-import { ShellClipboard, terminalFallbackClipboard, type ShellClipboardFactory } from './shellClipboard.js';
+import { terminalFallbackClipboard, type ShellClipboardFactory } from './shellClipboard.js';
 import { createShell, type Shell } from './shell.js';
 import { defineScreen, type Screen, type ScreenExtension, type ScreenSurface } from './shellScreen.js';
 import { executeCommand, semanticError } from './shellCommands.js';
@@ -67,10 +67,8 @@ class ReviewingExtension implements ScreenExtension {
   readonly #surface: ScreenSurface;
   readonly #userConfiguration: UserConfiguration;
   readonly #model: ReviewingApplicationModel;
-  #renderer: CliRenderer | undefined;
   #view: ReviewingView | undefined;
   readonly #highlight: ReviewingHighlight;
-  #clipboard: ShellClipboard | undefined;
   #unsubscribeFromConnection: (() => void) | undefined;
   #route?: ActiveRoute;
   #routeGeneration = 0;
@@ -122,14 +120,12 @@ class ReviewingExtension implements ScreenExtension {
     lendShellState(this.#model.state, this.#surface.shared);
     const { loaded, warning: configurationWarning } = this.#surface.preferences;
     if (loaded !== undefined) this.#model.applyReviewingPreferences(loaded.preferences, loaded.themes);
-    this.#renderer = this.#surface.renderer;
-    this.#highlight.attachRenderer(this.#renderer.nativeScene);
-    this.#clipboard = this.#surface.clipboard;
+    this.#highlight.attachRenderer(this.#surface.renderer.nativeScene);
     // Paint the first frame in the terminal's own light/dark so a light
     // terminal never flashes the dark theme; a silent terminal stays dark.
     this.#model.setTerminalThemeMode(this.#surface.terminalThemeMode);
     this.#view = new ReviewingView(
-      this.#renderer,
+      this.#surface.renderer,
       this.#model,
       effects => {
         // Local selection changes render inside ReviewingView before effects
@@ -142,7 +138,8 @@ class ReviewingExtension implements ScreenExtension {
           return;
         }
         // Workspace I/O waits until OpenTUI has drawn the local pending state.
-        void this.#renderer?.idle().then(() => {
+        if (this.#stopped) return;
+        void this.#surface.renderer.idle().then(() => {
           if (!this.#stopped) this.#runEffects(effects);
         });
       },
@@ -183,7 +180,6 @@ class ReviewingExtension implements ScreenExtension {
     this.#stopped = true;
     this.#routeGeneration += 1;
     this.#loadSequence += 1;
-    this.#clipboard?.cancel();
     this.#clearSubscriptions();
     this.#unsubscribeFromConnection?.();
     this.#unsubscribeFromConnection = undefined;
@@ -216,9 +212,15 @@ class ReviewingExtension implements ScreenExtension {
     }
     this.#view?.stop();
     this.#view = undefined;
-    this.#clipboard = undefined;
-    this.#renderer = undefined;
     await this.#highlight.destroy();
+  }
+
+  pause(): void {
+    this.#view?.stop();
+  }
+
+  resume(): void {
+    this.#view?.start();
   }
 
   /** A save of the settings failed. */
@@ -406,7 +408,7 @@ class ReviewingExtension implements ScreenExtension {
   }
 
   async #copyText(effect: Extract<ReviewingModelEffect, { readonly type: 'copy-text' }>): Promise<void> {
-    const outcome = this.#clipboard === undefined ? 'unavailable' : await this.#clipboard.copy(effect.text);
+    const outcome = this.#stopped ? 'unavailable' : await this.#surface.clipboard.copy(effect.text);
     if (this.#stopped || outcome === undefined) return;
     if (effect.announce === 'failure-only' && outcome !== 'unavailable') return;
     this.#model.reportClipboardCopy(effect.source, outcome, Buffer.byteLength(effect.text));

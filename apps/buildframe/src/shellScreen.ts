@@ -98,7 +98,7 @@ export interface ScreenDefinition<S, Mode extends string = string> {
   /**
    * Migration scaffolding (WF-301): a screen that still loads, listens and
    * draws for itself on the terminal the shell lends it. It shrinks as each
-   * part moves into the shell; only the first screen may have it.
+   * part moves into the shell. It pauses while another screen is over it.
    */
   readonly extend?: (surface: ScreenSurface) => ScreenExtension;
 }
@@ -123,6 +123,8 @@ export interface ScreenSurface {
   readonly shared: ShellSharedState;
   /** What the shell has open over the screen now, for the screen to draw with its frame. */
   layers(): ShellLayers;
+  /** Opens another screen over this one; this one pauses until Esc comes back. */
+  open(screen: string, args?: unknown): void;
   /** Leaves the app. */
   quit(): void;
 }
@@ -143,6 +145,10 @@ export interface ScreenExtension {
   start(): Promise<void>;
   stop(): Promise<void>;
   themeMode?(mode: 'dark' | 'light'): void;
+  /** Another screen opened over this one: stop listening and drawing. */
+  pause?(): void;
+  /** Back on top: listen and draw again. */
+  resume?(): void;
   /** A warning about the screen's settings, for the screen to show. */
   warn?(sentence: string): void;
 }

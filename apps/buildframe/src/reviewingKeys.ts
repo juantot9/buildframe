@@ -2,11 +2,15 @@ import { agentConnected, type ReviewingApplicationState } from './reviewingModel
 import { reviewingFiles } from './reviewingFileList.js';
 import {
   defineKeyTable,
+  footerSentence,
+  keyList,
+  keysRow,
   type FooterMode,
   type HelpMode,
   type HelpPlacement,
   type KeyBinding,
   type KeyPlacement,
+  type KeyListItem,
   type KeyTable,
 } from './shellKeys.js';
 
@@ -376,4 +380,17 @@ export function reviewingHelpMode(state: S): HelpName {
     return state.homeMode === 'launcher' ? 'launcher' : state.homeMode === 'comparison' ? 'comparison' : 'previous';
   }
   return state.shownStep !== undefined ? 'pastStep' : 'review';
+}
+
+/** The keys row, `?` entries and idle sentence for a state, as the footer and `?` list draw them. */
+export function reviewingKeysRow(state: S, width: number): string {
+  return keysRow(REVIEWING_KEYS, reviewingFooterMode(state), state, width);
+}
+
+export function reviewingKeyList(state: S): readonly KeyListItem[] {
+  return keyList(REVIEWING_KEYS, reviewingHelpMode(state), state);
+}
+
+export function reviewingFooterSentence(state: S): string | undefined {
+  return footerSentence(REVIEWING_KEYS, reviewingFooterMode(state), state);
 }

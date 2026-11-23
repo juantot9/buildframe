@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import type { ReviewingApplicationState } from '../../src/reviewingModel.js';
-import { reviewingFooterSentence, reviewingKeyList, reviewingKeysRow } from '../../src/reviewingView.js';
+import { reviewingFooterSentence, reviewingKeyList, reviewingKeysRow } from '../../src/reviewingKeys.js';
 import { REVIEWING_ACTED_KEYS } from '../../src/reviewingActions.js';
 import { REVIEWING_KEYS } from '../../src/reviewingKeys.js';
 import { defineKeyTable } from '../../src/shellKeys.js';
