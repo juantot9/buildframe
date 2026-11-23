@@ -52,7 +52,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ReviewingApplication } from '../../src/index.js';
 import { INDIGO_NIGHT, QUIET_GRAPHITE, QUIET_PAPER, WARM_CARBON } from '../../src/reviewingView.js';
 import { displayCells, wrappedDisplayRows } from '../../src/displayCells.js';
-import { createReviewingApplicationForTest } from '../../src/reviewingApplication.js';
+import { createReviewingApplicationForTest } from '../../src/reviewingScreen.js';
 import {
   createFileUserConfiguration,
   messageTemplatePath,

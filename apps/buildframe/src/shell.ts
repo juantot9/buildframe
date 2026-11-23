@@ -19,7 +19,7 @@ import { composeFrame } from './shellCompose.js';
 import { ShellPulse } from './shellPulse.js';
 import { ShellRoots } from './shellRoots.js';
 import { ShellSettings } from './shellSettings.js';
-import { HOME_SCREEN, homeScreen } from './shellHomeScreen.js';
+import { HOME_SCREEN, homeEntries, homeScopes, homeScreen, homeViewsByScreen } from './shellHomeScreen.js';
 import {
   dispatchScreenKey,
   type Screen,
@@ -85,6 +85,9 @@ class ShellApplication implements Shell {
   readonly #first: { readonly screen: string; readonly args?: unknown };
   readonly #stack: OpenScreen[] = [];
   readonly #views: ShellViews;
+  readonly #homeContributors: readonly Screen<any, any>[];
+  /** Reads the other screens' Home rows for a screen that draws Home itself. */
+  readonly #homeFeed: ShellViews;
   readonly #presentation: Look['presentation'];
   readonly #settings: ShellSettings;
   #loadWarning: string | undefined;
@@ -109,7 +112,10 @@ class ShellApplication implements Shell {
       this.#resolveClosed = resolve;
     });
     this.#options = options;
-    const home = options.screens.some(screen => screen.home !== undefined) ? [homeScreen(options.screens)] : [];
+    // A screen that draws for itself also draws Home; the shell only feeds it the other screens' rows.
+    const hostsHome = options.screens.some(screen => screen.extend !== undefined);
+    this.#homeContributors = options.screens.filter(screen => screen.home !== undefined && screen.extend === undefined);
+    const home = !hostsHome && this.#homeContributors.length > 0 ? [homeScreen(options.screens)] : [];
     this.#screens = new Map([...home, ...options.screens].map(screen => [screen.name, screen]));
     this.#first = options.first ?? { screen: HOME_SCREEN };
     if (!this.#screens.has(this.#first.screen)) throw new TypeError(`No screen named ${this.#first.screen}`);
@@ -122,6 +128,10 @@ class ShellApplication implements Shell {
         else if (!this.#stopped) extension.warn(text);
       },
     );
+    this.#homeFeed = new ShellViews(options.workspace, {
+      changed: () => undefined,
+      say: (sentence, tone) => this.#say(sentence, tone),
+    });
     this.#views = new ShellViews(options.workspace, {
       changed: () => this.#render(),
       say: (sentence, tone) => this.#say(sentence, tone),
@@ -189,6 +199,7 @@ class ShellApplication implements Shell {
       for (const open of [...this.#stack].reverse()) await open.extension?.stop();
       this.#clipboard?.cancel();
       this.#views.stop();
+      this.#homeFeed.stop();
       this.#unsubscribeFromConnection?.();
       this.#pulse.stop();
       terminal?.renderer.keyInput.off('keypress', this.#onKeyPress);
@@ -255,16 +266,27 @@ class ShellApplication implements Shell {
           settings: this.#settings,
           connection: undefined,
         }),
+        run: result => this.#run(result ?? []),
         open: (screen, args) => this.#run([{ type: 'open', screen, ...(args === undefined ? {} : { args }) }]),
         quit: () => void this.stop(),
       });
       this.#stack.push(open);
       await open.extension.start();
+      this.#feedHome(open.extension);
       return;
     }
     this.#current?.extension?.pause?.();
     this.#stack.push(open);
     await this.#show();
+  }
+
+  #feedHome(extension: ScreenExtension): void {
+    const contributors = this.#homeContributors;
+    if (extension.homeRows === undefined || contributors.length === 0) return;
+    void this.#homeFeed.show({
+      scopes: () => homeScopes(contributors),
+      receive: views => extension.homeRows?.(homeEntries(contributors, homeViewsByScreen(contributors, views))),
+    });
   }
 
   /** An extended screen draws its own tree: the shell's leaves the terminal. */

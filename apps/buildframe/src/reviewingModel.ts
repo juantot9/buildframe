@@ -53,7 +53,6 @@ import type {
 } from '@buildframe/workspace/reviewing';
 import type { ReviewComparisonSelection } from '@buildframe/workspace/workspace-evidence';
 
-import { fitDisplayCellsEnd } from './displayCells.js';
 import { contentWindowContainsLine } from './reviewingContent.js';
 import { Key, matchesKey, printableInput, type ReviewingInput } from './reviewingInput.js';
 import {
@@ -66,6 +65,8 @@ import {
 import { routeShellKey, type ShellKeyHost } from './shellInput.js';
 import { configurationKey } from './shellConfiguration.js';
 import { reviewingSettings } from './reviewingSettings.js';
+import { shortHash, headMoveSentence } from './reviewingHeadMoves.js';
+import { homeLauncherOptions, homeSelectionAvailable, type ExtraHomeRow } from './reviewingHomeRows.js';
 import { dispatchReviewingKey } from './reviewingActions.js';
 import { reasonSentence } from './reviewingReasons.js';
 import { outgoingStateSpins, type MessageState, type NoticeTone } from './reviewingStatus.js';
@@ -113,7 +114,7 @@ export type ReviewingLayout = 'wide' | 'balanced' | 'linear';
 export type ReviewRegion = 'files' | 'diff' | 'questions';
 export type ReviewingFocus = 'home' | ReviewRegion;
 export type HomeMode = 'launcher' | 'comparison' | 'history';
-export type HomeLauncherSelection = 'primary' | 'new-current' | 'comparison' | 'history';
+export type HomeLauncherSelection = 'primary' | 'new-current' | 'comparison' | 'history' | `row:${string}`;
 export type ConfigurationSetting =
   | 'theme'
   | 'background'
@@ -461,6 +462,8 @@ export interface ReviewingApplicationState {
   balancedContext: 'files' | 'questions';
   homeMode: HomeMode;
   homeLauncherSelection: HomeLauncherSelection;
+  /** Rows other screens add to Home, listed after Reviewing's own choices. */
+  extraHomeRows: readonly ExtraHomeRow[];
   reviewReturn: HomeMode;
   /** Last same-version Home count, retained while a Review is visible. */
   previousReviewCount: number;
@@ -561,6 +564,7 @@ export interface ReviewingApplicationState {
 
 export type ReviewingModelEffect =
   | { readonly type: 'stop' }
+  | { readonly type: 'choose-home-row'; readonly id: string }
   | {
       readonly type: 'show-home';
       readonly offset: number;
@@ -921,34 +925,6 @@ export function navigableHistorySteps(state: ReviewingApplicationState): readonl
   return state.review?.history?.steps.filter(step => step.changes.status === 'changed');
 }
 
-type HeadMove = NonNullable<ReviewHistoryStep['headMove']>;
-type HeadMoveCommit = HeadMove['to'];
-
-/** A commit's short hash, as git prints it by default. */
-export function shortHash(commit: HeadMoveCommit): string {
-  return commit.objectIdentity.slice(0, 7);
-}
-
-/** A commit in a sentence: its subject first, in plain words, then its short hash. */
-export function commitName(commit: HeadMoveCommit): string {
-  const subject = fitDisplayCellsEnd(commit.subject.trim(), 40, '…');
-  return subject === '' ? shortHash(commit) : `“${subject}” (${shortHash(commit)})`;
-}
-
-/** A HEAD move in a note: "committed f32adef", "3 commits, newest f32adef", "HEAD moved to f32adef". */
-export function headMoveNote(move: HeadMove): string {
-  if (move.kind === 'moved') return `HEAD moved to ${shortHash(move.to)}`;
-  return move.count === 1 ? `committed ${shortHash(move.to)}` : `${move.count} commits, newest ${shortHash(move.to)}`;
-}
-
-/** What happened to HEAD in a step, as one sentence: "“Tidy” (f32adef) was committed during #1." */
-export function headMoveSentence(move: HeadMove, label: string): string {
-  if (move.kind === 'moved') return `HEAD moved to ${commitName(move.to)} ${label}.`;
-  return move.count === 1
-    ? `${commitName(move.to)} was committed ${label}.`
-    : `${move.count} commits were made ${label}, the newest ${commitName(move.to)}.`;
-}
-
 /** The newest step in which HEAD moved; undefined when it never did. */
 export function latestHeadMoveStep(state: ReviewingApplicationState): ReviewHistoryStep | undefined {
   return [...(state.review?.history?.steps ?? [])].reverse().find(step => step.headMove !== undefined);
@@ -1247,6 +1223,7 @@ export class ReviewingApplicationModel {
       balancedContext: 'files',
       homeMode: 'launcher',
       homeLauncherSelection: 'primary',
+      extraHomeRows: [],
       reviewReturn: 'launcher',
       previousReviewCount: 0,
       home: undefined,
@@ -2008,12 +1985,7 @@ export class ReviewingApplicationModel {
     if (this.state.homeMode === 'history' && home.header.totalPastReviews === 0) {
       this.state.homeMode = 'launcher';
     }
-    if (
-      (home.header.totalPastReviews === 0 && this.state.homeLauncherSelection === 'history') ||
-      (home.currentReview === undefined && this.state.homeLauncherSelection === 'new-current')
-    ) {
-      this.state.homeLauncherSelection = 'primary';
-    }
+    if (!homeSelectionAvailable(this.state)) this.state.homeLauncherSelection = 'primary';
     const preferred = preferredReviewIdentity ?? this.state.selectedReviewIdentity;
     this.state.selectedReviewIdentity =
       home.reviews.items.find(item => item.reviewIdentity === preferred)?.reviewIdentity ??
@@ -3706,12 +3678,7 @@ export class ReviewingApplicationModel {
     const home = this.state.home;
     if (home === undefined) return [];
     if (this.state.homeMode === 'launcher') {
-      const options: HomeLauncherSelection[] = [
-        'primary',
-        ...(home.currentReview === undefined ? [] : ['new-current' as const]),
-        'comparison',
-        ...(home.header.totalPastReviews > 0 ? ['history' as const] : []),
-      ];
+      const options = homeLauncherOptions(this.state);
       const current = Math.max(0, options.indexOf(this.state.homeLauncherSelection));
       const target = cycleSingleStep
         ? (current + delta + options.length) % options.length
@@ -4941,6 +4908,9 @@ export class ReviewingApplicationModel {
         this.state.notice = undefined;
         this.setLoading('Loading local commit history', 'home');
         return [{ type: 'load-commit-graph' }];
+      }
+      if (this.state.homeLauncherSelection.startsWith('row:')) {
+        return [{ type: 'choose-home-row', id: this.state.homeLauncherSelection }];
       }
       if (this.state.homeLauncherSelection === 'history' && home.header.totalPastReviews > 0) {
         this.state.homeMode = 'history';

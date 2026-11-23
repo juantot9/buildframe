@@ -5,7 +5,7 @@ import {
   type EnsureWorkspaceRuntimeResult,
 } from '@buildframe/local-runtime/launcher';
 
-import { createReviewingApplication } from './reviewingApplication.js';
+import { createReviewingApplication } from './reviewingScreen.js';
 import type { ReviewingPresentation } from './reviewingModel.js';
 import { createFileUserConfiguration } from './userConfiguration.js';
 

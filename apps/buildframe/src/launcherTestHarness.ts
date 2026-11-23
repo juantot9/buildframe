@@ -5,7 +5,7 @@ import {
   type OpenDeveloperReviewingRequest,
   type OpenDeveloperReviewingResult,
 } from './launcher.js';
-import { createReviewingApplicationForTest } from './reviewingApplication.js';
+import { createReviewingApplicationForTest } from './reviewingScreen.js';
 import { createFileUserConfiguration } from './userConfiguration.js';
 
 /** @internal Built fault-probe path; deliberately absent from package exports. */

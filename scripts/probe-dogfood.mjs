@@ -477,7 +477,7 @@ try {
   assert.equal(highlightClient.isInitialized(), true);
   assert.deepEqual(highlightClient.getAllBuffers(), []);
   // Same closed Workspace, exact same visible content, with color explicitly off.
-  const { createReviewingApplicationForTest } = await import('../apps/buildframe/dist/reviewingApplication.js');
+  const { createReviewingApplicationForTest } = await import('../apps/buildframe/dist/reviewingScreen.js');
   const plainTerminal = await ScriptedTerminal.create();
   const plainApplication = createReviewingApplicationForTest({
     workspace: cli.workspace,

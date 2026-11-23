@@ -1,4 +1,3 @@
-import { type CliRenderer } from '@opentui/core';
 import { decodeBytesBase64 } from '@buildframe/workspace/bytes-base64';
 import type { Workspace, WorkspaceCommand } from '@buildframe/workspace';
 import type {
@@ -10,9 +9,7 @@ import type {
 } from '@buildframe/workspace/projection';
 import type { ReviewIdentity, ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
 
-import { terminalFallbackClipboard, type ShellClipboardFactory } from './shellClipboard.js';
-import { createShell, type Shell } from './shell.js';
-import { defineScreen, type Screen, type ScreenExtension, type ScreenSurface } from './shellScreen.js';
+import type { HomeRow, ScreenExtension, ScreenSurface } from './shellScreen.js';
 import { executeCommand, semanticError } from './shellCommands.js';
 import { isLiveScope, liveViewIdentity, ShellWatch } from './shellWatch.js';
 import {
@@ -36,35 +33,27 @@ import {
   type ReviewLoadTarget,
   type ReviewSelectionHint,
   type ReviewingModelEffect,
-  type ReviewingPresentation,
   type ReviewViewBundle,
 } from './reviewingModel.js';
 import { firstListedFile, manifestFileItems } from './reviewingFileList.js';
 import { ReviewingView } from './reviewingView.js';
+import type { ReviewingApplicationOptions } from './reviewingScreen.js';
 import { lendShellState } from './reviewingShellState.js';
+import { extraHomeRows } from './reviewingHomeRows.js';
+import type { HomeEntry } from './shellHomeScreen.js';
 import type { ActiveHomeRoute, ActiveReviewRoute, ActiveRoute, ReviewingSubscriptionScope } from './reviewingRoutes.js';
 import { ShellPulse, type PulseSource } from './shellPulse.js';
 import { ReviewingHighlight } from './reviewingHighlight.js';
 import { createEphemeralUserConfiguration, type UserConfiguration } from './userConfiguration.js';
 
-export interface ReviewingApplicationOptions {
-  /** A connected runtime's closed Workspace Interface. */
-  readonly workspace: Workspace;
-  readonly presentation?: Partial<ReviewingPresentation>;
-  /** Portable UI preferences; production supplies the file-backed Module. */
-  readonly userConfiguration?: UserConfiguration;
-}
-
-/** Reviewing runs as the shell with one screen. */
-export type ReviewingApplication = Shell;
-
 class ProjectionVersionsDidNotConverge extends Error {}
 class LiveChangesTemporarilyUnverified extends Error {}
 
 /** Reviewing on the terminal the shell lends it: its loader, model and view (WF-301 scaffolding). */
-class ReviewingExtension implements ScreenExtension {
+export class ReviewingExtension implements ScreenExtension {
   readonly #workspace: Workspace;
   readonly #surface: ScreenSurface;
+  #homeEntries: ReadonlyMap<string, HomeRow> = new Map();
   readonly #userConfiguration: UserConfiguration;
   readonly #model: ReviewingApplicationModel;
   #view: ReviewingView | undefined;
@@ -215,6 +204,12 @@ class ReviewingExtension implements ScreenExtension {
     await this.#highlight.destroy();
   }
 
+  homeRows(entries: readonly HomeEntry[]): void {
+    this.#homeEntries = new Map(entries.map(entry => [`row:${entry.id}`, entry.row]));
+    this.#model.state.extraHomeRows = extraHomeRows(entries);
+    this.#render();
+  }
+
   pause(): void {
     this.#view?.stop();
   }
@@ -309,6 +304,8 @@ class ReviewingExtension implements ScreenExtension {
     for (const effect of effects) {
       if (effect.type === 'stop') {
         this.#surface.quit();
+      } else if (effect.type === 'choose-home-row') {
+        this.#surface.run(this.#homeEntries.get(effect.id)?.choose());
       } else if (effect.type === 'show-home') {
         this.#showHomeFromEffect({
           kind: 'home',
@@ -1605,56 +1602,4 @@ class ReviewingExtension implements ScreenExtension {
     this.#model.failQuestionDiscussion(itemIdentity);
     this.#render();
   }
-}
-
-/** Creates the deep v1 Reviewing Application Module over the Workspace Interface. */
-/** Reviewing as the shell's one screen, while it still loads, listens and draws for itself. */
-function reviewingScreen(
-  options: ReviewingApplicationOptions,
-  createHighlightClient?: ConstructorParameters<typeof ReviewingHighlight>[1],
-): Screen<undefined, 'reviewing'> {
-  return defineScreen<undefined, 'reviewing'>({
-    name: 'reviewing',
-    open: () => undefined,
-    title: () => 'Reviewing',
-    mode: () => 'reviewing',
-    modes: { reviewing: {} },
-    keys: [],
-    body: () => [],
-    extend: surface => new ReviewingExtension(options, surface, createHighlightClient),
-  });
-}
-
-export function createReviewingApplication(options: ReviewingApplicationOptions): ReviewingApplication {
-  return createShell({
-    workspace: options.workspace,
-    screens: [reviewingScreen(options)],
-    first: { screen: 'reviewing' },
-    ...(options.presentation === undefined ? {} : { presentation: options.presentation }),
-    ...(options.userConfiguration === undefined ? {} : { userConfiguration: options.userConfiguration }),
-  });
-}
-
-/** @internal Concrete OpenTUI test seam; deliberately absent from package exports. */
-export function createReviewingApplicationForTest(
-  options: ReviewingApplicationOptions & {
-    readonly renderer: CliRenderer;
-    readonly createHighlightClient?: ConstructorParameters<typeof ReviewingHighlight>[1];
-    readonly createClipboardService?: ShellClipboardFactory;
-  },
-): ReviewingApplication {
-  const { renderer, createHighlightClient, createClipboardService, ...applicationOptions } = options;
-  // Scenario tests read exact geometry right after input; motion is opt-in there.
-  const presentation = { reducedMotion: true, ...applicationOptions.presentation };
-  return createShell({
-    workspace: applicationOptions.workspace,
-    screens: [reviewingScreen({ ...applicationOptions, presentation }, createHighlightClient)],
-    first: { screen: 'reviewing' },
-    presentation,
-    ...(applicationOptions.userConfiguration === undefined
-      ? {}
-      : { userConfiguration: applicationOptions.userConfiguration }),
-    renderer,
-    createClipboard: createClipboardService ?? terminalFallbackClipboard,
-  });
 }

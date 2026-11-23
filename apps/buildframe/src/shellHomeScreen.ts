@@ -1,4 +1,4 @@
-import type { WorkspaceView } from '@buildframe/workspace';
+import type { WorkspaceView, WorkspaceViewScope } from '@buildframe/workspace';
 
 import { Key, matchesKey } from './reviewingInput.js';
 import { Box } from './renderTree.js';
@@ -18,6 +18,50 @@ interface HomeState {
 /** A row's id on Home: the screen's name and the row's own id, so two screens never collide. */
 const rowId = (screen: string, row: HomeRow): string => `${screen}-${row.id}`;
 
+type Views = Readonly<Record<string, WorkspaceView>>;
+
+/** Every contributing screen's Home views, under `<screen>:<name>`, to be read together. */
+export function homeScopes(contributors: readonly Screen<any, any>[]): Readonly<Record<string, WorkspaceViewScope>> {
+  return Object.fromEntries(
+    contributors.flatMap(screen =>
+      Object.entries(screen.home!.views?.() ?? {}).map(([key, scope]) => [`${screen.name}:${key}`, scope]),
+    ),
+  );
+}
+
+/** The views read together, given back to each screen under its own names. */
+export function homeViewsByScreen(
+  contributors: readonly Screen<any, any>[],
+  views: Views,
+): Readonly<Record<string, Views>> {
+  return Object.fromEntries(
+    contributors.map(screen => [
+      screen.name,
+      Object.fromEntries(
+        Object.entries(views).flatMap(([key, view]) =>
+          key.startsWith(`${screen.name}:`) ? [[key.slice(screen.name.length + 1), view]] : [],
+        ),
+      ),
+    ]),
+  );
+}
+
+/** One row on Home, named by its screen so two screens never collide. */
+export interface HomeEntry {
+  readonly id: string;
+  readonly row: HomeRow;
+}
+
+/** The rows every contributing screen adds, in the order the screens are registered. */
+export function homeEntries(
+  contributors: readonly Screen<any, any>[],
+  viewsByScreen: Readonly<Record<string, Views>>,
+): HomeEntry[] {
+  return contributors.flatMap(screen =>
+    screen.home!.rows(viewsByScreen[screen.name] ?? {}).map(row => ({ id: rowId(screen.name, row), row })),
+  );
+}
+
 /**
  * Home: one card with the rows every screen adds, in the order the screens
  * are registered. It reads all their views together, so the rows always
@@ -26,10 +70,7 @@ const rowId = (screen: string, row: HomeRow): string => `${screen}-${row.id}`;
 export function homeScreen(screens: readonly Screen<any, any>[]): Screen<HomeState, 'home'> {
   const contributors = screens.filter(screen => screen.home !== undefined);
   if (screens.some(screen => screen.name === HOME_SCREEN)) throw new TypeError(`No screen may be named ${HOME_SCREEN}`);
-  const rows = (state: HomeState): { readonly id: string; readonly row: HomeRow }[] =>
-    contributors.flatMap(screen =>
-      screen.home!.rows(state.views[screen.name] ?? {}).map(row => ({ id: rowId(screen.name, row), row })),
-    );
+  const rows = (state: HomeState): HomeEntry[] => homeEntries(contributors, state.views);
   const selected = (state: HomeState) => {
     const all = rows(state);
     return all.find(entry => entry.id === state.selected) ?? all.find(entry => entry.row.available) ?? all[0];
@@ -64,23 +105,9 @@ export function homeScreen(screens: readonly Screen<any, any>[]): Screen<HomeSta
         run: state => selected(state)?.row.choose(),
       },
     ],
-    views: () =>
-      Object.fromEntries(
-        contributors.flatMap(screen =>
-          Object.entries(screen.home!.views?.() ?? {}).map(([key, scope]) => [`${screen.name}:${key}`, scope]),
-        ),
-      ),
+    views: () => homeScopes(contributors),
     receive: (state, views) => {
-      state.views = Object.fromEntries(
-        contributors.map(screen => [
-          screen.name,
-          Object.fromEntries(
-            Object.entries(views).flatMap(([key, view]) =>
-              key.startsWith(`${screen.name}:`) ? [[key.slice(screen.name.length + 1), view]] : [],
-            ),
-          ),
-        ]),
-      );
+      state.views = homeViewsByScreen(contributors, views);
     },
     body: (state, look, height) => {
       const current = selected(state);

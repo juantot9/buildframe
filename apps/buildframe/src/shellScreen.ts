@@ -5,6 +5,7 @@ import { Key, matchesKey, type ReviewingInput, type ReviewingKeySpec } from './r
 import type { RenderChild } from './renderTree.js';
 import type { ShellClipboard } from './shellClipboard.js';
 import type { ShellLayers } from './shellCompose.js';
+import type { HomeEntry } from './shellHomeScreen.js';
 import type { ShellSettings } from './shellSettings.js';
 import type { ReviewingPreferences, ReviewingThemeDefinition } from './userConfiguration.js';
 import type { CommandOutcome } from './shellCommands.js';
@@ -123,6 +124,8 @@ export interface ScreenSurface {
   readonly shared: ShellSharedState;
   /** What the shell has open over the screen now, for the screen to draw with its frame. */
   layers(): ShellLayers;
+  /** Carries out what a key or a chosen Home row returned (open, copy, say, execute). */
+  run(result: ScreenResult): void;
   /** Opens another screen over this one; this one pauses until Esc comes back. */
   open(screen: string, args?: unknown): void;
   /** Leaves the app. */
@@ -149,6 +152,11 @@ export interface ScreenExtension {
   pause?(): void;
   /** Back on top: listen and draw again. */
   resume?(): void;
+  /**
+   * A screen that draws for itself also draws Home (WF-301): these are the
+   * rows the other screens add to it, read again whenever their views change.
+   */
+  homeRows?(entries: readonly HomeEntry[]): void;
   /** A warning about the screen's settings, for the screen to show. */
   warn?(sentence: string): void;
 }

@@ -27,11 +27,8 @@ import {
   diffMinimumWidth,
   historyStepKey,
   historyStepText,
-  commitName,
-  headMoveNote,
   historyStepWords,
   latestHeadMoveStep,
-  shortHash,
   shownFilePosition,
   jumpListRows,
   type JumpListRow,
@@ -100,9 +97,11 @@ import { ShellSelection } from './shellSelection.js';
 import { agentIndicator, dialogHeight, dialogTop, shellHeader } from './shellChrome.js';
 import { composeFrame, type FrameScreen, type ShellLayers } from './shellCompose.js';
 import { messageOutcomeLabel, questionStateLabel, responseSize, stateBadge } from './reviewingMessageWords.js';
-import { homeLauncherCard, homePane, homeRow, homeSentence, type HomeCard, type HomeChoice } from './shellHome.js';
+import { homeLauncherCard, homePane, homeRow, homeSentence, type HomeCard } from './shellHome.js';
 import { fitPaneDetail, shortDisplayPath, treeName } from './reviewingPathText.js';
 import { reviewingOwnSettings } from './reviewingSettings.js';
+import { commitName, headMoveNote, shortHash } from './reviewingHeadMoves.js';
+import { homeChoices } from './reviewingHomeRows.js';
 
 export { INDIGO_NIGHT, MATCH_TERMINAL_THEME, QUIET_GRAPHITE, QUIET_PAPER, WARM_CARBON } from './shellLook.js';
 
@@ -3509,56 +3508,6 @@ function pendingReviewBody(state: ReviewingApplicationState): RenderChild {
  * The launcher, the commit picker and Previous Reviews all live in it, so
  * nothing moves when you go between them.
  */
-
-function homeChoices(state: ReviewingApplicationState): readonly HomeChoice[] {
-  const home = state.home!;
-  const current = home.currentReview;
-  const ascii = state.presentation.ascii;
-  return [
-    {
-      id: 'primary',
-      // ASCII twins stay distinct from the `>` cursor and the `-` separator.
-      icon: current === undefined ? (ascii ? '+' : '◇') : ascii ? '@' : '●',
-      label: current === undefined ? 'Review current changes' : 'Continue Current Review',
-      description:
-        current === undefined
-          ? 'Everything since your last commit, including uncommitted changes.'
-          : 'Go back to the open Review and its Messages.',
-      available: true,
-    },
-    ...(current === undefined
-      ? []
-      : [
-          {
-            id: 'new-current',
-            icon: ascii ? '+' : '◆',
-            label: 'Start new Review',
-            description: 'Start fresh from the code as it is now; the open Review moves to Previous Reviews.',
-            available: true,
-          },
-        ]),
-    {
-      id: 'comparison',
-      icon: ascii ? '=' : '↔',
-      label: 'Review a commit or range',
-      description: 'Pick commits from history; your files are not touched.',
-      available: true,
-    },
-    {
-      id: 'history',
-      icon: ascii ? '%' : '◷',
-      label:
-        home.header.totalPastReviews === 0
-          ? 'Previous Reviews (none yet)'
-          : `Previous Reviews (${home.header.totalPastReviews})`,
-      description:
-        home.header.totalPastReviews === 0
-          ? 'A Review moves here when you start a new one.'
-          : 'Read earlier Reviews and their Messages.',
-      available: home.header.totalPastReviews > 0,
-    },
-  ];
-}
 
 function homeLauncher(state: ReviewingApplicationState, interaction: ReviewPointerInteraction): HomeCard {
   if (state.home === undefined) {
