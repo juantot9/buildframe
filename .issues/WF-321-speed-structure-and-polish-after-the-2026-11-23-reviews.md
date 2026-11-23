@@ -49,6 +49,18 @@ reads made a read right after an edit miss it.
 4. AD-01 / AD-03: connect sentences say `!buildframe` for Codex; only the
    connect, status and disconnect commands go to the Codex helper.
 
+Done: A3 (`509316e`) first search 2,693 → 193 ms on a 20,000-line file;
+A5 (`4d0db13`) the Files pane holds up to 10,000 files as one list. A4 waits
+for the windows branch (its overlay code is WF-307's) and an owner decision
+on checking less often.
+
+Done in C: C1+C2 (`87e51f1`) the shell no longer imports Reviewing, and
+`check:dependencies` fails on runtime import loops (two found and broken);
+C3 (`63da487`) baseTypes.ts and workspaceContracts.ts; C4 (`e35590d`)
+connect sentences from the support facts, `!buildframe` for Codex, doctor
+works inside Codex. Left for WF-300: owners declaring their publish needs,
+so `#publishCommitted` stops naming them.
+
 ## B. Visual polish (frames shown before and after)
 
 The visual review's ranked proposals and polish table, in its suggested order.
