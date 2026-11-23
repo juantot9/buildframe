@@ -1345,9 +1345,7 @@ export class WorkspaceProjection {
     const versionIndex = entry.reviewSnapshotIdentities.indexOf(entry.reviewSnapshotIdentity);
     const latestReviewSnapshotIdentity = entry.reviewSnapshotIdentities.at(-1);
     if (latestReviewSnapshotIdentity === undefined) throw new ProjectionRecordsInvalid();
-    const endpointLabel = (
-      endpoint: ReviewSnapshotPayload['basis'] | ReviewSnapshotPayload['comparedState'],
-    ): string =>
+    const endpointLabel = (endpoint: ReviewSnapshotPayload['basis'] | ReviewSnapshotPayload['comparedState']): string =>
       endpoint.kind === 'commit'
         ? `${endpoint.abbreviatedObjectIdentity} ${endpoint.subject}`.trim()
         : endpoint.kind === 'tree'

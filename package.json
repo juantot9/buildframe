@@ -34,11 +34,11 @@
   },
   "devDependencies": {
     "@opentui/core": "0.9.7",
-    "@types/node": "^26.1.2",
-    "esbuild": "0.28.1",
-    "oxfmt": "0.66.0",
-    "oxlint": "1.81.0",
-    "tsx": "^4.19.2",
+    "@types/node": "^26.6.6",
+    "esbuild": "0.28.2",
+    "oxfmt": "0.79.0",
+    "oxlint": "1.94.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2",
     "vitest": "^4.1.12"
   },
