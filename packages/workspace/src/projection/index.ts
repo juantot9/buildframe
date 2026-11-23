@@ -211,6 +211,7 @@ import {
   textPreview,
 } from './views.js';
 import { layLiveChanges } from './liveFileList.js';
+import { GenerationCache } from './generationCache.js';
 import { matchReviewSearch } from './reviewSearch.js';
 
 export { WORKSPACE_PROJECTION_VERSION } from './limits.js';
@@ -381,14 +382,7 @@ export class WorkspaceProjection {
    * check is reused only while the watcher reports changes and nothing has
    * changed since; otherwise only concurrent reads share it.
    */
-  readonly #liveVerifications = new Map<
-    ReviewIdentity,
-    {
-      readonly generation: number;
-      settledAt: number | undefined;
-      readonly promise: Promise<LiveCaptureEntry | undefined>;
-    }
-  >();
+  readonly #liveVerifications = new GenerationCache<ReviewIdentity, LiveCaptureEntry | undefined>();
   /** Bumped by every change signal: a watcher event, the fallback tick, or a commit. */
   #liveGeneration = 0;
   /** The repository file list behind each verified working-tree state. */
@@ -397,12 +391,13 @@ export class WorkspaceProjection {
     ReturnType<WorkspaceEvidence['readCurrentRepositoryFiles']>
   >();
   readonly #searchIndexes = new Map<string, Promise<ReviewSearchIndex>>();
-  readonly #snapshotStatusReads = new Map<
+  /** Each Snapshot's current/stale status, shared like live checks: one per live generation. */
+  readonly #snapshotStatusReads = new GenerationCache<
     string,
-    Promise<{
+    {
       readonly status: ReviewProjectionHeader['snapshotStatus'];
       readonly contextStatus: ReviewProjectionHeader['contextStatus'];
-    }>
+    }
   >();
   readonly #snapshotEvidenceIdentities = new Map<string, string>();
   /** What each answered Message's Response changed; immutable once observed. */
@@ -1267,17 +1262,12 @@ export class WorkspaceProjection {
     readonly status: ReviewProjectionHeader['snapshotStatus'];
     readonly contextStatus: ReviewProjectionHeader['contextStatus'];
   }> {
-    const existing = this.#snapshotStatusReads.get(snapshot.reviewSnapshotIdentity);
-    if (existing !== undefined) return await existing;
-    const read = this.#readSnapshotStatus(snapshot);
-    this.#snapshotStatusReads.set(snapshot.reviewSnapshotIdentity, read);
-    try {
-      return await read;
-    } finally {
-      if (this.#snapshotStatusReads.get(snapshot.reviewSnapshotIdentity) === read) {
-        this.#snapshotStatusReads.delete(snapshot.reviewSnapshotIdentity);
-      }
-    }
+    return await this.#snapshotStatusReads.read(
+      snapshot.reviewSnapshotIdentity,
+      this.#liveGeneration,
+      this.#unsubscribeFromEvidenceInvalidation !== undefined,
+      async () => await this.#readSnapshotStatus(snapshot),
+    );
   }
 
   async #readSnapshotStatus(snapshot: ReviewSnapshotPayload): Promise<{
@@ -2586,33 +2576,12 @@ export class WorkspaceProjection {
   }
 
   async #verifiedLiveChanges(reviewIdentity: ReviewIdentity): Promise<LiveCaptureEntry | undefined> {
-    const shared = this.#liveVerifications.get(reviewIdentity);
-    const watching = this.#unsubscribeFromEvidenceInvalidation !== undefined;
-    if (
-      shared !== undefined &&
-      shared.generation === this.#liveGeneration &&
-      (shared.settledAt === undefined || watching)
-    ) {
-      return await shared.promise;
-    }
-    const verification: {
-      readonly generation: number;
-      settledAt: number | undefined;
-      readonly promise: Promise<LiveCaptureEntry | undefined>;
-    } = {
-      generation: this.#liveGeneration,
-      settledAt: undefined,
-      promise: this.#verifyLiveChangesNow(reviewIdentity),
-    };
-    this.#liveVerifications.set(reviewIdentity, verification);
-    try {
-      return await verification.promise;
-    } catch (error) {
-      if (this.#liveVerifications.get(reviewIdentity) === verification) this.#liveVerifications.delete(reviewIdentity);
-      throw error;
-    } finally {
-      verification.settledAt = performance.now();
-    }
+    return await this.#liveVerifications.read(
+      reviewIdentity,
+      this.#liveGeneration,
+      this.#unsubscribeFromEvidenceInvalidation !== undefined,
+      async () => await this.#verifyLiveChangesNow(reviewIdentity),
+    );
   }
 
   async #verifyLiveChangesNow(reviewIdentity: ReviewIdentity): Promise<LiveCaptureEntry | undefined> {
