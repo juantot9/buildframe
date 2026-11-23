@@ -2,7 +2,7 @@
 
 BuildFrame is a terminal app for reviewing what your coding agent changed. Open it
 in a repository, read the changes as a file tree and a Diff, write a Message on
-any line, and send it to a connected Pi or Claude Code session. The agent's
+any line, and send it to a connected Pi, Claude Code, OpenCode or Codex session. The agent's
 answer comes back under your Message, together with what it changed in the code.
 
 Everything stays on your machine. BuildFrame sends a Message only to the agent
@@ -40,9 +40,6 @@ buildframe      # or the shorter: bframe
 
 Run `/buildframe` in an agent session inside the same repository. From then on,
 every Message you send in BuildFrame goes straight to that session.
-
-> OpenCode and Codex connect from the next release. 0.1.0 on npm connects Pi
-> and Claude Code.
 
 | Agent | Install once | Then, in a session |
 |---|---|---|
@@ -115,7 +112,7 @@ buildframe doctor            # or: buildframe doctor --json
 
 `doctor` checks Node, the repository, whether BuildFrame's background process is
 running (and from which install), whether its saved data reads, which agent is
-connected, and your Pi and Claude Code versions. It changes nothing. Include
+connected, and your Pi, Claude Code, OpenCode and Codex versions. It changes nothing. Include
 its output when you report a problem.
 
 ## Your data

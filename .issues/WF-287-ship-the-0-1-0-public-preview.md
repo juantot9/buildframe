@@ -271,7 +271,10 @@ Nothing else from WF-050's candidate gate list is required for 0.1.0.
     plugin is unchanged since 5079c68. Installed globally on Node 26.13.1
     and 26.5.1, and as the Pi package, from `~/buildframe-dev-9ddd22d/`.
     The gate's checks (a period of real use, clean installs on macOS and
-    Linux, round trips) run again on this pack. SHA-256:
+    Linux, round trips) run again on this pack. Owner decision
+    2026-11-23: 0.1.0 announces all four connectors, so the round trips
+    cover OpenCode and Codex too, and `@buildframe/opencode` is published
+    with the CLI and Pi. SHA-256:
     - `buildframe-cli-0.1.0.tgz`
       `0d399953b5504cb3b57922ae3e257ddff75fb75470a12580ef70def15e2a55e1`
     - `buildframe-pi-0.1.0.tgz`
@@ -285,8 +288,9 @@ child 6's CI, and both before child 10.
 ## Acceptance
 
 - [ ] All children closed with their own recorded evidence.
-- [ ] `@buildframe/cli@0.1.0`, `@buildframe/pi@0.1.0` and the
-      Claude plugin `0.1.0` are published from one commit as `latest`.
+- [ ] `@buildframe/cli@0.1.0`, `@buildframe/pi@0.1.0`,
+      `@buildframe/opencode@0.1.0` and the Claude plugin `0.1.0` are
+      published from one commit as `latest`.
 - [ ] The release gate's three checks are recorded.
 - [x] The source repository is public, and CI is green on macOS and Linux.
 
