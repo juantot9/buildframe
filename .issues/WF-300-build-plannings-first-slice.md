@@ -41,3 +41,12 @@ downloadable modules.
 
 Built on the `planning` branch, which merges `main` in often; nothing from it
 lands on `main` until Planning ships.
+
+## Plug-in point (from WF-301, 2026-11-23)
+
+Planning is a screen made with `defineScreen`. Pass it in `screens` to
+`createReviewingApplication` (`reviewingScreen.ts`). Its `home` rows show on
+Home after Reviewing's own choices; choosing one opens the Planning screen
+over Reviewing, which pauses, and Esc comes back. Configuration (`c`), `?`
+and `!` are the shell's. How Home groups the two screens' rows is this
+ticket's decision.

@@ -88,12 +88,33 @@ Then Reviewing joined the shell (2026-11-21):
 - The shell owns saved preferences; Reviewing reads and saves through it. A
   failed save says "Settings were not saved" (was "Layout was not saved").
 
-Still in `extend`: the frame composition (Reviewing's header, status line,
-footer table and its own dialog layers), key routing (Reviewing's model holds
-the `?` list, Configuration and `!` state), the wheel and glide, pointer hover,
-and the loader. Next: the shell composes Reviewing's frame through screen hooks
-(header, said, footer, layers) and owns `?`, `c` and `!` for it, then routes
-its keys; then Home rows from `home`.
+Then (2026-11-23):
+
+- `4eb5afb` One frame function, `composeFrame` (`shellCompose.ts`), draws
+  every screen. Reviewing gives its header, status line, footer, `?` items and
+  dialog layers as frame hooks.
+- `cf915a8` The shell keeps the `?` list, `!` checks, Configuration window,
+  theme and background and lends them to Reviewing, whose state fields for
+  them read and write the shell's (`reviewingShellState.ts`, scaffolding);
+  the shell's layers draw them over Reviewing.
+- Owner decision (2026-11-23): unblock Planning before finishing the
+  inversion.
+- `57ec3f4` A screen that draws for itself can sit anywhere in the stack: it
+  pauses while another screen is over it and resumes on Esc, and opens
+  others through its surface.
+- Reviewing still draws Home, so its launcher also lists the rows other
+  screens add (`reviewingHomeRows.ts`): the shell reads their Home views and
+  hands the rows over; choosing one opens that screen over Reviewing. The
+  Reviewing factories take `screens` that join it (Planning plugs in here).
+  The factories and the screen definition live in `reviewingScreen.ts`; the
+  extension stays in `reviewingApplication.ts`.
+
+Still in `extend`: key routing (Reviewing's model routes its own keys with
+the shell's layers), drawing its own tree (pointer hover, wheel and glide,
+the composer), Home's launcher, and the loader. Next, when the inversion
+resumes: the shell routes Reviewing's keys through screen hooks, then draws
+its tree, then Home moves to the shell (startup auto-open, the context row
+and clicks included), and `extend` goes.
 
 Last: the behaviour tests move to renderer-free screen tests; the loader
 stays Reviewing's own until views can carry it.
