@@ -180,7 +180,6 @@ import {
   type LoadedIndex,
   type ProjectionSubscription,
   type ReviewSearchIndex,
-  type SearchContentSegment,
 } from './internalTypes.js';
 import {
   capturedLiveChangesIdentity,
@@ -3437,49 +3436,38 @@ export class WorkspaceProjection {
           .toLowerCase();
         const changes: IndexedReviewSearchChange[] = [];
         if (payload.diff.status === 'available') {
-          for (let rowOffset = 0; rowOffset < payload.diff.totalRows; rowOffset += REVIEW_DIFF_WINDOW_ROWS) {
-            const rows = await this.#diffRows(
-              entry,
-              file.fileIdentity,
-              payload.diff.totalRows,
-              rowOffset,
-              REVIEW_DIFF_WINDOW_ROWS,
-              stateVersion,
-            );
-            const changed = rows
-              .map((row, localRow) => ({ row, rowAbsolute: rowOffset + localRow }))
-              .filter(
-                (
-                  item,
-                ): item is {
-                  readonly row: ReviewDiffRowPayload & {
-                    readonly kind: 'addition' | 'deletion';
-                  };
-                  readonly rowAbsolute: number;
-                } => item.row.kind === 'addition' || item.row.kind === 'deletion',
-              );
-            const texts = await this.#searchRowTexts(
-              record.recordIdentity,
-              changed.map(item => item.row),
-              stateVersion,
-            );
-            changed.forEach((item, changeOffset) => {
-              const text = texts[changeOffset];
-              if (text === undefined) throw new ProjectionRecordsInvalid();
-              changes.push({
-                fileIdentity: file.fileIdentity,
-                fileAbsolute,
-                displayPath,
-                rowIdentity: item.row.rowIdentity,
-                rowAbsolute: item.rowAbsolute,
-                change: item.row.kind,
-                ...(item.row.oldLine === undefined ? {} : { oldLine: item.row.oldLine }),
-                ...(item.row.newLine === undefined ? {} : { newLine: item.row.newLine }),
-                text,
-                normalizedText: text.toLowerCase(),
-              });
+          const rows = await this.#diffRows(
+            entry,
+            file.fileIdentity,
+            payload.diff.totalRows,
+            0,
+            payload.diff.totalRows,
+            stateVersion,
+          );
+          const changed = rows.flatMap((row, rowAbsolute) =>
+            row.kind === 'addition' || row.kind === 'deletion' ? [{ row, change: row.kind, rowAbsolute }] : [],
+          );
+          const texts = await this.#searchRowTexts(
+            record.recordIdentity,
+            changed.map(item => item.row),
+            stateVersion,
+          );
+          changed.forEach((item, changeOffset) => {
+            const text = texts[changeOffset];
+            if (text === undefined) throw new ProjectionRecordsInvalid();
+            changes.push({
+              fileIdentity: file.fileIdentity,
+              fileAbsolute,
+              displayPath,
+              rowIdentity: item.row.rowIdentity,
+              rowAbsolute: item.rowAbsolute,
+              change: item.change,
+              ...(item.row.oldLine === undefined ? {} : { oldLine: item.row.oldLine }),
+              ...(item.row.newLine === undefined ? {} : { newLine: item.row.newLine }),
+              text,
+              normalizedText: text.toLowerCase(),
             });
-          }
+          });
         } else {
           unsearchableChangeFiles += 1;
         }
@@ -3499,33 +3487,34 @@ export class WorkspaceProjection {
     };
   }
 
+  /** Each row's text, cut from one read of its side: per-row reads re-checked the whole file each time. */
   async #searchRowTexts(
     recordIdentity: string,
     rows: readonly ReviewDiffRowPayload[],
     stateVersion: number,
   ): Promise<readonly string[]> {
-    const chunks = rows.map((): Uint8Array[] => []);
-    const segments: SearchContentSegment[] = [];
-    rows.forEach((row, rowIndex) => {
-      for (let localOffset = 0; localOffset < row.content.byteLength; localOffset += SEARCH_CONTENT_WINDOW_BYTES) {
-        segments.push({
-          rowIndex,
-          role: row.content.side,
-          digest: row.content.digest,
-          offset: row.content.byteOffset + localOffset,
-          length: Math.min(SEARCH_CONTENT_WINDOW_BYTES, row.content.byteLength - localOffset),
-        });
-      }
-    });
-    for (let segmentOffset = 0; segmentOffset < segments.length; segmentOffset += SEARCH_CONTENT_WINDOWS_PER_READ) {
-      const selected = segments.slice(segmentOffset, segmentOffset + SEARCH_CONTENT_WINDOWS_PER_READ);
+    const sides = new Map<string, { readonly digest: string; end: number }>();
+    for (const row of rows) {
+      if (row.content.byteLength === 0) continue;
+      const end = row.content.byteOffset + row.content.byteLength;
+      const side = sides.get(row.content.side);
+      if (side === undefined) sides.set(row.content.side, { digest: row.content.digest, end });
+      else if (side.digest !== row.content.digest) throw new ProjectionRecordsInvalid();
+      else side.end = Math.max(side.end, end);
+    }
+    const contents = new Map([...sides].map(([role, side]) => [role, Buffer.alloc(side.end)]));
+    const segments = [...sides].flatMap(([role, side]) =>
+      Array.from({ length: Math.ceil(side.end / SEARCH_CONTENT_WINDOW_BYTES) }, (_, index) => ({
+        role,
+        digest: side.digest,
+        offset: index * SEARCH_CONTENT_WINDOW_BYTES,
+        length: Math.min(SEARCH_CONTENT_WINDOW_BYTES, side.end - index * SEARCH_CONTENT_WINDOW_BYTES),
+      })),
+    );
+    for (let at = 0; at < segments.length; at += SEARCH_CONTENT_WINDOWS_PER_READ) {
+      const selected = segments.slice(at, at + SEARCH_CONTENT_WINDOWS_PER_READ);
       const content = await this.#state.readContent({
-        windows: selected.map(segment => ({
-          recordIdentity,
-          role: segment.role,
-          offset: segment.offset,
-          length: segment.length,
-        })),
+        windows: selected.map(({ role, offset, length }) => ({ recordIdentity, role, offset, length })),
       });
       if (content.stateVersion !== stateVersion) throw new ProjectionVersionChanged();
       if (content.quarantineReports.length > 0) throw new ProjectionRecordsInvalid();
@@ -3539,18 +3528,14 @@ export class WorkspaceProjection {
         ) {
           throw new ProjectionRecordsInvalid();
         }
-        chunks[segment.rowIndex]?.push(window.bytes);
+        contents.get(segment.role)?.set(window.bytes, segment.offset);
       });
     }
-    return rows.map((row, index) => {
+    return rows.map(row => {
       if (row.content.byteLength === 0) return '';
-      const selected = chunks[index];
-      if (selected === undefined) throw new ProjectionRecordsInvalid();
-      const bytes = Buffer.concat(selected.map(chunk => Buffer.from(chunk)));
-      if (bytes.byteLength !== row.content.byteLength) {
-        throw new ProjectionRecordsInvalid();
-      }
-      return bytes.toString('utf8');
+      const content = contents.get(row.content.side);
+      if (content === undefined) throw new ProjectionRecordsInvalid();
+      return content.subarray(row.content.byteOffset, row.content.byteOffset + row.content.byteLength).toString('utf8');
     });
   }
 

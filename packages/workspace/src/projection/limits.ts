@@ -41,9 +41,10 @@ export const LIVE_FALLBACK_VERIFICATION_MS = 2_000;
 /** The same check while nobody is looking; the file watcher still reports changes at once. */
 export const LIVE_BACKGROUND_FALLBACK_VERIFICATION_MS = 10_000;
 
-export const SEARCH_CONTENT_WINDOW_BYTES: number = 64 * 1024;
+/** The search index reads each side of a file in windows this big, as many per read as fit the State's 1 MiB bound. */
+export const SEARCH_CONTENT_WINDOW_BYTES: number = 256 * 1024;
 
-export const SEARCH_CONTENT_WINDOWS_PER_READ = 64;
+export const SEARCH_CONTENT_WINDOWS_PER_READ = 4;
 
 export const MAX_REVIEWS = 256;
 

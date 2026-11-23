@@ -38,14 +38,6 @@ export interface ReviewSearchIndex {
   readonly unsearchableChangeFiles: number;
 }
 
-export interface SearchContentSegment {
-  readonly rowIndex: number;
-  readonly role: 'old' | 'new';
-  readonly digest: string;
-  readonly offset: number;
-  readonly length: number;
-}
-
 export interface ProjectionSubscription {
   readonly scope: WorkspaceProjectionViewScope;
   readonly onUpdate: (update: WorkspaceProjectionViewUpdate) => void;
