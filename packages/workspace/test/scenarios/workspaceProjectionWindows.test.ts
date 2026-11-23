@@ -202,7 +202,7 @@ describe('bounded Reviewing Projection envelopes and exact windows', () => {
         kind: 'review.manifest',
         reviewIdentity: review.reviewIdentity,
         offset: 0,
-        limit: 65,
+        limit: 10_001,
       }),
     ).rejects.toThrow('Invalid bounded Review manifest window');
 

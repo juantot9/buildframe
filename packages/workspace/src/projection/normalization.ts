@@ -1,7 +1,6 @@
 import {
   REVIEW_CONTEXT_CONTRIBUTION_CONTENT_WINDOW_BYTES,
   REVIEW_DIFF_WINDOW_ROWS,
-  REVIEW_MANIFEST_WINDOW_FILES,
   REVIEW_SNAPSHOT_CONTEXT_CONTENT_WINDOW_BYTES,
   REVIEW_SNAPSHOT_CONTEXT_MANIFEST_WINDOW_ITEMS,
 } from '../reviewing/index.js';
@@ -54,6 +53,7 @@ import {
   REVIEW_ID_PATTERN,
   REVIEW_MESSAGE_ID_PATTERN,
   REVIEW_SNAPSHOT_ID_PATTERN,
+  MAX_FILE_LIST_READ_FILES,
 } from './limits.js';
 import {
   assertWindow,
@@ -79,7 +79,7 @@ function normalizeManifestRequest(request: Record<string, unknown>, value: unkno
   ) {
     throw new TypeError('Invalid Review Snapshot identity');
   }
-  assertWindow(request.offset as number, request.limit as number, REVIEW_MANIFEST_WINDOW_FILES, 'Review manifest');
+  assertWindow(request.offset as number, request.limit as number, MAX_FILE_LIST_READ_FILES, 'Review manifest');
   return value as ReviewManifestViewRequest;
 }
 function normalizeDiffRequest(request: Record<string, unknown>, value: unknown): WorkspaceProjectionViewRequest {
@@ -109,12 +109,7 @@ function normalizeLiveManifestRequest(
   value: unknown,
 ): WorkspaceProjectionViewRequest {
   assertReviewIdentity(request);
-  assertWindow(
-    request.offset as number,
-    request.limit as number,
-    REVIEW_MANIFEST_WINDOW_FILES,
-    'Live Changes manifest',
-  );
+  assertWindow(request.offset as number, request.limit as number, MAX_FILE_LIST_READ_FILES, 'Live Changes manifest');
   return value as ReviewLiveManifestViewRequest;
 }
 function normalizeLiveDiffRequest(request: Record<string, unknown>, value: unknown): WorkspaceProjectionViewRequest {
@@ -136,7 +131,7 @@ function normalizeLiveFilesRequest(request: Record<string, unknown>, value: unkn
   if (typeof request.liveChangesIdentity !== 'string' || !LIVE_CHANGES_ID_PATTERN.test(request.liveChangesIdentity)) {
     throw new TypeError('Invalid Live Changes identity');
   }
-  assertWindow(request.offset as number, request.limit as number, REVIEW_MANIFEST_WINDOW_FILES, 'Live file list');
+  assertWindow(request.offset as number, request.limit as number, MAX_FILE_LIST_READ_FILES, 'Live file list');
   return value as ReviewLiveFilesViewRequest;
 }
 function normalizeLiveFileContentRequest(
@@ -271,7 +266,7 @@ function normalizeStepChangesRequest(request: Record<string, unknown>, value: un
     assertWindow(request.offset as number, request.limit as number, REVIEW_DIFF_WINDOW_ROWS, 'Review step changes');
     return value as ReviewStepChangesDiffViewRequest;
   }
-  assertWindow(request.offset as number, request.limit as number, REVIEW_MANIFEST_WINDOW_FILES, 'Review step changes');
+  assertWindow(request.offset as number, request.limit as number, MAX_FILE_LIST_READ_FILES, 'Review step changes');
   return value as ReviewStepChangesViewRequest;
 }
 function normalizeQuestionsRequest(request: Record<string, unknown>, value: unknown): WorkspaceProjectionViewRequest {

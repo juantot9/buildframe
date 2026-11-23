@@ -82,7 +82,7 @@ import {
 import type { ReviewArrangement, ReviewingPreferences, ReviewingThemeDefinition } from './userConfiguration.js';
 
 export const HOME_WINDOW_SIZE = 64;
-export const MANIFEST_WINDOW_SIZE = 64;
+export const MANIFEST_WINDOW_SIZE = 10_000;
 export const DIFF_WINDOW_SIZE = 64;
 /** Rows of one file kept loaded around the view, like an editor buffer; farther windows fall away. */
 export const DIFF_KEEP_ROWS: number = DIFF_WINDOW_SIZE * 16;
@@ -91,13 +91,12 @@ export const VERSION_WINDOW_SIZE = 64;
 export const SEARCH_RESULT_WINDOW_SIZE = 64;
 /** The Workspace's whole per-Review bound, so every Message of a Review finds its Handoff. */
 export const HARNESS_INTERACTION_WINDOW_SIZE = 128;
-// The Reviewing loader's windows and bounds.
 export const QUESTION_BODY_WINDOW_BYTES: number = 16 * 1024;
 export const MESSAGE_BODY_WINDOW_BYTES: number = 16 * 1024;
 export const MESSAGE_BODY_LIMIT_BYTES: number = 256 * 1024;
 export const REVIEW_BASIS_WINDOW_SIZE = 64;
 export const REVIEW_MESSAGE_WINDOW_SIZE = 32;
-export const LIVE_FILE_WINDOW_SIZE = 64;
+export const LIVE_FILE_WINDOW_SIZE = 10_000;
 export const MAX_PROJECTION_ATTEMPTS = 5;
 const MESSAGE_MAX_BYTES = 256 * 1024;
 /** Keys that write a Message or move the Review's own files or saved points; a shown step waits for Esc first. */

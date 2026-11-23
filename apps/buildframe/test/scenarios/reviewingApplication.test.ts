@@ -3208,8 +3208,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(card()).not.toContain('waiting');
   }, 300_000);
 
-  it('opens and resends a Message in a file outside the loaded part of the Files list', async () => {
-    // More changed files than one window holds; the Message's file sorts last.
+  it('opens and resends a Message on the last file of a long Files list', async () => {
+    // More files than the old 64-file windows; the Message's file sorts last.
     const created = await fixture('zz-last.txt');
     await Promise.all(
       Array.from({ length: 70 }, (_, index) =>
@@ -3249,15 +3249,15 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await waitFor(() => adapter.directives.length === 1, 'Message directive');
     await waitForOutput(terminal, '#1 zz-last.txt:1');
 
-    // Back to the top of the list, so that file is no longer loaded.
+    // Back to the top of the list.
     await focus(/Files FOCUSED/u);
     terminal.send('g');
     await waitFor(() => frame().includes('Diff  since last commit · a000.txt'), 'first file shown');
 
-    // Selecting it in History doesn't load anything; Enter goes there and says so.
+    // The whole list is loaded, so selecting it in History shows its file at once.
     await focus(/(History|Messages) FOCUSED/u);
     terminal.send('k');
-    await waitFor(() => statusLine().includes('Press Enter to open #1 at zz-last.txt:1.'), 'Enter hint');
+    await waitFor(() => frame().includes('Diff  since last commit · zz-last.txt'), 'Message file');
     terminal.send('\r');
     await waitFor(() => frame().includes('Diff FOCUSED  since last commit · zz-last.txt'), 'Diff on the Message file');
     await waitFor(() => statusLine().includes('#1 · zz-last.txt:1'), 'landing notice');
@@ -5916,7 +5916,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     const manifestRequests = workspace.requests.filter(request => request.kind === 'review.manifest');
     const diffRequests = workspace.requests.filter(request => request.kind === 'review.diff');
     const questionRequests = workspace.requests.filter(request => request.kind === 'review.questions');
-    expect(manifestRequests.every(request => request.kind !== 'review.manifest' || request.limit <= 64)).toBe(true);
+    expect(manifestRequests.every(request => request.kind !== 'review.manifest' || request.limit <= 1e4)).toBe(true);
     expect(diffRequests.every(request => request.kind !== 'review.diff' || request.limit <= 64)).toBe(true);
     expect(questionRequests.every(request => request.kind !== 'review.questions' || request.limit <= 8)).toBe(true);
   }, 60_000);

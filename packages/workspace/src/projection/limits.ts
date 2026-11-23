@@ -65,3 +65,10 @@ export const REVIEW_BASIS_ID_PATTERN: RegExp = /^rbs_[0-9a-f]{64}$/u;
 export const REVIEW_MESSAGE_ID_PATTERN: RegExp = /^rmg_[0-9a-f]{64}$/u;
 
 export const LIVE_CHANGES_ID_PATTERN: RegExp = /^lch_[0-9a-f]{64}$/u;
+
+/**
+ * The most files one Review manifest, live manifest or live file list read
+ * returns. Stored manifests stay in 64-file records; a read spans as many as it
+ * needs, so a client can hold a repository's whole file list at once.
+ */
+export const MAX_FILE_LIST_READ_FILES = 10_000;
