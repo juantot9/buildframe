@@ -1,7 +1,7 @@
 import type { MouseEvent } from '@opentui/core';
 import type { HarnessConnectionView } from '@buildframe/workspace/harness-interaction';
 
-import { noticeGlyph, noticeStatusTone, type NoticeTone } from './reviewingStatus.js';
+import { noticeGlyph, noticeStatusTone, type NoticeTone } from './shellStatus.js';
 import type { RenderChild, RenderNode } from './renderTree.js';
 import { actionChecksPanel, agentIndicator, keyListPanel, shellHeader } from './shellChrome.js';
 import { shellFrame, type FrameLook, type FrameParts, type FrameStatus } from './shellFrame.js';

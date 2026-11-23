@@ -1,7 +1,7 @@
 import { StyledText, TextAttributes, type BorderCharacters, type MouseEvent } from '@opentui/core';
 
 import { Box, Text, type RenderChild } from './renderTree.js';
-import type { StatusTone } from './reviewingStatus.js';
+import type { StatusTone } from './shellStatus.js';
 import type { ReviewingPreferences, ReviewingThemeDefinition, ReviewingTokenPalette } from './userConfiguration.js';
 
 /**

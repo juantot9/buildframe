@@ -1,5 +1,5 @@
-import type { ReviewingInput } from './reviewingInput.js';
-import type { NoticeTone } from './reviewingStatus.js';
+import type { KeyInput } from './keyInput.js';
+import type { NoticeTone } from './shellStatus.js';
 import type { RenderChild } from './renderTree.js';
 import type { SizedLook } from './shellChrome.js';
 import { semanticError } from './shellCommands.js';
@@ -117,7 +117,7 @@ export class ShellSettings {
   }
 
   /** One key while the window is open: move, change and save, or close. */
-  key(input: ReviewingInput, screen: ScreenSettings | undefined): void {
+  key(input: KeyInput, screen: ScreenSettings | undefined): void {
     const window = this.window;
     if (window === undefined) return;
     const outcome = configurationKey(window, input, this.#content(screen).rows);

@@ -1,7 +1,7 @@
 import type { CliRenderer } from '@opentui/core';
 import type { WorkspaceCommand, WorkspaceView, WorkspaceViewScope } from '@buildframe/workspace';
 
-import { Key, matchesKey, type ReviewingInput, type ReviewingKeySpec } from './reviewingInput.js';
+import { Key, matchesKey, type KeyInput, type KeySpec } from './keyInput.js';
 import type { RenderChild } from './renderTree.js';
 import type { ShellClipboard } from './shellClipboard.js';
 import type { ShellLayers } from './shellCompose.js';
@@ -20,7 +20,7 @@ import {
   type KeyTable,
   type Text,
 } from './shellKeys.js';
-import type { NoticeTone } from './reviewingStatus.js';
+import type { NoticeTone } from './shellStatus.js';
 
 /**
  * A screen as data: what it shows, which keys it answers and what they do,
@@ -43,7 +43,7 @@ export interface ScreenKey<S, Mode extends string> {
   /** Stable name, unique in the screen. */
   readonly id: string;
   /** Printed characters (`'a'`) and named keys (`Key.enter`) that press it. */
-  readonly keys: readonly (string | ReviewingKeySpec)[];
+  readonly keys: readonly (string | KeySpec)[];
   /** How the key is printed: `a`, `Enter`, `j/k`. */
   readonly show: string;
   /** Footer words; a key without them is listed in `?` only. */
@@ -56,7 +56,7 @@ export interface ScreenKey<S, Mode extends string> {
   readonly waits?: (state: S) => boolean;
   /** The key cannot act now: it keeps its slot and this says why. */
   readonly blocked?: (state: S) => string | undefined;
-  run(state: S, input: ReviewingInput): ScreenResult;
+  run(state: S, input: KeyInput): ScreenResult;
 }
 
 export interface ScreenMode<S> {
@@ -180,16 +180,16 @@ export interface Screen<S, Mode extends string = string> extends ScreenDefinitio
 }
 
 /** Keys the shell answers on every screen. */
-const RESERVED: readonly ReviewingKeySpec[] = [Key.ctrl('c'), Key.escape];
+const RESERVED: readonly KeySpec[] = [Key.ctrl('c'), Key.escape];
 const RESERVED_TEXT = new Set(['q', '?', 'c', '!', ' ']);
 
-function keyName(key: string | ReviewingKeySpec): string {
+function keyName(key: string | KeySpec): string {
   if (typeof key === 'string') return key;
   const modifiers = (['ctrl', 'alt', 'shift', 'super'] as const).filter(modifier => key[modifier]);
   return [...modifiers, key.name].join('+');
 }
 
-function reserved(key: string | ReviewingKeySpec): boolean {
+function reserved(key: string | KeySpec): boolean {
   if (typeof key === 'string') return RESERVED_TEXT.has(key);
   return key.name === 'space' || RESERVED.some(spec => keyName(spec) === keyName(key));
 }
@@ -252,7 +252,7 @@ export function defineScreen<S, Mode extends string>(definition: ScreenDefinitio
   return { ...definition, table };
 }
 
-function presses(key: string | ReviewingKeySpec, input: ReviewingInput): boolean {
+function presses(key: string | KeySpec, input: KeyInput): boolean {
   return typeof key === 'string' ? input.text === key : matchesKey(input, key);
 }
 
@@ -260,7 +260,7 @@ function presses(key: string | ReviewingKeySpec, input: ReviewingInput): boolean
 export function dispatchScreenKey<S, Mode extends string>(
   screen: Screen<S, Mode>,
   state: S,
-  input: ReviewingInput,
+  input: KeyInput,
 ): readonly ScreenEffect[] {
   const mode = screen.mode(state);
   const key = screen.keys.find(candidate => actsIn(candidate, mode) && candidate.keys.some(k => presses(k, input)));

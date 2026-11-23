@@ -1,14 +1,8 @@
 import type { ReviewSearchItem, ReviewSearchView } from '@buildframe/workspace/projection';
 import type { ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
 
-import {
-  DIFF_WINDOW_SIZE,
-  LIVE_FILE_WINDOW_SIZE,
-  MANIFEST_WINDOW_SIZE,
-  type ReviewLoadTarget,
-  type ReviewSelectionHint,
-  type ReviewViewBundle,
-} from './reviewingModel.js';
+import { DIFF_WINDOW_SIZE, LIVE_FILE_WINDOW_SIZE, MANIFEST_WINDOW_SIZE } from './reviewingLimits.js';
+import type { ReviewLoadTarget, ReviewSelectionHint, ReviewViewBundle } from './reviewingModel.js';
 
 /** Where a chosen search result opens, and what it selects there. */
 export function searchResultTarget(

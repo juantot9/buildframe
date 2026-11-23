@@ -1,6 +1,6 @@
 import type { CliRenderer, KeyEvent, Selection } from '@opentui/core';
 
-import type { ReviewingInput } from './reviewingInput.js';
+import type { KeyInput } from './keyInput.js';
 
 export interface ShellSelectionHost {
   /** Whether a finished selection is copied now (not while a composer owns the text). */
@@ -39,7 +39,7 @@ export class ShellSelection {
   }
 
   /** Ctrl+C while text is selected copies it and clears the selection; returns whether it did. */
-  copyOnCtrlC(input: ReviewingInput, event: KeyEvent): boolean {
+  copyOnCtrlC(input: KeyInput, event: KeyEvent): boolean {
     if (input.name !== 'c' || !input.ctrl || (!this.#renderer.hasSelection && this.#text === undefined)) return false;
     const text = this.#renderer.getSelection()?.getSelectedText() || this.#text || '';
     if (text.length === 0) return false;

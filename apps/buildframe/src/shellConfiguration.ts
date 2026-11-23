@@ -1,5 +1,5 @@
 import { wrapDisplayCellRows } from './displayCells.js';
-import { Key, matchesKey, type ReviewingInput } from './reviewingInput.js';
+import { Key, matchesKey, type KeyInput } from './keyInput.js';
 import { Box, type RenderChild } from './renderTree.js';
 import { dialogTop, type SizedLook } from './shellChrome.js';
 import { borderedBox, controlPlaneTheme, label } from './shellLook.js';
@@ -39,7 +39,7 @@ export type ConfigurationKeyOutcome = 'closed' | 'changed' | 'moved' | 'ignored'
 /** Esc, Enter or `c` close; ↑/↓ (or k/j) move, wrapping; ←/→ (or h/l) change the selected row. */
 export function configurationKey(
   window: ConfigurationWindow,
-  input: ReviewingInput,
+  input: KeyInput,
   rows: readonly ConfigurationRow[],
 ): ConfigurationKeyOutcome {
   if (matchesKey(input, Key.escape) || matchesKey(input, Key.enter) || input.text === 'c') return 'closed';

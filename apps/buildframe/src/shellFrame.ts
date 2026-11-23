@@ -2,7 +2,7 @@ import type { MouseEvent } from '@opentui/core';
 
 import { displayCells, fitDisplayCellsEnd } from './displayCells.js';
 import { Box, type RenderChild, type RenderNode } from './renderTree.js';
-import type { StatusTone } from './reviewingStatus.js';
+import type { StatusTone } from './shellStatus.js';
 import { label, theme, toneColor, wrappedRows, type Look } from './shellLook.js';
 
 export interface FrameLook extends Look {

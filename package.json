@@ -27,7 +27,7 @@
     "lint": "oxlint",
     "format:check": "oxfmt --check .",
     "format": "oxfmt .",
-    "check:dependencies": "node scripts/check-dependencies.mjs",
+    "check:dependencies": "node scripts/check-dependencies.mjs && node scripts/check-import-rules.mjs",
     "verify": "pnpm lint && pnpm format:check && pnpm check:dependencies && pnpm test && pnpm typecheck && pnpm build && pnpm smoke:build",
     "release:assemble": "pnpm build && node scripts/assemble-release.mjs",
     "release:manifest": "pnpm --filter @buildframe/workspace --filter @buildframe/local-runtime --filter @buildframe/app-source -r build && node scripts/assemble-release.mjs --manifest-only"

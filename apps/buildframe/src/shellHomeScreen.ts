@@ -1,6 +1,6 @@
 import type { WorkspaceView, WorkspaceViewScope } from '@buildframe/workspace';
 
-import { Key, matchesKey } from './reviewingInput.js';
+import { Key, matchesKey } from './keyInput.js';
 import { Box } from './renderTree.js';
 import { homeLauncherCard } from './shellHome.js';
 import { theme } from './shellLook.js';

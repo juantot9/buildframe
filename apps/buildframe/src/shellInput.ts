@@ -1,4 +1,4 @@
-import { Key, matchesKey, type ReviewingInput } from './reviewingInput.js';
+import { Key, matchesKey, type KeyInput } from './keyInput.js';
 
 /**
  * What the shell needs from the screen to route one key. The shell owns the
@@ -9,9 +9,9 @@ import { Key, matchesKey, type ReviewingInput } from './reviewingInput.js';
 export interface ShellKeyHost<E> {
   readonly stop: E;
   /** A typing layer the screen has open (composer, inputs, lists) takes every key. */
-  capture(input: ReviewingInput): readonly E[] | undefined;
+  capture(input: KeyInput): readonly E[] | undefined;
   /** A screen layer that refuses or closes on some keys before the shell's own (a read-only Snapshot). */
-  guard(input: ReviewingInput): readonly E[] | undefined;
+  guard(input: KeyInput): readonly E[] | undefined;
   /** Whether a screen layer that refuses shell dialogs is open. */
   readonly guarded: boolean;
   /** The shell's own keys act only on a screen that is up (not while starting or failed). */
@@ -22,15 +22,15 @@ export interface ShellKeyHost<E> {
   readonly saving: boolean;
   sayStillLoading(key: string): void;
   readonly keyList: { readonly open: boolean; show(open: boolean): void };
-  readonly configuration: { readonly open: boolean; show(): void; input(input: ReviewingInput): readonly E[] };
+  readonly configuration: { readonly open: boolean; show(): void; input(input: KeyInput): readonly E[] };
   readonly details: { readonly open: boolean; show(open: boolean): void };
   /** Esc once nothing the shell owns is open: the screen closes its own layer or leaves. */
   escape(): readonly E[];
   /** Every key the shell does not claim. */
-  screenKey(input: ReviewingInput): readonly E[];
+  screenKey(input: KeyInput): readonly E[];
 }
 
-function isPlainSpace(input: ReviewingInput): boolean {
+function isPlainSpace(input: KeyInput): boolean {
   return input.name === 'space' && input.text === ' ' && !input.ctrl && !input.alt && !input.shift && !input.super;
 }
 
@@ -40,7 +40,7 @@ function isPlainSpace(input: ReviewingInput): boolean {
  * nothing loads or saves), the save lock, `?`, `c`, Esc (debug details first,
  * then the screen), `!`, and finally the screen.
  */
-export function routeShellKey<E>(input: ReviewingInput, host: ShellKeyHost<E>): readonly E[] {
+export function routeShellKey<E>(input: KeyInput, host: ShellKeyHost<E>): readonly E[] {
   const captured = host.capture(input);
   if (captured !== undefined) return captured;
   if (matchesKey(input, Key.ctrl('c'))) return [host.stop];

@@ -1,7 +1,5 @@
 import type { Workspace, WorkspaceCommand, WorkspaceCommandResult } from '@buildframe/workspace';
 
-import { runtimeErrorSentence } from './reviewingReasons.js';
-
 const RUNTIME_SESSION_ERROR_CODES = new Set([
   'runtime-disconnected',
   'workspace-call-rejected',
@@ -56,4 +54,18 @@ async function recoverCommandResult(
       ? await workspace.read({ kind: 'harness.command-result', commandIdentity: command.commandIdentity })
       : await workspace.read({ kind: 'review.command-result', commandIdentity: command.commandIdentity });
   return view.status === 'available' ? view.result : undefined;
+}
+
+/** Plain sentences for runtime connection failures (codes from the local runtime). */
+export function runtimeErrorSentence(code: string): string {
+  switch (code) {
+    case 'runtime-disconnected':
+      return 'Lost contact with BuildFrame’s background process. Restart BuildFrame.';
+    case 'workspace-call-rejected':
+      return 'BuildFrame couldn’t read part of what it saved for this repository. Run `buildframe doctor` here to see which part.';
+    case 'runtime-protocol-failure':
+      return 'BuildFrame’s background process sent something unexpected. Restart BuildFrame.';
+    default:
+      return `Something went wrong (${code}). Try again; if it keeps happening, restart BuildFrame.`;
+  }
 }

@@ -2,8 +2,8 @@ import type { CliRenderer, KeyEvent } from '@opentui/core';
 import type { Workspace, WorkspaceCommand } from '@buildframe/workspace';
 import type { HarnessConnectionView } from '@buildframe/workspace/harness-interaction';
 
-import { reviewingInputFromKeyEvent, type ReviewingInput } from './reviewingInput.js';
-import type { NoticeTone } from './reviewingStatus.js';
+import { keyInputFromKeyEvent, type KeyInput } from './keyInput.js';
+import type { NoticeTone } from './shellStatus.js';
 import { Box } from './renderTree.js';
 import {
   ShellClipboard,
@@ -311,7 +311,7 @@ class ShellApplication implements Shell {
   readonly #onResize = (): void => this.#render();
 
   readonly #onKeyPress = (event: KeyEvent): void => {
-    const input = reviewingInputFromKeyEvent(event);
+    const input = keyInputFromKeyEvent(event);
     // An extended screen listens for itself.
     if (input === undefined || this.#stopped || this.#current?.extension !== undefined) return;
     this.#run(routeShellKey(input, this.#keyHost()));
@@ -369,8 +369,7 @@ class ShellApplication implements Shell {
         }
         return [];
       },
-      screenKey: (input: ReviewingInput) =>
-        open === undefined ? [] : dispatchScreenKey(open.screen, open.state, input),
+      screenKey: (input: KeyInput) => (open === undefined ? [] : dispatchScreenKey(open.screen, open.state, input)),
     };
   }
 

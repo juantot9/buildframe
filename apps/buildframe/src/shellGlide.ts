@@ -1,7 +1,5 @@
 import { MacOSScrollAccel } from '@opentui/core';
 
-import type { ReviewingPaneScrollState } from './reviewingScroll.js';
-
 /** How long a pane takes to glide to its new offset. */
 const SCROLL_GLIDE_MS = 120;
 /** Rows one wheel notch moves before acceleration. */
@@ -52,7 +50,7 @@ export class PaneGlider<Region> {
    * The model owns where a pane should be; the View shows it gliding there.
    * A new list (another file, another window) appears in place without motion.
    */
-  glide(region: Region, scroll: ReviewingPaneScrollState): ReviewingPaneScrollState {
+  glide(region: Region, scroll: PaneScrollState): PaneScrollState {
     const now = performance.now();
     let previous = this.#glides.get(region);
     const scope = scroll.anchorScope === undefined ? {} : { anchorScope: scroll.anchorScope };
@@ -130,4 +128,29 @@ export class PaneGlider<Region> {
       this.#host.render();
     }, GLIDE_FRAME_MS);
   }
+}
+
+/** Durable visual position owned by the Reviewing model, never by a rebuilt renderable. */
+export interface PaneScrollState {
+  readonly contentKey: string;
+  readonly offset: number;
+  readonly viewportSize: number;
+  readonly contentSize: number;
+  readonly selectionKey: string | undefined;
+  readonly selectionStart: number;
+  readonly selectionSize: number;
+  readonly pageUp: number;
+  readonly pageDown: number;
+  /**
+   * False after the wheel moved the view on its own: the selection may then sit
+   * off screen until the next key press or click brings the view back to it.
+   */
+  readonly followSelection: boolean;
+  /** The document the anchor belongs to; another file or list never reuses it. */
+  readonly anchorScope?: string;
+  /** Key of the item that holds the view's top row, and how far into it the view starts. */
+  readonly anchorKey?: string;
+  readonly anchorDelta: number;
+  /** Rows the content moved under the view in this update (rows loaded above); a glide shifts with it. */
+  readonly contentShift: number;
 }

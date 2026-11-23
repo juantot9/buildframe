@@ -1,4 +1,4 @@
-import { NOTICE_LIFETIME_MS, SPINNER_FRAME_MS, type NoticeTone } from './reviewingStatus.js';
+import { NOTICE_LIFETIME_MS, SPINNER_FRAME_MS, type NoticeTone } from './shellStatus.js';
 
 /** What the pulse follows after each frame: a spinner that turns, and a notice that fades. */
 export interface PulseSource {

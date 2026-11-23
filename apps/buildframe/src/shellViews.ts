@@ -1,6 +1,6 @@
 import type { Workspace, WorkspaceView, WorkspaceViewScope } from '@buildframe/workspace';
 
-import type { NoticeTone } from './reviewingStatus.js';
+import type { NoticeTone } from './shellStatus.js';
 import { semanticError } from './shellCommands.js';
 import { isLiveScope, liveViewIdentity, ShellWatch } from './shellWatch.js';
 
