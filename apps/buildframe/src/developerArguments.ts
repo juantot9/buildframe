@@ -1,3 +1,5 @@
+import { connectInstruction, supportedHostNames } from './supportFacts.js';
+
 export interface DeveloperArguments {
   /** `doctor` checks this machine and repository instead of opening BuildFrame. */
   readonly command: 'review' | 'doctor';
@@ -19,12 +21,25 @@ export function developerUsage(): string {
     '',
     'bframe is a shorter name for the same command.',
     '',
-    'Opens the repository you are in, or the one given. Connect an agent by',
-    'running /buildframe in a Pi or Claude Code session in the same repository.',
+    ...wrapped(
+      `Opens the repository you are in, or the one given. Connect an agent by running ${connectInstruction()}, in the same repository.`,
+    ),
     '',
-    'doctor checks Node, this repository, BuildFrame’s background process, its',
-    'saved data, and the installed Pi and Claude Code. It changes nothing.',
+    ...wrapped(
+      `doctor checks Node, this repository, BuildFrame’s background process, its saved data, and the installed ${supportedHostNames()}. It changes nothing.`,
+    ),
   ].join('\n');
+}
+
+/** Words on lines of at most 78 characters. */
+function wrapped(text: string): string[] {
+  const lines: string[] = [];
+  for (const word of text.split(' ')) {
+    const last = lines.at(-1);
+    if (last !== undefined && last.length + 1 + word.length <= 78) lines[lines.length - 1] = `${last} ${word}`;
+    else lines.push(word);
+  }
+  return lines;
 }
 
 export function parseDeveloperArguments(arguments_: readonly string[], defaultStartPath: string): DeveloperArguments {

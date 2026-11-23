@@ -14,7 +14,14 @@ import {
   PINNED_TESTED_NODE_VERSION,
 } from './nodeSupport.js';
 import { startupFailureSentence } from './reviewingReasons.js';
-import { CLAUDE_CODE_SUPPORT, CODEX_SUPPORT, OPENCODE_SUPPORT, PI_SUPPORT, type HostSupport } from './supportFacts.js';
+import {
+  CLAUDE_CODE_SUPPORT,
+  CODEX_SUPPORT,
+  connectInstruction,
+  OPENCODE_SUPPORT,
+  PI_SUPPORT,
+  type HostSupport,
+} from './supportFacts.js';
 
 export type DoctorStatus = 'ok' | 'note' | 'warning' | 'error';
 
@@ -192,7 +199,7 @@ async function savedDataChecks(workspace: Workspace): Promise<DoctorCheck[]> {
           id: 'agent',
           status: 'note',
           summary: 'No agent is connected.',
-          next: 'Run /buildframe in a Pi or Claude Code session in this repository.',
+          next: `Run ${connectInstruction()} in this repository.`,
         }
       : {
           id: 'agent',

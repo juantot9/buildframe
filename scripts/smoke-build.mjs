@@ -85,7 +85,10 @@ const executable = new URL('../apps/buildframe/dist/developerExecutable.js', imp
 await fs.access(executable);
 const help = await execFileAsync(process.execPath, [executable.pathname, '--help']);
 assert.match(help.stdout, /Usage: buildframe \[--no-color\]/u);
-assert.match(help.stdout, /running \/buildframe in a Pi or Claude Code session/u);
+assert.match(
+  help.stdout,
+  /running\s+\/buildframe in a Pi, Claude Code or OpenCode session, or !buildframe in a\s+Codex session/u,
+);
 const versionRun = await execFileAsync(process.execPath, [executable.pathname, '--version']);
 assert.equal(
   versionRun.stdout,

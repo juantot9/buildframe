@@ -1,3 +1,5 @@
+import { connectCommandIn, connectInstruction } from './supportFacts.js';
+
 /**
  * Plain sentences for Workspace rejection codes. Every user-facing refusal
  * reads from here, so the status line and the Message card say the same thing
@@ -10,9 +12,9 @@ export function reasonSentence(reason: string, agent: string = 'The agent'): str
   switch (reason) {
     // The agent session
     case 'attachment-not-found':
-      return `No coding agent has connected to this repository yet. Start Claude Code or Pi with the BuildFrame plugin here, then send again.`;
+      return `No coding agent has connected to this repository yet. Run ${connectInstruction()} here, then send again.`;
     case 'attachment-not-live':
-      return `${agent} isn’t connected right now. Start it in this repository (or run /buildframe in Pi), then send again.`;
+      return `${agent} isn’t connected right now. Run ${connectCommandIn(agent)} in this repository, then send again.`;
     case 'attachment-selection-required':
       return `More than one agent session is connected. Close the extra one, then send again.`;
     case 'attachment-identity-conflict':
@@ -50,7 +52,7 @@ export function reasonSentence(reason: string, agent: string = 'The agent'): str
     case 'review-handoff-limit-reached':
       return 'This Review has reached its Message limit. Start a new Review to keep sending.';
     case 'harness-index-limit-reached':
-      return `Too many earlier Messages in this repository have an unknown outcome. Run /buildframe in ${lowerAgent} again to start fresh, then send.`;
+      return `Too many earlier Messages in this repository have an unknown outcome. Run ${connectCommandIn(agent)} again to start fresh, then send.`;
     case 'message-file-not-found':
     case 'anchor-file-not-found':
       return 'That file is no longer there. Pick another file or line.';
