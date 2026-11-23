@@ -55,7 +55,7 @@
     "@buildframe/workspace": "workspace:*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "1.5.0"
+    "@earendil-works/pi-coding-agent": "1.6.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.80.6 <2.0.0"
