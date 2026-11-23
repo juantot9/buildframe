@@ -5,7 +5,7 @@ status: open
 labels:
   - wayfinder:task
 parent: WF-304
-assignee: null
+assignee: juanan
 blocked_by: []
 created: 2026-11-22
 ---
@@ -46,6 +46,24 @@ Options, for the owner:
 - Read twice and compare digests where a torn read matters. Receipts are
   small, so the cost is one more bounded read; the saved bytes and
   diagnostics stay the same on every platform.
+
+## Decision and progress (2026-11-23)
+
+- The owner chose to read twice. After the metadata checks pass, the
+  capture reads the open receipt again and keeps it only when the bytes are
+  the same; otherwise it retries, and after the last attempt reports
+  `changed-during-read` as before. Saved bytes and diagnostics are unchanged
+  on every platform.
+- `legacyReviewSourceRead.ts` holds the bounded read and the second one
+  (`readBounded`, `stillHolds`); `legacyReviewSource.ts` (frozen) only calls
+  them (29,091 → 28,605 bytes). `legacyReviewSourceRead.test.ts` rewrites a
+  receipt in place at the same size, longer and shorter, and each is caught.
+- Not changed: the content window in `workspaceEvidence/repositoryContent.ts`.
+  It streams a whole file (up to its size limit) only to choose lines to
+  show, so a second pass doubles that read, and a missed same-size rewrite
+  there shows a window that is at most one refresh stale; nothing is saved
+  from it. Written down here as the known limit.
+- Still to see: the Windows CI job, in repeated runs.
 
 ## Work
 

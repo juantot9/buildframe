@@ -1,7 +1,7 @@
 ---
 id: WIN-005
 title: "Symlink targets as Git records them on Windows"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-304
@@ -37,3 +37,9 @@ moved to a POSIX-only file): expected `../outside-b`, captured `..\outside-b`.
 ## Verification
 
 - The symlink capture case passes on the Windows CI job.
+
+## Resolution (2026-11-23)
+
+- The owner confirmed the default above on 2026-11-23: a symlink target is
+  the bytes Git records, so on Windows `\` reads as `/`.
+- CI run 45072386168 (on `efdf166`): all six jobs pass, the symlink capture case among them on Windows.

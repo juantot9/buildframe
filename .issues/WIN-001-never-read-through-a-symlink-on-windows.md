@@ -64,3 +64,10 @@ reads the link's target and reports it `available`.
   job, where symlinks are available.
 - A Windows test with Developer Mode, or an elevated shell, on the
   reference machine.
+
+## Progress (2026-11-23)
+
+- CI run 45072386168 (on `efdf166`): all six jobs pass; on the Windows jobs, where symlinks work, the symlink refusal cases
+  ran and passed.
+- Left: the second check above, on the reference machine (Developer Mode or
+  an elevated shell).

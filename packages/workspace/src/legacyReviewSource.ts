@@ -2,6 +2,7 @@ import { constants, type BigIntStats } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { readBounded, stillHolds } from './legacyReviewSourceRead.js';
 import { deepFreeze, isRecord } from './recordCodec.js';
 import { sha256 } from './sha256.js';
 
@@ -312,21 +313,6 @@ async function locateSource(
     return unavailable(request, sourcePath, 'source-too-large');
   }
   return { sourcePath, directories, file };
-}
-
-async function readBounded(handle: fs.FileHandle): Promise<Buffer | undefined> {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-  while (totalBytes <= MAX_LEGACY_REVIEW_SOURCE_BYTES) {
-    const remaining = MAX_LEGACY_REVIEW_SOURCE_BYTES + 1 - totalBytes;
-    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, remaining));
-    const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null);
-    if (bytesRead === 0) break;
-    chunks.push(chunk.subarray(0, bytesRead));
-    totalBytes += bytesRead;
-  }
-  if (totalBytes > MAX_LEGACY_REVIEW_SOURCE_BYTES) return undefined;
-  return Buffer.concat(chunks, totalBytes);
 }
 
 function sourceMetadata(information: BigIntStats): LegacyReviewSourceMetadata {
@@ -779,7 +765,7 @@ export async function captureLegacyReviewSource(
           attempt,
           sourcePath: located.sourcePath,
         });
-        const bytes = await readBounded(handle);
+        const bytes = await readBounded(handle, MAX_LEGACY_REVIEW_SOURCE_BYTES);
         if (bytes === undefined) {
           outcome = unavailable(request, located.sourcePath, 'source-too-large');
         } else {
@@ -795,7 +781,8 @@ export async function captureLegacyReviewSource(
             !sameStat(opened, completed) ||
             !sameStat(completed, finalLocation.file) ||
             !sameDirectories(located.directories, finalLocation.directories) ||
-            completed.size !== BigInt(bytes.byteLength)
+            completed.size !== BigInt(bytes.byteLength) ||
+            !(await stillHolds(handle, bytes))
           ) {
             outcome = 'retry';
           } else {

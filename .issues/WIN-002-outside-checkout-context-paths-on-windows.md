@@ -1,7 +1,7 @@
 ---
 id: WIN-002
 title: "Outside-checkout Context paths on Windows"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-304
@@ -51,3 +51,9 @@ never ran it.
 ## Verification
 
 - The test above passes on the Windows CI job.
+
+## Resolution (2026-11-23)
+
+- The owner confirmed the default above on 2026-11-23: Windows normalizes a
+  selection once and joins and contains with `\`; case is not folded.
+- CI run 45072386168 (on `efdf166`): all six jobs pass, the outside-checkout scenario among them on Windows.

@@ -1,7 +1,7 @@
 ---
 id: WIN-003
 title: "Concurrent Workspace opens can fail on Windows"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: WF-304
@@ -63,3 +63,9 @@ same Workspace at the same moment.
 
 - A stress test of concurrent opens on Windows never reports
   `lock-registry`.
+
+## Resolution (2026-11-23)
+
+- The stress test above (4,400 concurrent opens on the reference machine)
+  never reported `lock-registry` after the change.
+- CI run 45072386168 (on `efdf166`): all six jobs pass.
