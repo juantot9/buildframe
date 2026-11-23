@@ -11,7 +11,7 @@ import type {
 import type { ReviewIdentity, ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
 
 import { ShellClipboard, terminalFallbackClipboard, type ShellClipboardFactory } from './shellClipboard.js';
-import { createShell } from './shell.js';
+import { createShell, type Shell } from './shell.js';
 import { defineScreen, type Screen, type ScreenExtension, type ScreenSurface } from './shellScreen.js';
 import { executeCommand, semanticError } from './shellCommands.js';
 import { isLiveScope, liveViewIdentity, ShellWatch } from './shellWatch.js';
@@ -41,6 +41,7 @@ import {
 } from './reviewingModel.js';
 import { firstListedFile, manifestFileItems } from './reviewingFileList.js';
 import { ReviewingView } from './reviewingView.js';
+import { lendShellState } from './reviewingShellState.js';
 import type { ActiveHomeRoute, ActiveReviewRoute, ActiveRoute, ReviewingSubscriptionScope } from './reviewingRoutes.js';
 import { ShellPulse, type PulseSource } from './shellPulse.js';
 import { ReviewingHighlight } from './reviewingHighlight.js';
@@ -54,14 +55,8 @@ export interface ReviewingApplicationOptions {
   readonly userConfiguration?: UserConfiguration;
 }
 
-export interface ReviewingApplication {
-  /** Resolves when terminal ownership and the connected Workspace use have ended. */
-  readonly closed: Promise<void>;
-  /** Starts OpenTUI and resolves after the Current Review or minimal launcher is visible. */
-  start(): Promise<void>;
-  /** Stops subscriptions and terminal ownership without changing workflow meaning. */
-  stop(): Promise<void>;
-}
+/** Reviewing runs as the shell with one screen. */
+export type ReviewingApplication = Shell;
 
 class ProjectionVersionsDidNotConverge extends Error {}
 class LiveChangesTemporarilyUnverified extends Error {}
@@ -124,6 +119,7 @@ class ReviewingExtension implements ScreenExtension {
   async start(): Promise<void> {
     if (this.#started) return;
     this.#started = true;
+    lendShellState(this.#model.state, this.#surface.shared);
     const { loaded, warning: configurationWarning } = this.#surface.preferences;
     if (loaded !== undefined) this.#model.applyReviewingPreferences(loaded.preferences, loaded.themes);
     this.#renderer = this.#surface.renderer;
@@ -152,6 +148,7 @@ class ReviewingExtension implements ScreenExtension {
       },
       this.#highlight,
       () => this.#scheduleDiffPrefetch(),
+      () => this.#surface.layers(),
     );
     this.#view.start();
     this.#subscribeToConnection();
@@ -233,7 +230,8 @@ class ReviewingExtension implements ScreenExtension {
 
   /** The terminal reported a new light or dark. */
   themeMode(mode: 'dark' | 'light'): void {
-    if (this.#model.setTerminalThemeMode(mode) && this.#view !== undefined) this.#render();
+    this.#model.setTerminalThemeMode(mode);
+    if (this.#view !== undefined) this.#render();
   }
 
   #render(): void {
@@ -305,7 +303,6 @@ class ReviewingExtension implements ScreenExtension {
       });
   }
 
-  /** Keeps spinners moving while something works; stops as soon as nothing does. */
   #runEffects(effects: readonly ReviewingModelEffect[]): void {
     for (const effect of effects) {
       if (effect.type === 'stop') {

@@ -30,10 +30,7 @@ const DESCRIPTIONS = {
   },
 } as const;
 
-const ALL_DESCRIPTIONS: readonly string[] = [
-  ...DISPLAY_DESCRIPTIONS,
-  ...Object.values(DESCRIPTIONS).flatMap(variants => Object.values(variants)),
-];
+const OWN_DESCRIPTIONS: readonly string[] = Object.values(DESCRIPTIONS).flatMap(variants => Object.values(variants));
 
 const ARRANGEMENTS: readonly ReviewArrangement[] = ['workspace', 'code-spotlight', 'review-notebook'];
 
@@ -42,10 +39,21 @@ export function reviewingSettings(
   state: ReviewingApplicationState,
   setCodeOnly: (codeOnly: boolean) => void,
 ): ConfigurationContent {
+  const own = reviewingOwnSettings(state, setCodeOnly);
+  return {
+    title: own.title,
+    rows: [themeRow(state), backgroundRow(state), ...own.rows],
+    descriptions: [...DISPLAY_DESCRIPTIONS, ...own.descriptions],
+  };
+}
+
+/** Reviewing's rows after the shell's theme and background. */
+export function reviewingOwnSettings(
+  state: ReviewingApplicationState,
+  setCodeOnly: (codeOnly: boolean) => void,
+): ConfigurationContent {
   const arrangement = state.arrangement;
   const rows: ConfigurationRow[] = [
-    themeRow(state),
-    backgroundRow(state),
     {
       id: 'arrangement',
       name: 'Arrangement',
@@ -101,5 +109,5 @@ export function reviewingSettings(
       },
     },
   ];
-  return { title: 'Review display', rows, descriptions: ALL_DESCRIPTIONS };
+  return { title: 'Review display', rows, descriptions: OWN_DESCRIPTIONS };
 }

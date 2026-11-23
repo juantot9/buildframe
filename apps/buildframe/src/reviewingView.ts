@@ -97,20 +97,12 @@ import { ShellComposer } from './shellComposer.js';
 import { ShellRenderLoop } from './shellRenderLoop.js';
 import { ShellPointer } from './shellPointer.js';
 import { ShellSelection } from './shellSelection.js';
-import {
-  actionChecksPanel,
-  agentIndicator,
-  dialogHeight,
-  dialogTop,
-  keyListPanel,
-  shellHeader,
-} from './shellChrome.js';
-import { configurationDialog } from './shellConfiguration.js';
+import { agentIndicator, dialogHeight, dialogTop, shellHeader } from './shellChrome.js';
 import { composeFrame, type FrameScreen, type ShellLayers } from './shellCompose.js';
 import { messageOutcomeLabel, questionStateLabel, responseSize, stateBadge } from './reviewingMessageWords.js';
 import { homeLauncherCard, homePane, homeRow, homeSentence, type HomeCard, type HomeChoice } from './shellHome.js';
 import { fitPaneDetail, shortDisplayPath, treeName } from './reviewingPathText.js';
-import { reviewingSettings } from './reviewingSettings.js';
+import { reviewingOwnSettings } from './reviewingSettings.js';
 
 export { INDIGO_NIGHT, MATCH_TERMINAL_THEME, QUIET_GRAPHITE, QUIET_PAPER, WARM_CARBON } from './shellLook.js';
 
@@ -4558,29 +4550,13 @@ function continuationChoiceOverlay(state: ReviewingApplicationState): RenderChil
   ];
 }
 
-function detailsOverlay(state: ReviewingApplicationState): RenderChild[] {
-  if (!state.showDetails) return [];
+/** The `!` lines: what Home's or the Review's actions can do at the State version shown. */
+function reviewingChecks(state: ReviewingApplicationState): readonly string[] {
   const actions = state.screen === 'home' ? (state.home?.actions ?? []) : (state.review?.manifest.actions ?? []);
-  return actionChecksPanel(
-    state,
-    actions.slice(0, 4).map(action => {
-      const status = action.availability === 'direct' ? 'ready' : 'blocked';
-      return `${actionName(action.kind)}: ${status} at v${action.gateBasis.expectedStateVersion}`;
-    }),
-  );
-}
-
-function configurationOverlay(
-  state: ReviewingApplicationState,
-  bodyHeight: number,
-  /** Header rows above the body: the box is centred as if they were body, so hiding the header never moves it. */
-  headerRows = 0,
-): RenderChild[] {
-  const window = state.configurationWindow;
-  if (window === undefined) return [];
-  // The rows only describe the state here; nothing changes them while drawing.
-  const content = reviewingSettings(state, () => undefined);
-  return configurationDialog(state, window, content, bodyHeight, headerRows, 'reviewing');
+  return actions.slice(0, 4).map(action => {
+    const status = action.availability === 'direct' ? 'ready' : 'blocked';
+    return `${actionName(action.kind)}: ${status} at v${action.gateBasis.expectedStateVersion}`;
+  });
 }
 
 function historicalBaseState(state: ReviewingApplicationState): ReviewingApplicationState {
@@ -4876,12 +4852,9 @@ const REVIEWING_FRAME: FrameScreen<ReviewingFrame> = {
           ? pendingReviewBody(presented)
           : reviewBody(presented, textarea, body, onDiscussionPage, onContentPage, height),
   ],
-  layers: ({ state, presented, interaction, onDiscussionPage }, _look, height, headerHeight) => [
-    ...detailsOverlay(presented),
-    ...(presented.actionLookupOpen
-      ? keyListPanel(presented, keyList(REVIEWING_KEYS, reviewingHelpMode(presented), presented), height, 'reviewing')
-      : []),
-    ...configurationOverlay(presented, height, headerHeight),
+  checks: ({ presented }) => reviewingChecks(presented),
+  settings: ({ state }) => reviewingOwnSettings(state, () => undefined),
+  layers: ({ state, presented, interaction, onDiscussionPage }, _look, height) => [
     ...continuationChoiceOverlay(presented),
     ...(state.search !== undefined ? [searchBody(state, height)] : []),
     ...basisPickerOverlay(state, interaction, height),
@@ -4892,21 +4865,13 @@ const REVIEWING_FRAME: FrameScreen<ReviewingFrame> = {
   ],
 };
 
-/** The shell's own layers stay closed while Reviewing still draws its own `?`, `c` and `!`. */
-const NO_SHELL_LAYERS: ShellLayers = {
-  said: undefined,
-  checksOpen: false,
-  keyListOpen: false,
-  settings: undefined,
-  connection: undefined,
-};
-
 function screen(
   state: ReviewingApplicationState,
   textarea: TextareaRenderable | undefined,
   interaction: ReviewPointerInteraction,
   onDiscussionPage: (page: DiscussionPage) => void,
   onContentPage: (pageSize: number) => void,
+  shell: ShellLayers,
 ): RenderNode {
   const presented = historicalBaseState(state);
   const body: ReviewPointerInteraction =
@@ -4923,7 +4888,7 @@ function screen(
     presented,
     REVIEWING_FRAME,
     { state, presented, textarea, interaction, body, onDiscussionPage, onContentPage },
-    NO_SHELL_LAYERS,
+    shell,
   );
 }
 
@@ -5180,6 +5145,14 @@ export class ReviewingView {
     readonly highlight: ReviewingHighlight,
     /** Runs after every drawn tree, whoever asked for it (input, wheel, glide). */
     readonly onRendered: () => void = () => {},
+    /** What the shell has open over Reviewing: `?`, `!` and Configuration. */
+    readonly shellLayers: () => ShellLayers = () => ({
+      said: undefined,
+      checksOpen: false,
+      keyListOpen: false,
+      settings: undefined,
+      connection: undefined,
+    }),
   ) {
     this.#model = model;
     this.#onEffects = onEffects;
@@ -5259,6 +5232,7 @@ export class ReviewingView {
         size => {
           this.#contentPageSize = size;
         },
+        this.shellLayers(),
       ),
     );
     textarea?.focus();

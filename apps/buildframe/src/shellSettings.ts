@@ -21,6 +21,8 @@ import {
 
 /** Rows a screen adds to Configuration, with every description they can show. */
 export interface ScreenSettings {
+  /** The window's heading when this screen is open; `Display` otherwise. */
+  readonly title?: string;
   readonly rows: readonly ConfigurationRow[];
   readonly descriptions: readonly string[];
 }
@@ -51,7 +53,8 @@ export class ShellSettings {
   #loaded:
     | { readonly preferences: ReviewingPreferences; readonly themes: readonly ReviewingThemeDefinition[] }
     | undefined;
-  #window: ConfigurationWindow | undefined;
+  /** The Configuration window while it is open. */
+  window: ConfigurationWindow | undefined;
 
   constructor(configuration: UserConfiguration, say: (text: string, tone: NoticeTone) => void) {
     this.#configuration = configuration;
@@ -106,20 +109,20 @@ export class ShellSettings {
   }
 
   get open(): boolean {
-    return this.#window !== undefined;
+    return this.window !== undefined;
   }
 
   show(): void {
-    this.#window = { selected: 'theme' };
+    this.window = { selected: 'theme' };
   }
 
   /** One key while the window is open: move, change and save, or close. */
   key(input: ReviewingInput, screen: ScreenSettings | undefined): void {
-    const window = this.#window;
+    const window = this.window;
     if (window === undefined) return;
     const outcome = configurationKey(window, input, this.#content(screen).rows);
     if (outcome === 'closed') {
-      this.#window = undefined;
+      this.window = undefined;
       this.#say('Settings saved.', 'success');
     } else if (outcome === 'changed') {
       const { reviewingTheme: theme, background } = this.display;
@@ -135,12 +138,12 @@ export class ShellSettings {
     headerRows: number,
     idPrefix: string,
   ): RenderChild[] {
-    const window = this.#window;
+    const window = this.window;
     if (window === undefined) return [];
     return configurationDialog(
       look,
       window,
-      { title: 'Display', ...this.#content(screen) },
+      { title: screen?.title ?? 'Display', ...this.#content(screen) },
       bodyHeight,
       headerRows,
       idPrefix,

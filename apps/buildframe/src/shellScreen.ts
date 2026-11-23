@@ -4,6 +4,8 @@ import type { WorkspaceCommand, WorkspaceView, WorkspaceViewScope } from '@build
 import { Key, matchesKey, type ReviewingInput, type ReviewingKeySpec } from './reviewingInput.js';
 import type { RenderChild } from './renderTree.js';
 import type { ShellClipboard } from './shellClipboard.js';
+import type { ShellLayers } from './shellCompose.js';
+import type { ShellSettings } from './shellSettings.js';
 import type { ReviewingPreferences, ReviewingThemeDefinition } from './userConfiguration.js';
 import type { CommandOutcome } from './shellCommands.js';
 import type { ConfigurationRow } from './shellConfiguration.js';
@@ -117,8 +119,23 @@ export interface ScreenSurface {
   };
   /** Saves every preference; the shell owns the file and says when a save fails. */
   savePreferences(preferences: ReviewingPreferences): void;
+  /** What the shell keeps that an extended screen still reads and writes directly (WF-301). */
+  readonly shared: ShellSharedState;
+  /** What the shell has open over the screen now, for the screen to draw with its frame. */
+  layers(): ShellLayers;
   /** Leaves the app. */
   quit(): void;
+}
+
+/** The `?` list and the `!` checks, open or not. */
+export interface ShellOverlays {
+  keyListOpen: boolean;
+  checksOpen: boolean;
+}
+
+export interface ShellSharedState {
+  readonly overlays: ShellOverlays;
+  readonly settings: ShellSettings;
 }
 
 /** An extended screen's own lifetime on the lent terminal. */

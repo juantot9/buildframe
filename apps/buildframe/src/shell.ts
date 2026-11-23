@@ -20,7 +20,13 @@ import { ShellPulse } from './shellPulse.js';
 import { ShellRoots } from './shellRoots.js';
 import { ShellSettings } from './shellSettings.js';
 import { HOME_SCREEN, homeScreen } from './shellHomeScreen.js';
-import { dispatchScreenKey, type Screen, type ScreenEffect, type ScreenExtension } from './shellScreen.js';
+import {
+  dispatchScreenKey,
+  type Screen,
+  type ScreenEffect,
+  type ScreenExtension,
+  type ShellOverlays,
+} from './shellScreen.js';
 import { ShellTerminal } from './shellTerminal.js';
 import { ShellViews } from './shellViews.js';
 import { createEphemeralUserConfiguration, type UserConfiguration } from './userConfiguration.js';
@@ -82,7 +88,8 @@ class ShellApplication implements Shell {
   readonly #presentation: Look['presentation'];
   readonly #settings: ShellSettings;
   #loadWarning: string | undefined;
-  #checksOpen = false;
+  /** The `?` list and `!` checks; an extended screen shares them (WF-301). */
+  readonly #overlays: ShellOverlays = { keyListOpen: false, checksOpen: false };
   #openingTerminal: Promise<ShellTerminal> | undefined;
   #terminal: ShellTerminal | undefined;
   #roots: ShellRoots | undefined;
@@ -91,7 +98,6 @@ class ShellApplication implements Shell {
   #unsubscribeFromConnection: (() => void) | undefined;
   #said: { readonly text: string; readonly tone: NoticeTone } | undefined;
   readonly #pulse = new ShellPulse(() => this.#render());
-  #keyListOpen = false;
   #saving = 0;
   #starting: Promise<void> | undefined;
   #stopping: Promise<void> | undefined;
@@ -238,6 +244,15 @@ class ShellApplication implements Shell {
           ...(this.#loadWarning === undefined ? {} : { warning: this.#loadWarning }),
         },
         savePreferences: preferences => this.#settings.save(preferences),
+        shared: { overlays: this.#overlays, settings: this.#settings },
+        // The screen draws its own header and status line, so the shell lends only its layers.
+        layers: () => ({
+          said: undefined,
+          checksOpen: this.#overlays.checksOpen,
+          keyListOpen: this.#overlays.keyListOpen,
+          settings: this.#settings,
+          connection: undefined,
+        }),
         quit: () => void this.stop(),
       });
       this.#stack.push(open);
@@ -250,7 +265,7 @@ class ShellApplication implements Shell {
 
   /** Shows the top screen afresh: its own subscriptions, its views read. */
   async #show(): Promise<void> {
-    this.#keyListOpen = false;
+    this.#overlays.keyListOpen = false;
     const open = this.#current;
     await this.#views.show(
       open?.screen.views === undefined
@@ -289,12 +304,12 @@ class ShellApplication implements Shell {
             : `Still loading; press ${key} again in a moment.`,
           'info',
         ),
-      keyList: { open: this.#keyListOpen, show: open => (this.#keyListOpen = open) },
+      keyList: { open: this.#overlays.keyListOpen, show: open => (this.#overlays.keyListOpen = open) },
       configuration: {
         open: this.#settings.open,
         show: () => {
           this.#settings.show();
-          this.#checksOpen = false;
+          this.#overlays.checksOpen = false;
         },
         input: input => {
           this.#settings.key(input, open?.screen.settings?.(open.state));
@@ -302,9 +317,9 @@ class ShellApplication implements Shell {
         },
       },
       details: {
-        open: this.#checksOpen,
+        open: this.#overlays.checksOpen,
         show: open => {
-          this.#checksOpen = open;
+          this.#overlays.checksOpen = open;
         },
       },
       escape: () => {
@@ -397,8 +412,8 @@ class ShellApplication implements Shell {
     const said = this.#said;
     const frame = composeFrame(look, screen, state, {
       said,
-      checksOpen: this.#checksOpen,
-      keyListOpen: this.#keyListOpen,
+      checksOpen: this.#overlays.checksOpen,
+      keyListOpen: this.#overlays.keyListOpen,
       settings: this.#settings,
       connection: this.#connection,
     });
