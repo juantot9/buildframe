@@ -99,6 +99,7 @@ import { composeFrame, type FrameScreen, type ShellLayers } from './shellCompose
 import { messageOutcomeLabel, questionStateLabel, responseSize, stateBadge } from './reviewingMessageWords.js';
 import { homeLauncherCard, homePane, homeRow, homeSentence, type HomeCard } from './shellHome.js';
 import { shortDisplayPath, treeName } from './reviewingPathText.js';
+import { wrappedCode } from './reviewingWrappedCode.js';
 import { balancedSibling, paneTitle, shownFocus } from './reviewingPaneTitle.js';
 import { reviewingOwnSettings } from './reviewingSettings.js';
 import { commitName, headMoveNote, shortHash } from './reviewingHeadMoves.js';
@@ -1954,35 +1955,6 @@ function clippedCode(
     }),
     { __isChunk: true, text: right },
   ]);
-}
-
-/**
- * Breaks code into explicit rows at token boundaries (see `codeRowStarts`), so
- * the rendered rows and `wrappedDiffRowHeight` come from one calculation.
- */
-function wrappedCode(source: string | StyledText, width: number): string | StyledText {
-  const plain = typeof source === 'string' ? source : source.chunks.map(chunk => chunk.text).join('');
-  const starts = codeRowStarts(plain, width);
-  if (starts.length === 0) return source;
-  if (typeof source === 'string') {
-    return [0, ...starts].map((start, index) => plain.slice(start, starts[index] ?? plain.length)).join('\n');
-  }
-  let offset = 0;
-  return new StyledText(
-    source.chunks.map(chunk => {
-      const chunkStart = offset;
-      offset += chunk.text.length;
-      const inside = starts.filter(start => start >= chunkStart && start < offset);
-      if (inside.length === 0) return chunk;
-      let text = '';
-      let from = chunkStart;
-      for (const start of inside) {
-        text += `${chunk.text.slice(from - chunkStart, start - chunkStart)}\n`;
-        from = start;
-      }
-      return { ...chunk, text: text + chunk.text.slice(from - chunkStart) };
-    }),
-  );
 }
 
 /** Where the selection starts, in rows, and how many rows it spans: one running total. */

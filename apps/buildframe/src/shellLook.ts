@@ -81,7 +81,7 @@ export const WARM_CARBON: SemanticTheme = Object.freeze({
   warning: '#e6d36a',
   code: '#ddd8cc',
   tokens: Object.freeze({
-    keyword: '#dfad83',
+    keyword: '#c39fd1',
     string: '#b6c58a',
     number: '#d7ba78',
     comment: '#888276',
@@ -90,7 +90,7 @@ export const WARM_CARBON: SemanticTheme = Object.freeze({
     constant: '#d7ba78',
     property: '#d2c6ab',
     tag: '#9fbfcf',
-    markup: '#dfad83',
+    markup: '#c39fd1',
   }),
 });
 
@@ -110,7 +110,7 @@ export const INDIGO_NIGHT: SemanticTheme = Object.freeze({
   warning: '#d7b76d',
   code: '#cfd9ee',
   tokens: Object.freeze({
-    keyword: '#b4a1e8',
+    keyword: '#d79fdb',
     string: '#8cc8af',
     number: '#e3a17c',
     comment: '#8290ad',
@@ -119,7 +119,7 @@ export const INDIGO_NIGHT: SemanticTheme = Object.freeze({
     constant: '#e3a17c',
     property: '#b9c8e5',
     tag: '#91bdec',
-    markup: '#b4a1e8',
+    markup: '#d79fdb',
   }),
 });
 
