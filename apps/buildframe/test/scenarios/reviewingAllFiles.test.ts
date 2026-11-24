@@ -13,8 +13,9 @@ import { createReviewingApplicationForTest } from '../../src/reviewingScreen.js'
 
 /**
  * Every file (f) exists only for live changes. There, / also finds files the
- * changes leave unchanged and opens them; on a fixed Review, f says why it
- * can't list every file, and the Files pane never claims "All".
+ * changes leave unchanged and opens them, drawn with the Diff's wrapping and
+ * layout; on a fixed Review, f says why it can't list every file, and the
+ * Files pane never claims "All".
  */
 
 const run = promisify(execFile);
@@ -51,6 +52,7 @@ describe('every file, and searching it', () => {
     for (const file of ['src/a.ts', 'src/b.ts', 'src/config.ts', 'README.md']) {
       await writeFile(path.join(checkout, file), 'const value = 1;\n');
     }
+    await writeFile(path.join(checkout, 'src/config.ts'), `const value = 1;\n// long ${'x '.repeat(120)}\n`);
     await git(checkout, 'add', '.');
     await git(checkout, 'commit', '-qm', 'basis');
     await writeFile(path.join(checkout, 'src/a.ts'), 'const value = 2;\n');
@@ -98,6 +100,18 @@ describe('every file, and searching it', () => {
     terminal.mockInput.pressEnter();
     await shows('src/config.ts is unchanged versus this basis.');
     expect(frame()).toMatch(/›\s+·\s+config\.ts/u);
+
+    // An unchanged file follows w and v like a Diff: long lines wrap until w
+    // cuts them, and side by side each line reads the same on both sides.
+    expect(frame()).not.toMatch(/x›/u);
+    terminal.mockInput.pressKey('w');
+    await waitFor(() => /x›/u.test(frame()), 'the long line cut at the edge');
+    expect(frame()).toContain('unchanged since last commit');
+    terminal.mockInput.pressKey('v');
+    await waitFor(() => (frame().match(/const value = 1;/gu) ?? []).length === 2, 'the line on both sides');
+    expect(frame()).toContain('Side-by-side');
+    terminal.mockInput.pressKey('v');
+    await waitFor(() => (frame().match(/const value = 1;/gu) ?? []).length === 1, 'one side again');
 
     // A Review of a commit is fixed: no list of every file, and the pane says so.
     terminal.mockInput.pressEscape();

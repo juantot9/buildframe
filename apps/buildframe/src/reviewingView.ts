@@ -1,5 +1,4 @@
 import {
-  StyledText,
   TextareaRenderable,
   type CliRenderer,
   type KeyEvent,
@@ -99,7 +98,7 @@ import { composeFrame, type FrameScreen, type ShellLayers } from './shellCompose
 import { messageOutcomeLabel, questionStateLabel, responseSize, stateBadge } from './reviewingMessageWords.js';
 import { homeLauncherCard, homePane, homeRow, homeSentence, type HomeCard } from './shellHome.js';
 import { shortDisplayPath, treeName } from './reviewingPathText.js';
-import { wrappedCode } from './reviewingWrappedCode.js';
+import { clippedCode } from './reviewingWrappedCode.js';
 import { balancedSibling, paneTitle, shownFocus } from './reviewingPaneTitle.js';
 import { reviewingOwnSettings } from './reviewingSettings.js';
 import { commitName, headMoveNote, shortHash } from './reviewingHeadMoves.js';
@@ -1929,34 +1928,6 @@ function messageThreadCard(
   );
 }
 
-function clippedCode(
-  state: ReviewingApplicationState,
-  source: string | StyledText,
-  width: number,
-): string | StyledText {
-  if (state.wrapDiffLines) return wrappedCode(source, width);
-  const plain = typeof source === 'string' ? source : source.chunks.map(chunk => chunk.text).join('');
-  const offset = state.diffHorizontalOffset;
-  const left = offset > 0 ? (state.presentation.ascii ? '<' : '‹') : '';
-  const available = Math.max(1, width - left.length - 1);
-  const slice = displayCellSlice(plain, offset, available);
-  const shown = plain.slice(slice.start, slice.end);
-  const clipped = displayCells(plain) > offset + available;
-  const right = clipped ? (state.presentation.ascii ? '>' : '›') : '';
-  if (typeof source === 'string') return `${left}${slice.padding}${shown}${right}`;
-  let index = 0;
-  return new StyledText([
-    { __isChunk: true, text: left + slice.padding },
-    ...source.chunks.flatMap(chunk => {
-      const start = Math.max(0, slice.start - index);
-      const end = Math.min(chunk.text.length, slice.end - index);
-      index += chunk.text.length;
-      return end <= start ? [] : [{ ...chunk, text: chunk.text.slice(start, end) }];
-    }),
-    { __isChunk: true, text: right },
-  ]);
-}
-
 /** Where the selection starts, in rows, and how many rows it spans: one running total. */
 function selectionSpan(
   items: readonly ReviewingVisualItem[],
@@ -2272,8 +2243,16 @@ function diffPane(
       // Windows of large files reach line numbers wider than four digits.
       const lineNumberWidth = Math.max(4, String(totalLines).length);
       const lineGutterWidth = lineNumberWidth + 4;
-      const contentGutterWidth = lineGutterWidth + markWidth;
-      const codeWidth = Math.max(4, paneContentWidth - contentGutterWidth);
+      // Side by side, an unchanged line reads the same on both sides, like a Diff's context lines.
+      const sideBySide = state.diffMode === 'side-by-side';
+      const codeWidth = Math.max(
+        4,
+        sideBySide
+          ? Math.floor((paneContentWidth - markWidth) / 2) - lineGutterWidth
+          : paneContentWidth - lineGutterWidth - markWidth,
+      );
+      const lineRows = (line: string): number =>
+        state.wrapDiffLines ? codeRowStarts(safeText(line, state.presentation.ascii), codeWidth).length + 1 : 1;
       const filetype = reviewingFiletype(path);
       const items: ReviewingVisualItem[] = [
         {
@@ -2297,17 +2276,32 @@ function diffPane(
           selectionStart = items.reduce((total, item) => total + item.size, 0);
         }
         const itemIndex = items.length;
+        const rows = lineRows(line);
         items.push({
-          size: 1,
+          size: rows,
           ordinals: [index],
           render: () => {
             const marker = selected ? (state.presentation.ascii ? '>' : '▌') : ' ';
-            const clipped = displayCellSlice(line, 0, codeWidth);
-            const code = `${line.slice(0, clipped.end)}${clipped.padding}`;
+            const gutter = (lead: string) =>
+              label(state, ` ${lead}${String(lineNumber).padStart(lineNumberWidth)}  `, {
+                fg: selected ? selectionColors(state, 'diff').fg : colors.muted,
+                width: lineGutterWidth,
+                height: rows,
+                flexShrink: 0,
+              });
+            const code = () =>
+              richLabel(
+                state,
+                line.length === 0 ? ' ' : line,
+                filetype,
+                interaction,
+                { fg: selected ? colors.text : colors.code, width: codeWidth, height: rows, flexShrink: 0 },
+                codeWidth,
+              );
             return Box(
               {
                 width: '100%',
-                height: 1,
+                height: rows,
                 flexShrink: 0,
                 flexDirection: 'row',
                 backgroundColor: state.presentation.noColor
@@ -2318,25 +2312,15 @@ function diffPane(
                 id: reviewRenderableId(state, `reviewing-content-line-${lineNumber}`),
                 ...pointerMouseHandlers(interaction, { kind: 'content-line', line: lineNumber }),
               },
-              label(state, ` ${marker}${String(lineNumber).padStart(lineNumberWidth)}  `, {
-                fg: selected ? selectionColors(state, 'diff').fg : colors.muted,
-                width: lineGutterWidth,
-                height: 1,
-                flexShrink: 0,
-              }),
+              gutter(marker),
+              ...(sideBySide ? [code(), gutter(' ')] : []),
               lineMessagesCell(
                 state,
                 lineMessages.new.get(lineNumber) ?? [],
                 `reviewing-line-messages-content-${lineNumber}`,
                 selected,
               ),
-              richLabel(state, code.length === 0 ? ' ' : code, filetype, interaction, {
-                fg: selected ? colors.text : colors.code,
-                width: codeWidth,
-                height: 1,
-                flexShrink: 0,
-                truncate: false,
-              }),
+              code(),
             );
           },
         });
@@ -2361,7 +2345,7 @@ function diffPane(
           selectionSize =
             (composer !== undefined && questionTextarea !== undefined ? embeddedHeight : 0) +
             (anchoredThread !== undefined ? messageCardHeight : 0) +
-            1;
+            rows;
         }
       });
       items.push({
@@ -2387,10 +2371,10 @@ function diffPane(
         interaction,
         lines.length,
         {
-          contentKey: `reviewing-content:${sourceIdentity}:${content.pathBytesBase64}:${firstLine}`,
+          contentKey: `reviewing-content:${sourceIdentity}:${content.pathBytesBase64}:${firstLine}:${state.diffMode}:${state.wrapDiffLines}`,
           ...(selectionStart === undefined ? {} : { selectionStart }),
           ...(selectionSize === undefined ? {} : { selectionSize }),
-          pageItemSizes: lines.map(() => 1),
+          pageItemSizes: lines.map(lineRows),
           // While the next window loads, the selection may sit just outside this one.
           pageSelectedIndex: Math.min(lines.length - 1, Math.max(0, state.unchangedContentLine - firstLine)),
         },
