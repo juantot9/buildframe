@@ -214,16 +214,9 @@ const REVIEW_KEYS: readonly KeyAction<M, E>[] = [
   },
   { actsFor: [], match: either(onKey(Key.left), onText('h')), when: focused('diff'), run: anchorSide('old') },
   { actsFor: [], match: either(onKey(Key.right), onText('l')), when: focused('diff'), run: anchorSide('new') },
-  { actsFor: ['diffMode'], match: onText('w'), when: focused('diff'), run: toggleWrap },
-  { actsFor: ['diffMode'], match: onText('v'), when: focused('diff'), run: toggleDiffMode },
-  {
-    actsFor: [],
-    match: onText('w', 'v'),
-    run: (model, input) =>
-      say(
-        `Press Tab to reach the Diff, then press ${input.text} to ${input.text === 'w' ? 'wrap lines' : 'switch the Diff layout'}.`,
-      )(model),
-  },
+  // w and v change how the Diff is drawn, so they work from whichever pane has focus.
+  { actsFor: ['diffMode'], match: onText('w'), when: review, run: toggleWrap },
+  { actsFor: ['diffMode'], match: onText('v'), when: review, run: toggleDiffMode },
   { actsFor: ['newMessage'], match: onText('a'), run: model => model.openCreateEditor() },
   { actsFor: ['enter'], match: onKey(Key.enter), when: focused('files'), run: openFromFiles },
   // Enter opens the Message where it lives: the Diff takes focus on its line.

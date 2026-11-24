@@ -528,7 +528,7 @@ async function waitForInitialReviewReconciliation(workspace: TimedWorkspace): Pr
   const deadline = performance.now() + 10_000;
   while (performance.now() < deadline) {
     const harnessReads = workspace.reads.filter(request => request.kind === 'harness.review-interaction').length;
-    // One Review load, then quiet: subscriptions start at the shown version and do not re-read.
+    // One Review load, then quiet: subscriptions start at the shown version.
     if (workspace.inFlightReads === 0 && harnessReads >= 1 && workspace.reads.length === previousReadCount) {
       stableChecks += 1;
       if (stableChecks >= 10) return;
@@ -1696,7 +1696,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       .filter(line => /#[12] · /u.test(line));
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(row.trimEnd()).toMatch(/✗ failed$/u);
-    // And every row fits the card's inner width (border and padding taken off), counted in cells.
+    // And every row fits the card's inner width, counted in cells.
     const cardWidth = terminal.renderer.root.findDescendantById('reviewing-expanded-message-card')?.width ?? 0;
     for (const row of rows) {
       expect(wrappedDisplayRows(row.trimEnd(), Math.max(1, cardWidth - 4))).toBe(1);
@@ -2551,7 +2551,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       );
     await waitFor(() => diffCard().includes('Message tail.'), 'whole Message in the Diff card');
     expect(durableMessage).not.toContain('Message tail.');
-    // The outcome sentence shows once: whole in the Diff card, a one-line preview in History.
+    // The outcome sentence shows once: whole in the Diff card, a preview in History.
     await waitFor(() => diffCard().includes('Waiting for Pi fixture to start.'), 'outcome in the Diff card');
     expect(durableMessage).toContain('○ waiting');
 
@@ -2899,7 +2899,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     terminal.send('k');
     await waitFor(() => (inlineCardText() ?? '').includes('First inline anchor'), 'back to first inline card');
     await waitFor(() => selectedDiffRow('new one'), 'back to first Message Diff row');
-    // History focused: the Diff keeps a neutral fill; only the focused pane wears the accent.
+    // History focused: the Diff keeps a neutral fill; only the focused pane is accented.
     const firstRow = descendantsWithIdPrefix(terminal.renderer.root, 'reviewing-diff-row-').find(row =>
       renderableTreeText(row).includes('new one'),
     ) as BoxRenderable | undefined;
@@ -3140,7 +3140,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     const live = bases.bases.items.find(item => item.kind === 'live');
     if (live === undefined) throw new Error('Live Basis unavailable');
     const location = { pathBytesBase64: Buffer.from('review.txt').toString('base64'), line: 1 } as const;
-    // Saved through the Workspace directly: the same commit the composer makes, only faster.
+    // Saved through the Workspace directly: the composer's commit, faster.
     for (let index = 0; index < 66; index += 1) {
       const body = `Message ${index + 1} of many`;
       const inspection = await owner.workspace.read({
@@ -3281,14 +3281,16 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     } as never);
     await waitFor(() => statusLine().includes('#1 failed'), 'failure notice');
 
-    // The failed card says "Press r", and r works from Files too; w says where it works.
+    // The failed card says "Press r", and r works from Files too; so do w and v.
     await focus(/Files FOCUSED/u);
     terminal.send('w');
-    await waitFor(() => statusLine().includes('Press Tab to reach the Diff, then press w'), 'w hint');
+    await waitFor(() => statusLine().includes('Diff line wrapping'), 'w from Files');
+    terminal.send('v');
+    await waitFor(() => frame().includes('Side-by-side  since'), 'v from Files');
 
     // With the file unloaded again, r from Files loads it and reopens the draft there.
     terminal.send('g');
-    await waitFor(() => frame().includes('Diff  since last commit · a000.txt'), 'first file shown again');
+    await waitFor(() => frame().includes('since last commit · a000.txt'), 'first file shown again');
     terminal.send('r');
     await waitFor(() => statusLine().includes('Sending #1 again'), 'send-again draft');
     expect(frame()).toContain('zz-last.txt');
