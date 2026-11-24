@@ -59,6 +59,7 @@ export function matchReviewSearch(
       fileIdentity: file.fileIdentity,
       fileAbsolute,
       displayPath: file.path.display,
+      pathBytesBase64: file.path.bytesBase64,
     });
   });
   return { results, totalResults };

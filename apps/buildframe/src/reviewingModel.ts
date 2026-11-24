@@ -58,6 +58,7 @@ import { Key, matchesKey, printableInput, type ReviewingInput } from './reviewin
 import {
   firstListedFile,
   reviewFileTreeNodes,
+  reviewTreeNodes,
   reviewingFiles,
   type ReviewFileTreeNode,
   type ReviewingFileItem,
@@ -67,6 +68,15 @@ import { configurationKey } from './shellConfiguration.js';
 import { reviewingSettings } from './reviewingSettings.js';
 import { searchResultTarget } from './reviewingSearchOpen.js';
 import { shortHash, headMoveSentence } from './reviewingHeadMoves.js';
+import type { LiveFolders } from './reviewingLiveFolders.js';
+import {
+  historyStepKey,
+  historyStepText,
+  historyStepWords,
+  latestHeadMoveStep,
+  navigableHistorySteps,
+} from './reviewingHistorySteps.js';
+export { historyStepKey, historyStepText, historyStepWords, latestHeadMoveStep, navigableHistorySteps };
 import { homeLauncherOptions, homeSelectionAvailable, type ExtraHomeRow } from './reviewingHomeRows.js';
 import { dispatchReviewingKey } from './reviewingActions.js';
 import { reasonSentence } from './reviewingReasons.js';
@@ -216,6 +226,8 @@ export interface ReviewViewBundle {
   /** Steps of the Review's history; absent for fixed comparisons. */
   readonly history?: Extract<ReviewHistoryView, { readonly status: 'available' }>;
   readonly liveFiles?: ReviewLiveFilesView;
+  /** All files a folder at a time: liveFiles lists the loaded folders' files. */
+  readonly liveFolders?: LiveFolders;
   readonly questions: ReviewQuestionsAvailableView;
   readonly harnessInteraction: ReviewHarnessInteractionView;
   readonly continuation?: ReviewContinuationView;
@@ -606,6 +618,7 @@ export type ReviewingModelEffect =
       readonly windowLine?: number;
     }
   | { readonly type: 'load-commit-graph' }
+  | { readonly type: 'load-live-folder'; readonly pathBytesBase64: string }
   | {
       readonly type: 'preview-comparison';
       readonly selection: ReviewComparisonSelection;
@@ -839,16 +852,6 @@ export function rowMessages(lines: LineMessages, row: ReviewProjectedDiffRow): r
   ];
 }
 
-function historyPointKey(point: ReviewHistoryPoint): string {
-  return point.kind === 'sent' || point.kind === 'answered'
-    ? `${point.kind}:${point.reviewMessageIdentity}`
-    : point.kind;
-}
-
-export function historyStepKey(from: ReviewHistoryPoint, to: ReviewHistoryPoint): string {
-  return `${historyPointKey(from)}>${historyPointKey(to)}`;
-}
-
 export interface JumpListState {
   readonly kind: 'files' | 'messages';
   /** The selected row among the rows the filter leaves, by its key. */
@@ -929,62 +932,6 @@ export function shownFilePosition(
       ? review.liveFiles.files.total
       : review.manifest.manifest.totalFiles;
   return index < 0 || total < 2 ? undefined : { position: offset + index + 1, total };
-}
-
-/** The steps [ and ] visit: those that changed code, oldest first; undefined without history. */
-export function navigableHistorySteps(state: ReviewingApplicationState): readonly ReviewHistoryStep[] | undefined {
-  return state.review?.history?.steps.filter(step => step.changes.status === 'changed');
-}
-
-/** The newest step in which HEAD moved; undefined when it never did. */
-export function latestHeadMoveStep(state: ReviewingApplicationState): ReviewHistoryStep | undefined {
-  return [...(state.review?.history?.steps ?? [])].reverse().find(step => step.headMove !== undefined);
-}
-
-/** How a step reads in titles ("during #3") and in its notice; a HEAD move in it leads the notice. */
-export function historyStepText(
-  step: ReviewHistoryStep,
-  messages: readonly ReviewMessageIdentity[],
-): { readonly label: string; readonly description: string } {
-  const text = historyStepWords(step, messages);
-  return step.headMove === undefined
-    ? text
-    : { ...text, description: `${headMoveSentence(step.headMove, text.label)} ${text.description}` };
-}
-
-export function historyStepWords(
-  step: ReviewHistoryStep,
-  messages: readonly ReviewMessageIdentity[],
-): { readonly label: string; readonly description: string } {
-  const ordinalOf = (point: ReviewHistoryPoint): number =>
-    point.kind === 'sent' || point.kind === 'answered' ? messages.indexOf(point.reviewMessageIdentity) + 1 : 0;
-  const ordinals = step.messageOrdinals;
-  if (step.kind === 'answer') {
-    return {
-      label: `during #${ordinals[0]}`,
-      description: `Everything that changed while #${ordinals[0]} was answered, by the agent or anyone else.`,
-    };
-  }
-  if (step.kind === 'outside') {
-    const label =
-      step.to.kind !== 'now'
-        ? `before #${ordinalOf(step.to)}`
-        : step.from.kind === 'start'
-          ? 'outside answers'
-          : `after #${ordinalOf(step.from)}`;
-    return { label, description: 'Changed outside any answer, most likely by you.' };
-  }
-  const named = ordinals.length === 1 ? `#${ordinals[0]}` : `#${ordinals[0]}–#${ordinals.at(-1)}`;
-  if (step.from.kind === 'sent' && step.to.kind !== 'answered') {
-    return {
-      label: `since ${named} was sent`,
-      description: `Everything that changed since ${named} was sent, by the agent or anyone else. It has no answer yet.`,
-    };
-  }
-  return {
-    label: `around ${named}`,
-    description: `Everything that changed around ${named}, by the agent or anyone else. BuildFrame didn't keep the code when it was sent, so edits outside the answer are included.`,
-  };
 }
 
 /** A stretch's before → after rows in the shape the Diff pane already draws. */
@@ -4217,10 +4164,15 @@ export class ReviewingApplicationModel {
   }
 
   private visibleTreeNodes(): readonly ReviewFileTreeNode[] {
-    return reviewFileTreeNodes(
-      reviewingFiles(this.state.review, this.state.fileScope),
-      this.state.collapsedDirectories,
-    );
+    return reviewTreeNodes(this.state.review, this.state.fileScope, this.state.collapsedDirectories);
+  }
+
+  /** Opens a folder that isn't loaded yet: it shows open once its read lands. */
+  private loadFolder(directory: string): readonly ReviewingModelEffect[] | undefined {
+    const node = this.visibleTreeNodes().find(entry => entry.kind === 'directory' && entry.directory === directory);
+    if (node?.kind !== 'directory' || node.unloaded === undefined) return undefined;
+    this.state.collapsedDirectories = Object.freeze(this.state.collapsedDirectories.filter(item => item !== directory));
+    return [{ type: 'load-live-folder', pathBytesBase64: node.unloaded.pathBytesBase64 }];
   }
 
   private findNodeIndex(nodes: readonly ReviewFileTreeNode[]): number {
@@ -4307,6 +4259,8 @@ export class ReviewingApplicationModel {
   expandSelected(): readonly ReviewingModelEffect[] {
     if (this.state.selectedDirectory !== undefined) {
       const directory = this.state.selectedDirectory;
+      const loading = this.loadFolder(directory);
+      if (loading !== undefined) return loading;
       if (this.state.collapsedDirectories.includes(directory)) {
         this.state.collapsedDirectories = Object.freeze(
           this.state.collapsedDirectories.filter(item => item !== directory),
@@ -4347,6 +4301,8 @@ export class ReviewingApplicationModel {
   }
 
   private toggleDirectory(directory: string): readonly ReviewingModelEffect[] {
+    const loading = this.loadFolder(directory);
+    if (loading !== undefined) return loading;
     if (this.state.collapsedDirectories.includes(directory)) {
       this.state.collapsedDirectories = Object.freeze(
         this.state.collapsedDirectories.filter(item => item !== directory),
@@ -5133,6 +5089,8 @@ export class ReviewingApplicationModel {
       const review = this.state.review;
       if (review === undefined || searchView?.status !== 'available') return [];
       this.state.search = undefined;
+      // The result's file becomes the selection, not the folder the cursor was on.
+      this.state.selectedDirectory = undefined;
       this.state.focus = result.kind === 'change' ? 'diff' : 'files';
       if (result.kind === 'unchanged-file') this.state.fileScope = 'all';
       this.setLoading('Opening search result', this.state.focus);

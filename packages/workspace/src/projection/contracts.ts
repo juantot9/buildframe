@@ -56,6 +56,10 @@ import type {
   ReviewLiveFilesViewRequest,
   ReviewLiveFolderView,
   ReviewLiveFolderViewRequest,
+  ReviewLiveFoldersView,
+  ReviewLiveFoldersViewRequest,
+  ReviewLiveFileContentView,
+  ReviewLiveFileContentViewRequest,
 } from './liveFileContracts.js';
 
 export type {
@@ -113,15 +117,6 @@ export interface ReviewLiveDiffViewRequest {
   readonly offset: number;
   readonly limit: number;
   /** One-based source line whose row should be the first row of the window. */
-  readonly anchorLine?: number;
-}
-
-export interface ReviewLiveFileContentViewRequest {
-  readonly kind: 'review.live-file-content';
-  readonly reviewIdentity: ReviewIdentity;
-  readonly liveChangesIdentity: string;
-  readonly pathBytesBase64: string;
-  /** One-based source line to include; defaults to the start of the file. */
   readonly anchorLine?: number;
 }
 
@@ -278,6 +273,7 @@ export type WorkspaceProjectionViewRequest =
   | ReviewLiveDiffViewRequest
   | ReviewLiveFilesViewRequest
   | ReviewLiveFolderViewRequest
+  | ReviewLiveFoldersViewRequest
   | ReviewLiveFileContentViewRequest
   | ReviewVersionsViewRequest
   | ReviewBasesViewRequest
@@ -625,46 +621,6 @@ export interface ReviewLiveDiffUnavailableView {
 }
 
 export type ReviewLiveDiffView = ReviewLiveDiffAvailableView | ReviewLiveDiffUnavailableView;
-
-export type ReviewLiveFileContentView =
-  | {
-      readonly kind: 'review.live-file-content';
-      readonly status: 'available';
-      readonly projectionVersion: typeof WORKSPACE_PROJECTION_VERSION;
-      readonly stateVersion: number;
-      readonly reviewIdentity: ReviewIdentity;
-      readonly liveChangesIdentity: string;
-      readonly path: EvidencePath;
-      readonly content: {
-        readonly encoding: 'utf8';
-        readonly bytesBase64: string;
-        readonly byteLength: number;
-        readonly totalByteLength: number;
-        /** Absolute one-based line of the first complete line in this window. */
-        readonly firstLine: number;
-        readonly lineCount: number;
-        readonly totalLines: number;
-        readonly truncated: boolean;
-      };
-    }
-  | {
-      readonly kind: 'review.live-file-content';
-      readonly status: 'unavailable' | 'not-found' | 'fixed' | 'moved';
-      readonly projectionVersion: typeof WORKSPACE_PROJECTION_VERSION;
-      readonly stateVersion: number;
-      readonly reviewIdentity: ReviewIdentity;
-      readonly liveChangesIdentity: string;
-      readonly reason:
-        | 'binary'
-        | 'unrenderable'
-        | 'too-large'
-        | 'file-unavailable'
-        | 'inspection-failed'
-        | 'review-not-found'
-        | 'review-not-current'
-        | 'fixed-comparison'
-        | 'live-changes-moved';
-    };
 
 export interface ReviewContinuationAvailableView {
   readonly kind: 'review.continuation';
@@ -1379,6 +1335,7 @@ export type WorkspaceProjectionView =
   | ReviewLiveDiffView
   | ReviewLiveFilesView
   | ReviewLiveFolderView
+  | ReviewLiveFoldersView
   | ReviewLiveFileContentView
   | ReviewVersionsView
   | ReviewBasesView
@@ -1409,6 +1366,7 @@ export interface WorkspaceProjectionViewByKind {
   'review.live-diff': ReviewLiveDiffView;
   'review.live-files': ReviewLiveFilesView;
   'review.live-folder': ReviewLiveFolderView;
+  'review.live-folders': ReviewLiveFoldersView;
   'review.live-file-content': ReviewLiveFileContentView;
   'review.versions': ReviewVersionsView;
   'review.bases': ReviewBasesView;

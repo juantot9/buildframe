@@ -60,6 +60,7 @@ import {
   type UserConfigurationSaveResult,
 } from '../../src/userConfiguration.js';
 import { resolveGitExecutable } from '../../../../packages/workspace/src/gitProcess.js';
+import { liveFoldersOf } from './liveFoldersFake.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1061,6 +1062,10 @@ class StressWorkspace implements Workspace {
           truncated: false,
         },
       };
+    }
+    if (request.kind === 'review.live-folders') {
+      const all = this.view({ ...request, kind: 'review.live-files', offset: 0, limit: 10_000 });
+      return liveFoldersOf(request, all as never);
     }
     if (request.kind === 'review.live-files') {
       const manifest = this.view({
@@ -2172,7 +2177,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     const currentChoiceCheckpoint = terminal.checkpoint();
     terminal.send('C');
     await waitForOutput(terminal, 'CONTINUE REVIEW - SAVED RANGE / CURRENT HEAD', currentChoiceCheckpoint);
-    // A replaced tree destroys its old nodes, so read the dialog that is on screen now.
+    // A replaced tree destroys its old nodes: read the dialog on screen.
     continuationDialog = terminal.renderer.root.findDescendantById(
       'reviewing-continuation-dialog',
     ) as unknown as typeof continuationDialog;
@@ -2602,17 +2607,17 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await waitForOutput(terminal, 'Files FOCUSED  All');
     expect(terminal.setup.captureCharFrame()).toContain('unchanged.txt');
     expect(terminal.setup.captureCharFrame()).toContain('notes/');
-    // j/k moves over folder nodes too, neo-tree style; h/l collapse in place.
+    // j/k moves over folders too; one without changes stays closed until l loads it.
     terminal.send('j');
-    // A folder selection keeps the last file's Diff on screen.
+    await waitForOutput(terminal, '› ▸ notes/');
+    terminal.send('l');
     await waitForOutput(terminal, '› ▾ notes/');
     expect(terminal.setup.captureCharFrame()).toContain('old one');
     const deepFileRow = descendantsWithIdPrefix(terminal.renderer.root, 'reviewing-file-row-').find(row =>
       renderableTreeText(row).includes('deep.txt'),
     );
     if (deepFileRow === undefined) throw new Error('Nested unchanged file row missing');
-    // A subscription refresh can install the next render tree during a frame;
-    // click only once that current tree has acquired its presented geometry.
+    // Click only once the current tree has its presented geometry.
     await waitFor(async () => {
       await terminal.flush();
       const current = terminal.renderer.root.findDescendantById(deepFileRow.id);
@@ -2757,7 +2762,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await waitForOutput(terminal, 'Current Review · ');
     await waitForOutput(terminal, 'Diff FOCUSED');
 
-    // A first Message whose turn BuildFrame loses track of makes the next one ask first.
+    // A Message whose turn is lost makes the next one ask first.
     terminal.send('a');
     await waitForOutput(terminal, 'New Message · review.txt:1');
     terminal.send('First');
@@ -2925,7 +2930,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await waitForOutput(terminal, 'Current Review · ');
     await waitFor(() => terminal.setup.captureCharFrame().includes('› M  review.txt'), 'first listed file selected');
     expect(terminal.setup.captureCharFrame()).toContain('since last commit · review.txt');
-    // A deleted file has no new side, so a Message names why instead of blaming a line.
+    // A deleted file has no new side; a Message names why.
     await focusPane(terminal, 'Files');
     terminal.send('j');
     await waitFor(() => terminal.setup.captureCharFrame().includes('› D  zz-gone.txt'), 'deleted file selected');
@@ -2964,7 +2969,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     };
     // Your own edits between answers are routine: Pewter, never the caution brass.
     expect(colorOf('edits before #1')?.fg.equals(RGBA.fromHex(QUIET_GRAPHITE.muted))).toBe(true);
-    // "now ◀ here" says what the Diff shows; the cursor's accent stays with the cursor.
+    // "now ◀ here" says what the Diff shows.
     const here = colorOf('◀ here');
     expect(here?.fg.equals(RGBA.fromHex(QUIET_GRAPHITE.accent))).toBe(false);
     expect(here?.bg.equals(RGBA.fromHex(QUIET_GRAPHITE.accentSoft))).toBe(false);
@@ -3199,7 +3204,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
         ?.trimEnd() ?? '';
     await waitFor(() => row(1) !== '', 'first Message card');
     expect(row(1)).toMatch(/✗ not sent$/u);
-    // Up from the first Message wraps to the newest, #66: both it and #65 lie past the first 64 Handoffs.
+    // Up from the first Message wraps to the newest, #66, past the first 64.
     await focusPane(terminal, 'History');
     terminal.send('k');
     await waitFor(() => row(66) !== '', 'newest Message card');
@@ -3288,7 +3293,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     terminal.send('v');
     await waitFor(() => frame().includes('Side-by-side  since'), 'v from Files');
 
-    // With the file unloaded again, r from Files loads it and reopens the draft there.
+    // With the file unloaded, r from Files loads it and reopens the draft.
     terminal.send('g');
     await waitFor(() => frame().includes('since last commit · a000.txt'), 'first file shown again');
     terminal.send('r');
@@ -3411,11 +3416,11 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
 
     // The moment is said once on the status line, after the answer.
     await waitForOutput(terminal, `answered #1. “Tidy review” (${short}) was committed during #1.`);
-    // Live changes are empty now; the Diff names the commit that took them and the way on.
+    // Live changes are empty; the Diff names the commit that took them.
     await waitForOutput(terminal, `No changes since “Tidy review” (${short})`);
     await waitForOutput(terminal, '[ and ] history shows what changed');
     await waitForOutput(terminal, `since ${short} · no changes`);
-    // History's Message says code changed and names the commit, in its own short form.
+    // History's Message says code changed and names the commit.
     const historyText = (): string =>
       renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-messages-viewport'))
         .replace(/[│┃]/gu, ' ')
@@ -3430,7 +3435,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-history-rail')).replace(/\s+/gu, ' ');
     await waitFor(() => railText().includes('#1◆'), 'rail marks the commit on #1');
 
-    // [ shows everything that changed while #1 was answered, committed or not; the commit leads.
+    // [ shows what changed while #1 was answered; the commit leads.
     const checkpoint = terminal.checkpoint();
     terminal.send('[');
     await waitForOutput(terminal, 'during #1 · review.txt', checkpoint);
@@ -3621,7 +3626,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(terminal.renderer.root.findDescendantById(`reviewing-basis-${answerPoint.reviewBasisIdentity}`)).toBeFalsy();
     terminal.send('\u001b');
 
-    // On a narrow terminal the rail folds the middle into a count, keeping start and now.
+    // Narrow, the rail folds the middle into a count.
     terminal.resize(72, 30);
     await waitFor(() => /◆ .*┄ \d+ ┄.* now/u.test(railText()), 'folded rail');
   }, 300_000);
@@ -3772,8 +3777,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       const selected = rows.find(row => /^\s*[›>]/u.test(renderableTreeText(row)));
       return selected === undefined ? undefined : { id: selected.id, text: renderableTreeText(selected) };
     };
-    // A debounced preview for a previous row must not race the walk, so each
-    // step first reaches its row and then lets that row's reads settle.
+    // Each step reaches its row, then lets that row's reads settle.
     const settleSelection = async (needle: string): Promise<{ readonly id: string; readonly text: string }> => {
       await waitFor(() => (selectedFilesRow()?.text ?? '').includes(needle), `Files selection ${needle}`);
       await new Promise(resolve => setTimeout(resolve, 40));
@@ -3795,6 +3799,10 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     terminal.send('j');
     const walk = [await settleSelection('src/')];
     for (const needle of ['two.txt', 'one.txt', 'docs/', 'readme.md']) {
+      if (needle === 'readme.md') {
+        terminal.send('l');
+        await waitForOutput(terminal, 'readme.md');
+      }
       terminal.send('j');
       walk.push(await settleSelection(needle));
     }

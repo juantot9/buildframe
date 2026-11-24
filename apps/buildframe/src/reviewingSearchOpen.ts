@@ -1,7 +1,7 @@
 import type { ReviewSearchItem, ReviewSearchView } from '@buildframe/workspace/projection';
 import type { ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
 
-import { DIFF_WINDOW_SIZE, LIVE_FILE_WINDOW_SIZE, MANIFEST_WINDOW_SIZE } from './reviewingLimits.js';
+import { DIFF_WINDOW_SIZE, MANIFEST_WINDOW_SIZE } from './reviewingLimits.js';
 import type { ReviewLoadTarget, ReviewSelectionHint, ReviewViewBundle } from './reviewingModel.js';
 
 /** Where a chosen search result opens, and what it selects there. */
@@ -21,10 +21,11 @@ export function searchResultTarget(
     return {
       target: {
         reviewIdentity,
-        liveFilesOffset: Math.floor(result.fileAbsolute / LIVE_FILE_WINDOW_SIZE) * LIVE_FILE_WINDOW_SIZE,
+        // All files loads the folders on the file's way, so it opens by its path.
+        liveFilesOffset: 0,
         manifestOffset: review.manifest.manifest.offset,
         fileIdentity: result.fileIdentity,
-        fileAbsolute: result.fileAbsolute,
+        filePathBytesBase64: result.pathBytesBase64,
         diffOffset: 0,
         questionOffset,
       },

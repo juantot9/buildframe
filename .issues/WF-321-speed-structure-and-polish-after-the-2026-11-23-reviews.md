@@ -83,7 +83,14 @@ file-list read fits under the 1 MiB message cap and the app joins the
 pieces. Step 2: the `review.live-folder` read, one folder's subfolders
 (with file and changed counts) and files, at most 1,000 rows and 512 KiB per
 read; 0.4 ms per folder on the 5,000-file repo once the index is built
-(2.8 ms for the first). Next: folders that load when opened, then Code search.
+(2.8 ms for the first). Step 3: All files opens with the top folder and
+the folders holding changes; any other folder is a closed row until opened
+(one read), `H` shows `N changed` on closed folders, and `/` opens a file in
+a folder never opened. A batched `review.live-folders` read keeps opening to
+three reads (one per folder took 2.3 s on the 5,000-file repo). On that repo
+(changes in all 50 folders) open 1.64 s and `f` 36 ms, as before; with one
+change, open 0.65 s, `f` 22 ms, a closed folder opens in 24 ms. Next: Code
+search, with This file, `n`/`N` and `:120` (owner, 2026-11-24).
 
 ## D. Larger changes
 

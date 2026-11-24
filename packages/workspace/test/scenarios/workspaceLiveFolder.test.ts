@@ -104,6 +104,31 @@ describe('a live folder read lists one folder of the current Review', () => {
     expect(moved).toMatchObject({ status: 'moved', reason: 'live-changes-moved' });
   });
 
+  it('reads many whole folders at once, naming the ones that are not there', async () => {
+    const { owner, review, live } = await folderReview();
+    const view = await owner.workspace.read({
+      kind: 'review.live-folders',
+      reviewIdentity: review.reviewIdentity,
+      liveChangesIdentity: live.liveChangesIdentity,
+      pathsBytesBase64: ['', base64('src/lib'), base64('nowhere'), base64('docs')],
+    });
+    if (view.status !== 'available') throw new Error(`Folders are ${view.status}`);
+    expect(view.folders.map(folder => [folder.folder.path.display, folder.entries.length])).toEqual([
+      ['', 3],
+      ['src/lib', 1],
+      ['docs', 1],
+    ]);
+    expect(view).toMatchObject({ missing: [base64('nowhere')], remaining: [], tooLarge: [] });
+    await expect(
+      owner.workspace.read({
+        kind: 'review.live-folders',
+        reviewIdentity: review.reviewIdentity,
+        liveChangesIdentity: live.liveChangesIdentity,
+        pathsBytesBase64: [base64('/src')],
+      }),
+    ).rejects.toThrow();
+  });
+
   it('rejects a folder path that is not a plain relative path, and windows over 1,000 rows', async () => {
     const { folder } = await folderReview();
     for (const bad of ['src/', '/src', 'src//lib', '..', 'src/./lib']) {

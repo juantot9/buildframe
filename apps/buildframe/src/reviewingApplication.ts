@@ -1,12 +1,6 @@
 import { decodeBytesBase64 } from '@buildframe/workspace/bytes-base64';
 import type { Workspace, WorkspaceCommand } from '@buildframe/workspace';
-import type {
-  ReviewLiveFilesView,
-  ReviewLiveManifestView,
-  ReviewManifestView,
-  ReviewQuestionBodyView,
-  WorkspaceHomeView,
-} from '@buildframe/workspace/projection';
+import type { ReviewQuestionBodyView, WorkspaceHomeView } from '@buildframe/workspace/projection';
 import type { ReviewIdentity, ReviewSnapshotIdentity } from '@buildframe/workspace/reviewing';
 
 import type { HomeRow, ScreenExtension, ScreenSurface } from './shellScreen.js';
@@ -36,6 +30,8 @@ import {
   type ReviewViewBundle,
 } from './reviewingModel.js';
 import { firstListedFile, manifestFileItems } from './reviewingFileList.js';
+import { foldersToLoad, loadOpenedFolder, readLiveFolders } from './reviewingLiveFolders.js';
+import { withFileWindow } from './reviewingFileWindow.js';
 import { ReviewingView } from './reviewingView.js';
 import type { ReviewingApplicationOptions } from './reviewingScreen.js';
 import { lendShellState } from './reviewingShellState.js';
@@ -365,13 +361,18 @@ export class ReviewingExtension implements ScreenExtension {
           this.#model.reportConfigurationWarning(`Couldn’t load what changed. ${semanticError(error)}`);
           this.#render();
         });
+      } else if (effect.type === 'load-live-folder') {
+        void loadOpenedFolder(this.#workspace, () => this.#model.state.review, effect.pathBytesBase64).then(next => {
+          if (this.#stopped || next === undefined) return;
+          this.#model.state.review = next;
+          this.#render();
+        });
       } else {
         void this.#execute(effect.command);
       }
     }
   }
 
-  /** One stretch's changed files, or one file's before → after rows in it. */
   async #loadStepChanges(
     effect: Extract<ReviewingModelEffect, { readonly type: 'load-step-changes' | 'load-step-change-diff' }>,
   ): Promise<void> {
@@ -840,82 +841,10 @@ export class ReviewingExtension implements ScreenExtension {
     });
   }
 
-  /**
-   * A file asked for only by its path may sit in any window of the file list.
-   * Find the window that holds it, so opening a Message never depends on
-   * which 64 files happen to be loaded.
-   */
-  async #withFileWindow(requested: ReviewLoadTarget): Promise<ReviewLoadTarget> {
-    const path = requested.filePathBytesBase64;
-    if (path === undefined || requested.fileIdentity !== undefined || requested.fileAbsolute !== undefined) {
-      return requested;
-    }
-    const reviewIdentity = requested.reviewIdentity;
-    const snapshot = requested.reviewSnapshotIdentity;
-    let located = requested;
-    // Changed files: the live list, or the saved one for a fixed comparison or a snapshot.
-    let live = snapshot === undefined;
-    let liveChangesIdentity: string | undefined;
-    for (let offset: number | null = 0, window = 0; offset !== null && window < 1024; window += 1) {
-      const view: ReviewLiveManifestView | ReviewManifestView = live
-        ? await this.#workspace.read({
-            kind: 'review.live-manifest',
-            reviewIdentity,
-            offset,
-            limit: MANIFEST_WINDOW_SIZE,
-          })
-        : await this.#workspace.read({
-            kind: 'review.manifest',
-            reviewIdentity,
-            ...(snapshot === undefined ? {} : { reviewSnapshotIdentity: snapshot }),
-            offset,
-            limit: MANIFEST_WINDOW_SIZE,
-          });
-      if (view.status !== 'available') {
-        if (live && view.status === 'fixed') {
-          live = false;
-          continue;
-        }
-        break;
-      }
-      if (view.kind === 'review.live-manifest') liveChangesIdentity = view.liveChangesIdentity;
-      if (
-        view.manifest.files.some(
-          file => file.newSide?.pathBytesBase64 === path || file.oldSide?.pathBytesBase64 === path,
-        )
-      ) {
-        located = { ...located, manifestOffset: view.manifest.offset };
-        break;
-      }
-      const nextOffset: number | null = view.manifest.nextOffset;
-      offset = nextOffset;
-    }
-    // All files (after f): the live list of every file, unchanged ones included.
-    if (requested.liveFilesOffset !== undefined && liveChangesIdentity !== undefined) {
-      for (let offset: number | null = 0, window = 0; offset !== null && window < 1024; window += 1) {
-        const view: ReviewLiveFilesView = await this.#workspace.read({
-          kind: 'review.live-files',
-          reviewIdentity,
-          liveChangesIdentity,
-          offset,
-          limit: LIVE_FILE_WINDOW_SIZE,
-        });
-        if (view.status !== 'available') break;
-        if (view.files.items.some(file => file.path.bytesBase64 === path)) {
-          located = { ...located, liveFilesOffset: view.files.offset };
-          break;
-        }
-        const nextOffset: number | null = view.files.nextOffset;
-        offset = nextOffset;
-      }
-    }
-    return located;
-  }
-
   async #readReviewBundle(
     asked: ReviewLoadTarget,
   ): Promise<{ readonly bundle: ReviewViewBundle; readonly target: ReviewLoadTarget }> {
-    const requested = await this.#withFileWindow(asked);
+    const requested = await withFileWindow(this.#workspace, asked);
     for (let attempt = 0; attempt < MAX_PROJECTION_ATTEMPTS; attempt += 1) {
       const selectedSnapshot = requested.reviewSnapshotIdentity;
       const [snapshotManifest, questions, versions, bases, messages, history, liveManifest, continuation] =
@@ -1012,16 +941,22 @@ export class ReviewingExtension implements ScreenExtension {
             reviewSnapshotIdentity: snapshotManifest.header.reviewSnapshotIdentity as ReviewSnapshotIdentity,
             isLatest: snapshotManifest.header.version?.isLatest ?? false,
           };
-      const liveFiles: ReviewViewBundle['liveFiles'] =
+      // All files: the top folder, the folders on the way to a change or the file asked for, and those opened before.
+      const shown = this.#model.state.review;
+      const folders =
         source.kind === 'live'
-          ? await this.#workspace.read({
-              kind: 'review.live-files',
-              reviewIdentity: requested.reviewIdentity,
-              liveChangesIdentity: source.liveChangesIdentity,
-              offset: requested.liveFilesOffset ?? 0,
-              limit: LIVE_FILE_WINDOW_SIZE,
-            })
+          ? await readLiveFolders(
+              this.#workspace,
+              requested.reviewIdentity,
+              source.liveChangesIdentity,
+              foldersToLoad(
+                manifest.manifest.files.map(file => (file.newSide ?? file.oldSide)?.pathBytesBase64 ?? ''),
+                requested.filePathBytesBase64,
+                shown?.manifest.header.reviewIdentity === requested.reviewIdentity ? shown.liveFolders : undefined,
+              ),
+            )
           : undefined;
+      const liveFiles = folders?.liveFiles;
       if (liveFiles !== undefined && liveFiles.stateVersion !== snapshotManifest.stateVersion) continue;
       if (liveFiles?.status === 'moved') continue;
       // Match only what was asked for: a deleted file has no new side, and
@@ -1116,7 +1051,7 @@ export class ReviewingExtension implements ScreenExtension {
           bases,
           messages,
           ...(history.status === 'available' ? { history } : {}),
-          ...(liveFiles === undefined ? {} : { liveFiles }),
+          ...folders,
           questions,
           harnessInteraction,
           ...(continuation === undefined ? {} : { continuation }),

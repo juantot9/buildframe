@@ -95,5 +95,18 @@ describe('file-list reads fit the runtime message cap', () => {
     );
     expect(folderRows.pieces).toBeGreaterThan(3);
     expect(new Set(folderRows.seen).size).toBe(NEW_FILES);
+
+    // Read with others, a folder too large for one read is left to be paged on its own.
+    const together = await owner.workspace.read({
+      kind: 'review.live-folders',
+      reviewIdentity: review.reviewIdentity,
+      liveChangesIdentity: live.liveChangesIdentity,
+      pathsBytesBase64: ['', Buffer.from(path.basename(folder)).toString('base64')],
+    });
+    expect(Buffer.byteLength(JSON.stringify(together))).toBeLessThan(RUNTIME_MESSAGE_CAP);
+    expect(together).toMatchObject({
+      remaining: [],
+      tooLarge: [Buffer.from(path.basename(folder)).toString('base64')],
+    });
   }, 120_000);
 });

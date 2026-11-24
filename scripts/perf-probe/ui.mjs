@@ -365,6 +365,30 @@ if (run('fileswheel')) {
   } else console.error('no files viewport');
 }
 
+// 8. Open closed folders in All files: each l reads just that folder.
+if (run('openfolder')) {
+  drawPhase = 'open folder';
+  await focus('Files');
+  if (!capture().includes('Files FOCUSED  All')) await press('f (every file)', 'f');
+  for (let opened = 0; opened < reps; opened += 1) {
+    // Walk down to the next closed folder row (the selected row starts with ›).
+    let steps = 0;
+    while (!/›\s*▸ /u.test(capture()) && steps < 400) {
+      terminal.mockInput.pressKey('j');
+      await settle(t(), 30);
+      steps += 1;
+    }
+    if (steps >= 400) break;
+    const before = capture();
+    const s = t();
+    terminal.mockInput.pressKey('l');
+    await waitFor(() => capture() !== before && !/›\s*▸ /u.test(capture()), 'folder opened', 10_000);
+    record('open closed folder: key -> contents on screen (ms)', t() - s);
+    await settle(t(), 60);
+  }
+  writeFileSync(path.join(process.env.PERF_ROOT, `frame-open-folder-${path.basename(repo)}.txt`), capture());
+}
+
 // Renderer-side frame stats (native render + output).
 const stats = renderer.getStats?.();
 if (stats) {

@@ -1,6 +1,6 @@
 # Files pane: folders that load when opened
 
-Date: 2026-11-24. Status: approved 2026-11-24 (all three recommended answers); steps 1–2 done. Ticket: WF-321 (follows A5, `4d0db13`).
+Date: 2026-11-24. Status: approved 2026-11-24 (all three recommended answers); steps 1–3 done. Ticket: WF-321 (follows A5, `4d0db13`).
 
 ## Why
 
@@ -51,6 +51,12 @@ Every file-list read (`review.manifest`, `review.live-files`, the new one) also 
 - `f`: faster than today's 32 ms, since ~30 rows replace ~5,300.
 - Wheel: as smooth as today.
 
+## Step 3 as built
+
+- Folders load in batches (`review.live-folders`, whole folders while they fit one read; a folder too large for one read is paged with `review.live-folder`). One read per folder made opening the 5,000-file repo take 2.3 s.
+- Unchanged-file search results carry their path bytes, so `/` opens a file in a folder that was never opened.
+- Measured through the background process: on the 5,000-file repo with changes in all 50 folders, open 1.64 s and `f` 36 ms (1.68 s and 34 ms before); with one change, open 0.65 s, `f` 22 ms, opening a closed folder 24 ms median (target 16 ms; the read through the background process is most of it).
+
 ## Order of work
 
 1. Byte bounds on the reads, and the Changed list sent in pieces. This removes the crash on its own, and lands with the background-process test.
@@ -79,8 +85,22 @@ Details:
 - **Fast enough to type into.** Measured with `git grep -I -F`: ~120 ms warm on the 5,000-file repo (650 ms on the first, cold run) and 124 ms for 4,622 hits across `neoflow`. Typing keeps the current 80 ms pause; an older search is dropped as soon as a newer one starts.
 - **Workspace change (needs approval):** a new read, `review.code-search` (query, scope, window). It runs `git grep` through the same controlled Git path as other Workspace reads; the text it returns is bounded per line.
 
+## Moving inside a file
+
+Owner request 2026-11-24: search inside a file and move there, or go to a line.
+
+**Today** nothing does either. `/` searches the whole Review (paths and changed text); `g`/`G` reach the ends, `J`/`K` the next changed file.
+
+**Proposal**, part of step 4 since it uses the same read:
+
+- **This file**, a fourth scope in `/`, first and chosen by default when the Diff has focus (`● This file  ○ Changes  ○ Files  ○ Code`). It finds any text in the open file, changed or not; each result is `line` and the line. Enter selects that line in the Diff (or the unchanged file) and closes the dialog.
+- **`n` / `N`** move to the next / previous match of the last search in the Diff, without opening the dialog, like Vim and less.
+- **`:` then a number, Enter**: go to that line of the open file (`:120`). In a Diff it selects the row for that new-side line, or the nearest one when the line didn't change and isn't shown.
+- Built on `review.code-search` with a path filter, so it adds no Workspace read of its own.
+
 ## Questions for the owner
 
 1. Should All files open the folders that hold changes, or start with every folder closed? Recommended: open the ones with changes.
 2. Should closed folders show their changed count (`3 changed`)? Recommended: yes.
 3. Should search be one `/` with three scopes (Changes, Files, Code), or keep `/` as it is and add Code search on its own key? Recommended: one `/` with scopes.
+4. Moving inside a file: a This file scope in `/` (default from the Diff), `n`/`N` for the next match, and `:120` to go to a line? Recommended: yes, all three, in step 4. **Approved 2026-11-24.**

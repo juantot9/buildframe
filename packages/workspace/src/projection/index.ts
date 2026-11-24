@@ -119,10 +119,6 @@ import type {
   ReviewLiveDiffViewRequest,
   ReviewLiveFileContentView,
   ReviewLiveFileContentViewRequest,
-  ReviewLiveFilesView,
-  ReviewLiveFilesViewRequest,
-  ReviewLiveFolderView,
-  ReviewLiveFolderViewRequest,
   ReviewLiveManifestView,
   ReviewLiveManifestViewRequest,
   ReviewManifestView,
@@ -212,7 +208,7 @@ import {
   textPreview,
 } from './views.js';
 import { layLiveChangesOnce } from './liveFileList.js';
-import { liveFilesView, liveFolderView, type LiveFileListing } from './liveFolder.js';
+import { liveListView, type LiveFileListing } from './liveFolder.js';
 import { GenerationCache } from './generationCache.js';
 import { matchReviewSearch } from './reviewSearch.js';
 import { withinFileListBudget } from './fileListBudget.js';
@@ -260,6 +256,9 @@ export type {
   ReviewLiveFolderSummary,
   ReviewLiveFolderView,
   ReviewLiveFolderViewRequest,
+  ReviewLiveFolderContents,
+  ReviewLiveFoldersView,
+  ReviewLiveFoldersViewRequest,
   ReviewLiveManifestAvailableView,
   ReviewLiveManifestUnavailableView,
   ReviewLiveManifestView,
@@ -657,9 +656,13 @@ export class WorkspaceProjection {
       case 'review.live-manifest':
         return await this.#liveManifest(request, index, entry);
       case 'review.live-files':
-        return await this.#liveFiles(request, index, entry);
       case 'review.live-folder':
-        return await this.#liveFolder(request, index, entry);
+      case 'review.live-folders':
+        return liveListView(
+          request,
+          index.stateVersion,
+          await this.#liveFileList(entry, index, request.liveChangesIdentity),
+        );
       case 'review.live-file-content':
         return await this.#liveFileContent(request, index, entry);
       case 'review.continuation':
@@ -2786,24 +2789,6 @@ export class WorkspaceProjection {
     }
     const files = layLiveChangesOnce(repository.files, live.projection.files);
     return { status: 'available', liveChangesIdentity: live.liveChangesIdentity, files };
-  }
-
-  async #liveFiles(
-    request: ReviewLiveFilesViewRequest,
-    index: LoadedIndex,
-    entry: ReviewIndexEntry | undefined,
-  ): Promise<ReviewLiveFilesView> {
-    const listing = await this.#liveFileList(entry, index, request.liveChangesIdentity);
-    return liveFilesView(request, index.stateVersion, listing);
-  }
-
-  async #liveFolder(
-    request: ReviewLiveFolderViewRequest,
-    index: LoadedIndex,
-    entry: ReviewIndexEntry | undefined,
-  ): Promise<ReviewLiveFolderView> {
-    const listing = await this.#liveFileList(entry, index, request.liveChangesIdentity);
-    return liveFolderView(request, index.stateVersion, listing);
   }
 
   async #liveFileContent(

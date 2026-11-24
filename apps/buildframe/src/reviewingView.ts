@@ -46,7 +46,7 @@ import {
   comparisonUnavailableNotice,
   noticeToneOf,
 } from './reviewingModel.js';
-import { reviewFileTreeNodes, reviewingFiles } from './reviewingFileList.js';
+import { reviewTreeNodes, reviewingFiles } from './reviewingFileList.js';
 import { noticeGlyph, noticeStatusTone, outgoingBadge, spinnerGlyph, type StatusTone } from './reviewingStatus.js';
 
 import {
@@ -72,6 +72,7 @@ import {
   controlPlaneTheme,
   label,
   safeText,
+  spans,
   theme,
   wrappedRows,
   type ThemeColor,
@@ -99,6 +100,7 @@ import { messageOutcomeLabel, questionStateLabel, responseSize, stateBadge } fro
 import { homeLauncherCard, homePane, homeRow, homeSentence, type HomeCard } from './shellHome.js';
 import { shortDisplayPath, treeName } from './reviewingPathText.js';
 import { clippedCode } from './reviewingWrappedCode.js';
+import { selectionSpan, sidePairs, type SidePair } from './reviewingDiffRows.js';
 import { balancedSibling, paneTitle, shownFocus } from './reviewingPaneTitle.js';
 import { reviewingOwnSettings } from './reviewingSettings.js';
 import { commitName, headMoveNote, shortHash } from './reviewingHeadMoves.js';
@@ -447,7 +449,6 @@ function filesPane(
   }
   const colors = theme(state);
   const review = state.review;
-  const files = reviewingFiles(review, state.fileScope);
   // "All" only when every file is really listed: a fixed Review has its changed files alone.
   const allShown = state.fileScope === 'all' && review?.liveFiles?.status === 'available';
   const source = allShown ? review.liveFiles.files : review?.manifest.manifest;
@@ -457,7 +458,7 @@ function filesPane(
   const messages = review?.messages.messages.items ?? [];
   const changedDuring = changedDuringByPath(review);
   const changedGlyph = state.presentation.ascii ? '*' : '✎';
-  const nodes = reviewFileTreeNodes(files, state.collapsedDirectories);
+  const nodes = reviewTreeNodes(review, state.fileScope, state.collapsedDirectories);
   const selectedIndex =
     state.selectedDirectory !== undefined
       ? nodes.findIndex(node => node.kind === 'directory' && node.directory === state.selectedDirectory)
@@ -478,11 +479,20 @@ function filesPane(
           ? `${node.collapsed ? NERD_ICONS.folder : NERD_ICONS.folderOpen} `
           : `${node.collapsed ? (state.presentation.ascii ? '>' : '▸') : state.presentation.ascii ? 'v' : '▾'} `;
         const selected = node.directory === state.selectedDirectory;
+        const row = `${selected ? (state.presentation.ascii ? '>' : '›') : ' '}${indent} ${glyph}${treeName(node.directory)}`;
+        const fg = selected ? selectionColors(state, 'files').fg : node.collapsed ? colors.muted : colors.text;
+        // A closed folder says where the changes are, in Pewter after its name.
+        const changed = node.collapsed && node.changedFiles > 0 ? `  ${node.changedFiles} changed` : '';
         return label(
           state,
-          `${selected ? (state.presentation.ascii ? '>' : '›') : ' '}${indent} ${glyph}${treeName(node.directory)}`,
+          changed === ''
+            ? row
+            : spans(state, [
+                { text: row, fg, bold: true },
+                { text: changed, fg: colors.muted },
+              ]),
           {
-            fg: selected ? selectionColors(state, 'files').fg : node.collapsed ? colors.muted : colors.text,
+            fg,
             bg: selected ? selectionColors(state, 'files').bg : colors.surface,
             bold: true,
             height: 1,
@@ -552,7 +562,7 @@ function filesPane(
     interaction,
     sourceTotal,
     {
-      contentKey: `reviewing-files:${sourceIdentity}:${state.fileScope}:${sourceOffset}:${state.collapsedDirectories.join('|')}`,
+      contentKey: `reviewing-files:${sourceIdentity}:${state.fileScope}:${sourceOffset}:${sourceTotal}:${state.collapsedDirectories.join('|')}`,
       anchorScope: `reviewing-files:${sourceIdentity}:${state.fileScope}`,
     },
   );
@@ -577,7 +587,15 @@ function filesPane(
       `${state.loading?.region === 'files' ? state.loading.label : allShown ? 'All' : 'Changed'}${balancedSibling(state, 'files')}`,
       column.span,
     ),
-    label(state, `  ${sourceTotal} ${allShown ? 'repository' : 'changed'} files`, { fg: colors.muted, height: 1 }),
+    // All files counts every file in the repository, loaded or not.
+    label(
+      state,
+      `  ${allShown ? (review.liveFolders?.loaded.get('')?.summary.files ?? sourceTotal) : sourceTotal} ${allShown ? 'repository' : 'changed'} files`,
+      {
+        fg: colors.muted,
+        height: 1,
+      },
+    ),
     column.body,
   );
 }
@@ -1928,21 +1946,6 @@ function messageThreadCard(
   );
 }
 
-/** Where the selection starts, in rows, and how many rows it spans: one running total. */
-function selectionSpan(
-  items: readonly ReviewingVisualItem[],
-  first: number,
-  last: number,
-): { readonly selectionStart?: number; readonly selectionSize?: number } {
-  if (first < 0) return {};
-  let start = 0;
-  for (let index = 0; index < first; index += 1) start += items[index]!.size;
-  if (last < first) return { selectionStart: start };
-  let size = 0;
-  for (let index = first; index <= last; index += 1) size += items[index]!.size;
-  return { selectionStart: start, selectionSize: size };
-}
-
 /**
  * Wrapped heights by row object. Rows are immutable and stay the same objects
  * between redraws, so cursor moves, glides and spinners re-measure nothing.
@@ -2037,36 +2040,6 @@ function diffLine(
       codeWidth,
     ),
   );
-}
-
-interface SidePair {
-  readonly old?: ReviewProjectedDiffRow;
-  readonly next?: ReviewProjectedDiffRow;
-}
-
-function sidePairs(rows: readonly ReviewProjectedDiffRow[]): readonly SidePair[] {
-  const pairs: SidePair[] = [];
-  let index = 0;
-  while (index < rows.length) {
-    const row = rows[index];
-    if (row === undefined) break;
-    if (row.kind === 'context') {
-      pairs.push({ old: row, next: row });
-      index += 1;
-      continue;
-    }
-    const deletions: ReviewProjectedDiffRow[] = [];
-    while (rows[index]?.kind === 'deletion') deletions.push(rows[index++]!);
-    const additions: ReviewProjectedDiffRow[] = [];
-    while (rows[index]?.kind === 'addition') additions.push(rows[index++]!);
-    for (let offset = 0; offset < Math.max(deletions.length, additions.length); offset += 1) {
-      pairs.push({
-        ...(deletions[offset] === undefined ? {} : { old: deletions[offset] }),
-        ...(additions[offset] === undefined ? {} : { next: additions[offset] }),
-      });
-    }
-  }
-  return pairs;
 }
 
 function sidePairHeight(state: ReviewingApplicationState, pair: SidePair, codeWidth: number): number {

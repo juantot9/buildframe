@@ -45,11 +45,12 @@ describe('every file, and searching it', () => {
     cleanups.push(async () => await rm(root, { recursive: true, force: true }));
     const checkout = path.join(root, 'checkout');
     await mkdir(path.join(checkout, 'src'), { recursive: true });
+    await mkdir(path.join(checkout, 'docs/notes'), { recursive: true });
     process.env.XDG_STATE_HOME = path.join(root, 'state');
     await git(checkout, 'init', '-q');
     await git(checkout, 'config', 'user.name', 'BuildFrame Test');
     await git(checkout, 'config', 'user.email', 'user-8@masked.invalid');
-    for (const file of ['src/a.ts', 'src/b.ts', 'src/config.ts', 'README.md']) {
+    for (const file of ['src/a.ts', 'src/b.ts', 'src/config.ts', 'README.md', 'docs/guide.md', 'docs/notes/plan.md']) {
       await writeFile(path.join(checkout, file), 'const value = 1;\n');
     }
     await writeFile(path.join(checkout, 'src/config.ts'), `const value = 1;\n// long ${'x '.repeat(120)}\n`);
@@ -88,7 +89,21 @@ describe('every file, and searching it', () => {
     terminal.mockInput.pressEnter();
     await shows('1 changed files');
     terminal.mockInput.pressKey('f');
-    await shows('4 repository files');
+    await shows('6 repository files');
+    // Only the folder with the change is open; docs/ is one closed row until it is opened.
+    expect(frame()).toMatch(/▾ src\//u);
+    expect(frame()).toMatch(/▸ docs\//u);
+    expect(frame()).not.toContain('guide.md');
+    type('G');
+    await shows('› ▸ docs/');
+    type('l');
+    await shows('guide.md');
+    expect(frame()).toMatch(/▸ notes\//u);
+    // Closed, a folder with changes says how many.
+    type('H');
+    await shows('▸ src/  1 changed');
+    type('L');
+    await shows('▾ src/');
 
     terminal.mockInput.pressKey('/');
     await shows('Search this Review');
@@ -113,6 +128,15 @@ describe('every file, and searching it', () => {
     terminal.mockInput.pressKey('v');
     await waitFor(() => (frame().match(/const value = 1;/gu) ?? []).length === 1, 'one side again');
 
+    // / opens a file in a folder never opened, loading the folders on its way.
+    terminal.mockInput.pressKey('/');
+    await shows('Search this Review');
+    type('plan');
+    await shows('docs/notes/plan.md  · unchanged');
+    terminal.mockInput.pressEnter();
+    await shows('docs/notes/plan.md is unchanged versus this basis.');
+    expect(frame()).toMatch(/›\s+·\s+plan\.md/u);
+
     // A Review of a commit is fixed: no list of every file, and the pane says so.
     terminal.mockInput.pressEscape();
     await shows('Review a commit or range');
@@ -122,11 +146,11 @@ describe('every file, and searching it', () => {
     await shows('Parent  none (first commit)');
     terminal.mockInput.pressEnter();
     await shows('Fixed commits: Messages quote them as saved');
-    expect(frame()).toContain('4 changed files');
+    expect(frame()).toContain('6 changed files');
     expect(frame()).not.toContain('repository files');
     terminal.mockInput.pressKey('f');
     await shows('Only changed files here: every file shows on live changes, in the Current Review.');
-    expect(frame()).toContain('4 changed files');
+    expect(frame()).toContain('6 changed files');
 
     terminal.mockInput.pressKey('q');
     await application.closed;

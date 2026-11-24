@@ -48,6 +48,8 @@ export type ReviewSearchItem =
       readonly fileIdentity: string;
       readonly fileAbsolute: number;
       readonly displayPath: string;
+      /** Exact path bytes, so the file can be opened wherever All files has it. */
+      readonly pathBytesBase64: string;
     }
   | {
       readonly kind: 'change';

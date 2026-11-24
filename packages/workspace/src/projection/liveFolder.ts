@@ -7,10 +7,18 @@ import type {
   ReviewLiveFilesViewRequest,
   ReviewLiveFolderEntry,
   ReviewLiveFolderSummary,
+  ReviewLiveFolderContents,
   ReviewLiveFolderView,
   ReviewLiveFolderViewRequest,
+  ReviewLiveFoldersView,
+  ReviewLiveFoldersViewRequest,
 } from './liveFileContracts.js';
-import { WORKSPACE_PROJECTION_VERSION } from './limits.js';
+import {
+  MAX_FILE_LIST_READ_BYTES,
+  MAX_FILE_LIST_READ_FILES,
+  MAX_LIVE_FOLDER_READ_ENTRIES,
+  WORKSPACE_PROJECTION_VERSION,
+} from './limits.js';
 
 /** Every repository file with the live changes laid over it, or why there is none. */
 export type LiveFileListing =
@@ -44,6 +52,75 @@ export function liveFilesView(
     status: 'available',
     liveChangesIdentity: listing.liveChangesIdentity,
     files: { total: all.length, offset: request.offset, items, nextOffset: next < all.length ? next : null },
+  };
+}
+
+/** Any of the live file list's reads: the whole list, one folder, or many whole folders. */
+export function liveListView(
+  request: ReviewLiveFilesViewRequest | ReviewLiveFolderViewRequest | ReviewLiveFoldersViewRequest,
+  stateVersion: number,
+  listing: LiveFileListing,
+): ReviewLiveFilesView | ReviewLiveFolderView | ReviewLiveFoldersView {
+  if (request.kind === 'review.live-files') return liveFilesView(request, stateVersion, listing);
+  if (request.kind === 'review.live-folder') return liveFolderView(request, stateVersion, listing);
+  return liveFoldersView(request, stateVersion, listing);
+}
+
+/**
+ * Whole folders, in the order asked, while they fit one read's row and byte
+ * bounds; the rest are named so the next read (or a paged one) picks them up.
+ */
+export function liveFoldersView(
+  request: ReviewLiveFoldersViewRequest,
+  stateVersion: number,
+  listing: LiveFileListing,
+): ReviewLiveFoldersView {
+  const header = {
+    kind: 'review.live-folders',
+    projectionVersion: WORKSPACE_PROJECTION_VERSION,
+    stateVersion,
+    reviewIdentity: request.reviewIdentity,
+  } as const;
+  if (listing.status !== 'available') {
+    return { ...header, liveChangesIdentity: request.liveChangesIdentity, ...listing } as ReviewLiveFoldersView;
+  }
+  const index = folderIndex(listing.files);
+  const folders: ReviewLiveFolderContents[] = [];
+  const missing: string[] = [];
+  const remaining: string[] = [];
+  const tooLarge: string[] = [];
+  let rows = 0;
+  let bytes = 0;
+  for (const path of request.pathsBytesBase64) {
+    const folder = index.get(Buffer.from(path, 'base64').toString('latin1'));
+    if (folder === undefined) {
+      missing.push(path);
+      continue;
+    }
+    const entries = entriesOf(folder);
+    folder.bytes ??= Buffer.byteLength(JSON.stringify(entries), 'utf8');
+    if (entries.length > MAX_LIVE_FOLDER_READ_ENTRIES || folder.bytes > MAX_FILE_LIST_READ_BYTES) {
+      tooLarge.push(path);
+    } else if (
+      remaining.length > 0 ||
+      rows + entries.length > MAX_FILE_LIST_READ_FILES ||
+      bytes + folder.bytes > MAX_FILE_LIST_READ_BYTES
+    ) {
+      remaining.push(path);
+    } else {
+      folders.push({ folder: summaryOf(folder), entries });
+      rows += entries.length;
+      bytes += folder.bytes;
+    }
+  }
+  return {
+    ...header,
+    status: 'available',
+    liveChangesIdentity: listing.liveChangesIdentity,
+    folders,
+    missing,
+    remaining,
+    tooLarge,
   };
 }
 
@@ -89,6 +166,8 @@ interface Folder {
   readonly items: ReviewLiveFileItem[];
   entries?: readonly ReviewLiveFolderEntry[];
   summary?: ReviewLiveFolderSummary;
+  /** The encoded size of all its rows, measured once. */
+  bytes?: number;
 }
 
 /** Built once per laid file list, so opening a folder costs only its own rows. */

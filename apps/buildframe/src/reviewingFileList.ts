@@ -1,6 +1,7 @@
 import type { ReviewProjectedFile } from '@buildframe/workspace/projection';
 
 import type { ReviewViewBundle, ReviewingApplicationState } from './reviewingModel.js';
+import { unloadedFolders, type UnloadedFolder } from './reviewingLiveFolders.js';
 
 /** The Files pane's list: the files a Review shows, and the tree they're drawn as. */
 
@@ -55,6 +56,10 @@ export type ReviewFileTreeNode =
       readonly depth: number;
       /** Flat index of the first file beneath this folder. */
       readonly flat: number;
+      /** Changed files anywhere beneath, so a closed folder can say where the changes are. */
+      readonly changedFiles: number;
+      /** Not read yet: opening it loads it. */
+      readonly unloaded?: { readonly pathBytesBase64: string };
     }
   | {
       readonly kind: 'file';
@@ -69,6 +74,8 @@ interface ReviewFileTreeDirectory {
   readonly directories: Map<string, ReviewFileTreeDirectory>;
   readonly files: { readonly file: ReviewingFileItem; readonly flat: number }[];
   firstFlat: number;
+  changedFiles: number;
+  unloaded?: UnloadedFolder;
 }
 
 /**
@@ -81,6 +88,7 @@ interface ReviewFileTreeDirectory {
 export function reviewFileTreeNodes(
   files: readonly ReviewingFileItem[],
   collapsedDirectories: readonly string[],
+  unloadedFolders: readonly UnloadedFolder[] = [],
 ): readonly ReviewFileTreeNode[] {
   const root: ReviewFileTreeDirectory = {
     path: '',
@@ -88,25 +96,39 @@ export function reviewFileTreeNodes(
     directories: new Map(),
     files: [],
     firstFlat: 0,
+    changedFiles: 0,
   };
   const changedDirectories = new Set<string>();
-  files.forEach((file, flat) => {
-    const slash = file.displayPath.lastIndexOf('/');
-    const parts = slash < 0 ? [] : file.displayPath.slice(0, slash).split('/');
+  /** The folder for a path, and every folder above it, created as needed. */
+  const directoryOf = (folderPath: string, flat: number, changed: number): ReviewFileTreeDirectory => {
     let current = root;
     let prefix = '';
-    parts.forEach((segment, depth) => {
+    for (const [depth, segment] of (folderPath === '' ? [] : folderPath.split('/')).entries()) {
       prefix = `${prefix}${segment}/`;
       let next = current.directories.get(prefix);
       if (next === undefined) {
-        next = { path: prefix, depth, directories: new Map(), files: [], firstFlat: flat };
+        next = { path: prefix, depth, directories: new Map(), files: [], firstFlat: flat, changedFiles: 0 };
         current.directories.set(prefix, next);
       }
       next.firstFlat = Math.min(next.firstFlat, flat);
-      if (file.status !== 'unchanged') changedDirectories.add(prefix);
+      next.changedFiles += changed;
+      if (changed > 0) changedDirectories.add(prefix);
       current = next;
-    });
-    current.files.push({ file, flat });
+    }
+    return current;
+  };
+  files.forEach((file, flat) => {
+    const slash = file.displayPath.lastIndexOf('/');
+    const folder = directoryOf(
+      slash < 0 ? '' : file.displayPath.slice(0, slash),
+      flat,
+      file.status === 'unchanged' ? 0 : 1,
+    );
+    folder.files.push({ file, flat });
+  });
+  // An unloaded folder sorts among its siblings by name; it starts no file of its own.
+  unloadedFolders.forEach((folder, index) => {
+    directoryOf(folder.directory.slice(0, -1), files.length + index, folder.changedFiles).unloaded = folder;
   });
 
   const collapsed = new Set(collapsedDirectories);
@@ -134,13 +156,15 @@ export function reviewFileTreeNodes(
         continue;
       }
       const child = entry.directory;
-      const isCollapsed = collapsed.has(child.path);
+      const isCollapsed = child.unloaded !== undefined || collapsed.has(child.path);
       nodes.push({
         kind: 'directory',
         directory: child.path,
         collapsed: isCollapsed,
         depth: child.depth,
         flat: child.firstFlat,
+        changedFiles: child.changedFiles,
+        ...(child.unloaded === undefined ? {} : { unloaded: { pathBytesBase64: child.unloaded.pathBytesBase64 } }),
       });
       if (!isCollapsed) emit(child);
     }
@@ -156,4 +180,15 @@ export function firstListedFile(
 ): ReviewingFileItem | undefined {
   const node = reviewFileTreeNodes(files, collapsedDirectories).find(entry => entry.kind === 'file');
   return node?.kind === 'file' ? node.file : files[0];
+}
+
+/** The Files tree a Review shows: in All files, with a closed row for each folder not loaded yet. */
+export function reviewTreeNodes(
+  review: ReviewViewBundle | undefined,
+  scope: ReviewingApplicationState['fileScope'],
+  collapsedDirectories: readonly string[],
+): readonly ReviewFileTreeNode[] {
+  const files = reviewingFiles(review, scope);
+  const allShown = scope === 'all' && review?.source.kind === 'live' && review.liveFiles?.status === 'available';
+  return reviewFileTreeNodes(files, collapsedDirectories, allShown ? unloadedFolders(review.liveFolders) : []);
 }
