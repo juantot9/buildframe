@@ -186,6 +186,7 @@ import {
   commandRecordIdentity,
   diffWindowIdentity,
   fileRecordIdentity,
+  headObjectIdentity,
   indexIdentity,
   manifestWindowIdentity,
   permanentProjectionRecordFailure,
@@ -212,6 +213,7 @@ import {
 import { layLiveChanges } from './liveFileList.js';
 import { GenerationCache } from './generationCache.js';
 import { matchReviewSearch } from './reviewSearch.js';
+import { withinFileListBudget } from './fileListBudget.js';
 
 export { WORKSPACE_PROJECTION_VERSION } from './limits.js';
 export type {
@@ -338,14 +340,6 @@ type StepChangeSet =
 const MAX_STEP_CHANGE_SETS = 8;
 const MAX_HISTORY_POINT_STATES = 1024;
 const MAX_COMMIT_CROSSINGS = 8;
-
-/** The commit a captured basis compares against; undefined unless it is HEAD. */
-function headObjectIdentity(basis: {
-  readonly kind: string;
-  readonly objectIdentity?: string | null;
-}): string | null | undefined {
-  return basis.kind === 'head' ? (basis.objectIdentity ?? null) : undefined;
-}
 
 type MessageChangedPaths = { readonly paths: readonly EvidencePath[]; readonly total: number } | undefined;
 
@@ -1558,7 +1552,8 @@ export class WorkspaceProjection {
     }
     const { status: snapshotStatus, contextStatus } = await this.#snapshotStatus(snapshot);
     const current = new Map(entry.currentDispositions.map(item => [item.questionIdentity, item]));
-    const next = request.offset + files.length;
+    const listed = withinFileListBudget(files.map(projectedFile));
+    const next = request.offset + listed.length;
     return {
       kind: 'review.manifest',
       status: 'available',
@@ -1569,7 +1564,7 @@ export class WorkspaceProjection {
         totalFiles: snapshot.manifest.totalFiles,
         identity: snapshot.manifest.digest.value,
         offset: request.offset,
-        files: files.map(projectedFile),
+        files: listed,
         nextOffset: next < snapshot.manifest.totalFiles ? next : null,
       },
       questions: {
@@ -2434,7 +2429,9 @@ export class WorkspaceProjection {
     if (entry === undefined) return { ...base, status: 'not-found' };
     const changes = await this.#stepChangeSet(entry, index, request.from, request.to);
     if (changes.status !== 'available') return { ...base, status: changes.status, reason: changes.reason };
-    const items = changes.files.slice(request.offset, request.offset + request.limit).map(item => item.file);
+    const items = withinFileListBudget(
+      changes.files.slice(request.offset, request.offset + request.limit).map(item => item.file),
+    );
     const next = request.offset + items.length;
     return {
       ...base,
@@ -2731,7 +2728,9 @@ export class WorkspaceProjection {
         reason: 'inspection-failed',
       };
     }
-    const files = live.projection.files.slice(request.offset, request.offset + request.limit);
+    const files = withinFileListBudget(
+      live.projection.files.slice(request.offset, request.offset + request.limit).map(projectedFile),
+    );
     const next = request.offset + files.length;
     return {
       kind: 'review.live-manifest',
@@ -2745,7 +2744,7 @@ export class WorkspaceProjection {
       manifest: {
         totalFiles: live.projection.files.length,
         offset: request.offset,
-        files: files.map(projectedFile),
+        files,
         nextOffset: next < live.projection.files.length ? next : null,
       },
     };
@@ -2812,7 +2811,7 @@ export class WorkspaceProjection {
     const listed = await this.#liveFileList(entry, index, request.liveChangesIdentity);
     if (listed.status !== 'available') return unavailable(listed.status, listed.reason);
     const { live, files: all } = listed;
-    const items = all.slice(request.offset, request.offset + request.limit);
+    const items = withinFileListBudget(all.slice(request.offset, request.offset + request.limit));
     const next = request.offset + items.length;
     return {
       kind: 'review.live-files',

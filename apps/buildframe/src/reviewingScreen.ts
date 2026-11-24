@@ -1,5 +1,6 @@
 import type { CliRenderer } from '@opentui/core';
 import type { Workspace } from '@buildframe/workspace';
+import { joinFileListPieces } from './reviewingFileListPieces.js';
 
 import { ReviewingExtension } from './reviewingApplication.js';
 import type { ReviewingHighlight } from './reviewingHighlight.js';
@@ -37,7 +38,13 @@ function reviewingScreen(
     modes: { reviewing: {} },
     keys: [],
     body: () => [],
-    extend: surface => new ReviewingExtension(options, surface, createHighlightClient),
+    // Long file lists arrive in pieces that fit the runtime's message cap; Reviewing reads them joined.
+    extend: surface =>
+      new ReviewingExtension(
+        { ...options, workspace: joinFileListPieces(options.workspace) },
+        surface,
+        createHighlightClient,
+      ),
   });
 }
 

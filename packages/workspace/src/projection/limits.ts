@@ -72,3 +72,10 @@ export const LIVE_CHANGES_ID_PATTERN: RegExp = /^lch_[0-9a-f]{64}$/u;
  * needs, so a client can hold a repository's whole file list at once.
  */
 export const MAX_FILE_LIST_READ_FILES = 10_000;
+
+/**
+ * The most bytes one file-list read's entries take when encoded: half the
+ * local runtime's 1 MiB message cap, leaving room for the rest of the view.
+ * A read that reaches it stops early and says where the next one starts.
+ */
+export const MAX_FILE_LIST_READ_BYTES: number = 512 * 1024;

@@ -91,3 +91,11 @@ export function diffWindowIdentity(snapshotIdentity: string, fileIdentity: strin
 export function commandRecordIdentity(commandIdentity: string): string {
   return reviewingRecordIdentity('rcm', commandIdentity);
 }
+
+/** The commit a captured basis compares against; undefined unless it is HEAD. */
+export function headObjectIdentity(basis: {
+  readonly kind: string;
+  readonly objectIdentity?: string | null;
+}): string | null | undefined {
+  return basis.kind === 'head' ? (basis.objectIdentity ?? null) : undefined;
+}

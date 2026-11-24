@@ -5598,7 +5598,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     const filesPaneText = (): string =>
       renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-files-viewport'));
     await waitFor(() => !filesPaneText().includes(' file-0.ts'), 'Files list scrolled');
-    expect(frameLineWith(' file-3.ts')?.includes('>')).toBe(false);
+    expect(filesPaneText()).not.toContain('>');
 
     const secondMessageSelected = (): boolean => {
       const secondMessage = terminal.renderer.root.findDescendantById('reviewing-message-card-2') as
