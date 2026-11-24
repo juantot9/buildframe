@@ -63,7 +63,14 @@ so `#publishCommitted` stops naming them.
 
 ## B. Visual polish (frames shown before and after)
 
-The visual review's ranked proposals and polish table, in its suggested order.
+The visual review's ranked proposals, in its suggested order. Owner
+decision 2026-11-24: theming, layout and spacing only; labels, copy and
+glyph choices stay (the polish table's wording rows are out).
+
+Done: B1 (`fd63657`) proposals 2, 3, 7, 9 (answer tone), 11, 12 and the
+Files/History inset; critique 27 → 29/40. The mark column stays 3 cells
+(owner, 2026-11-24). Next, B2: dialog backdrop and focus (1), card inset (6),
+`↳` and badge-only colour on the card title (rest of 9).
 
 ## D. Larger changes
 
