@@ -104,6 +104,12 @@ const waitFor = async (predicate, what, timeout = 60_000) => {
   while (!predicate()) {
     if (t() - s > timeout) {
       writeFileSync(path.join(process.env.PERF_ROOT, 'last-frame.txt'), capture());
+      // Every distinct frame so far, to see where a run stopped moving.
+      const distinct = frames.filter((frame, index) => index === 0 || frame.text !== frames[index - 1].text);
+      writeFileSync(
+        path.join(process.env.PERF_ROOT, 'frames-before-timeout.txt'),
+        distinct.map(frame => `=== +${frame.at.toFixed(0)} ms\n${frame.text}`).join('\n'),
+      );
       throw new Error(`timeout: ${what}`);
     }
     await new Promise(r => setTimeout(r, 1));
@@ -314,6 +320,49 @@ if (run('wheel')) {
     }
     rss('after wheel');
   } else console.error('no diff viewport');
+}
+
+// 7. Wheel through every file in Files: the whole list is one scroll, so the
+// flick never waits for a window to load and reaches the last file.
+if (run('fileswheel')) {
+  drawPhase = 'Files wheel';
+  await focus('Files');
+  if (!capture().includes('Files FOCUSED  All')) await press('f (every file)', 'f');
+  const viewport = () => renderer.root.findDescendantById('reviewing-files-viewport');
+  if (viewport() !== undefined) {
+    const v = viewport();
+    const x = v.screenX + Math.floor(v.width / 2);
+    const y = v.screenY + Math.floor(v.height / 2);
+    const s = t();
+    const before = frames.length;
+    let notches = 0;
+    let unchanged = 0;
+    let previous = capture();
+    let syncTotal = 0;
+    for (; notches < 4000; notches += 1) {
+      const ws = t();
+      await terminal.mockMouse.scroll(x, y, 'down');
+      syncTotal += t() - ws;
+      await new Promise(r => setTimeout(r, 8));
+      const current = capture();
+      if (current === previous) unchanged += 1;
+      else unchanged = 0;
+      previous = current;
+      if (unchanged >= 25) break;
+    }
+    const r = await settle(s, 200);
+    const burstFrames = frames.slice(before);
+    const gaps = burstFrames.slice(1).map((f, i) => f.at - burstFrames[i].at);
+    record('Files wheel to the end: notches', notches - unchanged + 1);
+    record('Files wheel to the end: wall (ms)', r.lastChange ?? NaN);
+    record('Files wheel: mean JS time per notch (ms)', syncTotal / notches);
+    record('Files wheel: frames presented', burstFrames.length);
+    if (gaps.length > 0) {
+      record('Files wheel: max gap between frames (ms)', Math.max(...gaps));
+      record('Files wheel: frames with gap > 33 ms', gaps.filter(g => g > 33).length);
+    }
+    writeFileSync(path.join(process.env.PERF_ROOT, `frame-files-wheel-end-${path.basename(repo)}.txt`), capture());
+  } else console.error('no files viewport');
 }
 
 // Renderer-side frame stats (native render + output).
