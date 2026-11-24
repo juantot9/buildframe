@@ -69,8 +69,12 @@ glyph choices stay (the polish table's wording rows are out).
 
 Done: B1 (`fd63657`) proposals 2, 3, 7, 9 (answer tone), 11, 12 and the
 Files/History inset; critique 27 → 29/40. The mark column stays 3 cells
-(owner, 2026-11-24). Next, B2: dialog backdrop and focus (1), card inset (6),
-`↳` and badge-only colour on the card title (rest of 9).
+(owner, 2026-11-24). B2: dialog backdrop (1) and card inset (6); History
+stays short whenever the card holds the Message, paged or not (owner,
+2026-11-24). Dropped: badge-only colour on the card title (OpenTUI draws a
+border title in one colour) and a Sage `↳` (it would split every answer row).
+Left: side-by-side room (4), loading frame shape (5), theme keyword hues
+(10), wrapped-row continuation (m).
 
 ## D. Larger changes
 
