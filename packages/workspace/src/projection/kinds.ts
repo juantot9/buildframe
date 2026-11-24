@@ -17,6 +17,7 @@ export const PROJECTION_VIEW_KINDS: readonly WorkspaceProjectionViewRequest['kin
   'review.live-diff',
   'review.live-file-content',
   'review.live-files',
+  'review.live-folder',
   'review.live-manifest',
   'review.manifest',
   'review.message-body',

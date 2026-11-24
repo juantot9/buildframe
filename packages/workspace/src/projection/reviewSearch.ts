@@ -1,4 +1,4 @@
-import type { ReviewLiveFileItem } from './contracts.js';
+import type { ReviewLiveFileItem } from './liveFileContracts.js';
 import type { ReviewSearchIndex } from './internalTypes.js';
 import type { ReviewSearchItem, ReviewSearchViewRequest } from './searchContracts.js';
 import { searchSnippet } from './utils.js';

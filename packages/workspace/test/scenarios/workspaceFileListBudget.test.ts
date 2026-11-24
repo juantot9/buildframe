@@ -79,5 +79,21 @@ describe('file-list reads fit the runtime message cap', () => {
       expect(seen).toHaveLength(total);
       expect(new Set(seen).size).toBe(total);
     }
+
+    // One folder of them, read in windows of at most 1,000 rows.
+    const folderRows = await readAll(
+      offset =>
+        owner.workspace.read({
+          kind: 'review.live-folder',
+          reviewIdentity: review.reviewIdentity,
+          liveChangesIdentity: live.liveChangesIdentity,
+          pathBytesBase64: Buffer.from(path.basename(folder)).toString('base64'),
+          offset,
+          limit: 1_000,
+        }),
+      view => ({ items: view.entries.items.map((entry: any) => entry.file), nextOffset: view.entries.nextOffset }),
+    );
+    expect(folderRows.pieces).toBeGreaterThan(3);
+    expect(new Set(folderRows.seen).size).toBe(NEW_FILES);
   }, 120_000);
 });

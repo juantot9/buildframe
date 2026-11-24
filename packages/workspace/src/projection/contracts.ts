@@ -51,6 +51,12 @@ import type {
   ReviewSearchView,
   ReviewSearchViewRequest,
 } from './searchContracts.js';
+import type {
+  ReviewLiveFilesView,
+  ReviewLiveFilesViewRequest,
+  ReviewLiveFolderView,
+  ReviewLiveFolderViewRequest,
+} from './liveFileContracts.js';
 
 export type {
   ReviewSearchItem,
@@ -60,6 +66,7 @@ export type {
   ReviewSearchView,
   ReviewSearchViewRequest,
 };
+export type * from './liveFileContracts.js';
 
 export interface WorkspaceHomeViewRequest {
   readonly kind: 'workspace.home';
@@ -107,14 +114,6 @@ export interface ReviewLiveDiffViewRequest {
   readonly limit: number;
   /** One-based source line whose row should be the first row of the window. */
   readonly anchorLine?: number;
-}
-
-export interface ReviewLiveFilesViewRequest {
-  readonly kind: 'review.live-files';
-  readonly reviewIdentity: ReviewIdentity;
-  readonly liveChangesIdentity: string;
-  readonly offset: number;
-  readonly limit: number;
 }
 
 export interface ReviewLiveFileContentViewRequest {
@@ -278,6 +277,7 @@ export type WorkspaceProjectionViewRequest =
   | ReviewContinuationViewRequest
   | ReviewLiveDiffViewRequest
   | ReviewLiveFilesViewRequest
+  | ReviewLiveFolderViewRequest
   | ReviewLiveFileContentViewRequest
   | ReviewVersionsViewRequest
   | ReviewBasesViewRequest
@@ -625,44 +625,6 @@ export interface ReviewLiveDiffUnavailableView {
 }
 
 export type ReviewLiveDiffView = ReviewLiveDiffAvailableView | ReviewLiveDiffUnavailableView;
-
-export interface ReviewLiveFileItem {
-  /** Stable path-row identity. Changed rows separately retain the Diff file identity. */
-  readonly fileIdentity: string;
-  readonly path: EvidencePath;
-  readonly status: ReviewProjectedFile['status'] | 'unchanged';
-  readonly changedFile?: ReviewProjectedFile;
-}
-
-export type ReviewLiveFilesView =
-  | {
-      readonly kind: 'review.live-files';
-      readonly status: 'available';
-      readonly projectionVersion: typeof WORKSPACE_PROJECTION_VERSION;
-      readonly stateVersion: number;
-      readonly reviewIdentity: ReviewIdentity;
-      readonly liveChangesIdentity: string;
-      readonly files: {
-        readonly total: number;
-        readonly offset: number;
-        readonly items: readonly ReviewLiveFileItem[];
-        readonly nextOffset: number | null;
-      };
-    }
-  | {
-      readonly kind: 'review.live-files';
-      readonly status: 'unavailable' | 'not-found' | 'fixed' | 'moved';
-      readonly projectionVersion: typeof WORKSPACE_PROJECTION_VERSION;
-      readonly stateVersion: number;
-      readonly reviewIdentity: ReviewIdentity;
-      readonly liveChangesIdentity: string;
-      readonly reason:
-        | 'inspection-failed'
-        | 'review-not-found'
-        | 'review-not-current'
-        | 'fixed-comparison'
-        | 'live-changes-moved';
-    };
 
 export type ReviewLiveFileContentView =
   | {
@@ -1416,6 +1378,7 @@ export type WorkspaceProjectionView =
   | ReviewContinuationView
   | ReviewLiveDiffView
   | ReviewLiveFilesView
+  | ReviewLiveFolderView
   | ReviewLiveFileContentView
   | ReviewVersionsView
   | ReviewBasesView
@@ -1445,6 +1408,7 @@ export interface WorkspaceProjectionViewByKind {
   'review.continuation': ReviewContinuationView;
   'review.live-diff': ReviewLiveDiffView;
   'review.live-files': ReviewLiveFilesView;
+  'review.live-folder': ReviewLiveFolderView;
   'review.live-file-content': ReviewLiveFileContentView;
   'review.versions': ReviewVersionsView;
   'review.bases': ReviewBasesView;

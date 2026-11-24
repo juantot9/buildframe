@@ -4,7 +4,7 @@ import {
   REVIEW_SNAPSHOT_CONTEXT_CONTENT_WINDOW_BYTES,
   REVIEW_SNAPSHOT_CONTEXT_MANIFEST_WINDOW_ITEMS,
 } from '../reviewing/index.js';
-import { normalizeReviewComparisonSelection } from '../workspaceEvidence/index.js';
+import { normalizeReviewComparisonSelection, validateRelativePath } from '../workspaceEvidence/index.js';
 import type {
   ReviewBasesViewRequest,
   ReviewCommandResultViewRequest,
@@ -15,6 +15,7 @@ import type {
   ReviewLiveDiffViewRequest,
   ReviewLiveFileContentViewRequest,
   ReviewLiveFilesViewRequest,
+  ReviewLiveFolderViewRequest,
   ReviewLiveManifestViewRequest,
   ReviewManifestViewRequest,
   ReviewMessageBodyViewRequest,
@@ -54,6 +55,7 @@ import {
   REVIEW_MESSAGE_ID_PATTERN,
   REVIEW_SNAPSHOT_ID_PATTERN,
   MAX_FILE_LIST_READ_FILES,
+  MAX_LIVE_FOLDER_READ_ENTRIES,
 } from './limits.js';
 import {
   assertWindow,
@@ -134,6 +136,33 @@ function normalizeLiveFilesRequest(request: Record<string, unknown>, value: unkn
   assertWindow(request.offset as number, request.limit as number, MAX_FILE_LIST_READ_FILES, 'Live file list');
   return value as ReviewLiveFilesViewRequest;
 }
+/** Folder path bytes in canonical base64: empty for the top, else a relative path. */
+function normalizeLiveFolderRequest(request: Record<string, unknown>, value: unknown): WorkspaceProjectionViewRequest {
+  assertReviewIdentity(request);
+  const path = request.pathBytesBase64;
+  const bytes = typeof path === 'string' ? Buffer.from(path, 'base64') : undefined;
+  if (
+    typeof request.liveChangesIdentity !== 'string' ||
+    !LIVE_CHANGES_ID_PATTERN.test(request.liveChangesIdentity) ||
+    bytes === undefined ||
+    bytes.toString('base64') !== path ||
+    (bytes.byteLength > 0 && !validRelativePath(bytes))
+  ) {
+    throw new TypeError('Invalid Live folder request');
+  }
+  assertWindow(request.offset as number, request.limit as number, MAX_LIVE_FOLDER_READ_ENTRIES, 'Live folder');
+  return value as ReviewLiveFolderViewRequest;
+}
+
+function validRelativePath(bytes: Buffer): boolean {
+  try {
+    validateRelativePath(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function normalizeLiveFileContentRequest(
   request: Record<string, unknown>,
   value: unknown,
@@ -417,6 +446,8 @@ export function normalizeRequest(value: unknown): WorkspaceProjectionViewRequest
       return normalizeLiveDiffRequest(request, value);
     case 'review.live-files':
       return normalizeLiveFilesRequest(request, value);
+    case 'review.live-folder':
+      return normalizeLiveFolderRequest(request, value);
     case 'review.live-file-content':
       return normalizeLiveFileContentRequest(request, value);
     case 'review.search':

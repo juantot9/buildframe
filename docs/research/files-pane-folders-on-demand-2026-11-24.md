@@ -1,6 +1,6 @@
 # Files pane: folders that load when opened
 
-Date: 2026-11-24. Status: brief, waiting for the owner's approval. Ticket: WF-321 (follows A5, `4d0db13`).
+Date: 2026-11-24. Status: approved 2026-11-24 (all three recommended answers); steps 1–2 done. Ticket: WF-321 (follows A5, `4d0db13`).
 
 ## Why
 

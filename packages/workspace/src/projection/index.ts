@@ -119,9 +119,10 @@ import type {
   ReviewLiveDiffViewRequest,
   ReviewLiveFileContentView,
   ReviewLiveFileContentViewRequest,
-  ReviewLiveFileItem,
   ReviewLiveFilesView,
   ReviewLiveFilesViewRequest,
+  ReviewLiveFolderView,
+  ReviewLiveFolderViewRequest,
   ReviewLiveManifestView,
   ReviewLiveManifestViewRequest,
   ReviewManifestView,
@@ -210,7 +211,8 @@ import {
   snapshotBlockers,
   textPreview,
 } from './views.js';
-import { layLiveChanges } from './liveFileList.js';
+import { layLiveChangesOnce } from './liveFileList.js';
+import { liveFilesView, liveFolderView, type LiveFileListing } from './liveFolder.js';
 import { GenerationCache } from './generationCache.js';
 import { matchReviewSearch } from './reviewSearch.js';
 import { withinFileListBudget } from './fileListBudget.js';
@@ -254,6 +256,10 @@ export type {
   ReviewLiveFileItem,
   ReviewLiveFilesView,
   ReviewLiveFilesViewRequest,
+  ReviewLiveFolderEntry,
+  ReviewLiveFolderSummary,
+  ReviewLiveFolderView,
+  ReviewLiveFolderViewRequest,
   ReviewLiveManifestAvailableView,
   ReviewLiveManifestUnavailableView,
   ReviewLiveManifestView,
@@ -652,6 +658,8 @@ export class WorkspaceProjection {
         return await this.#liveManifest(request, index, entry);
       case 'review.live-files':
         return await this.#liveFiles(request, index, entry);
+      case 'review.live-folder':
+        return await this.#liveFolder(request, index, entry);
       case 'review.live-file-content':
         return await this.#liveFileContent(request, index, entry);
       case 'review.continuation':
@@ -2752,19 +2760,11 @@ export class WorkspaceProjection {
 
   /** Every repository file with the current Review's live changes laid over it, or why there is none. */
   async #liveFileList(
-    entry: ReviewIndexEntry,
+    entry: ReviewIndexEntry | undefined,
     index: LoadedIndex,
     liveChangesIdentity: string,
-  ): Promise<
-    | { readonly status: 'available'; readonly live: LiveCaptureEntry; readonly files: ReviewLiveFileItem[] }
-    | {
-        readonly status: Exclude<ReviewLiveFilesView['status'], 'available' | 'not-found'>;
-        readonly reason: Extract<
-          ReviewLiveFilesView,
-          { readonly status: Exclude<ReviewLiveFilesView['status'], 'available'> }
-        >['reason'];
-      }
-  > {
+  ): Promise<LiveFileListing> {
+    if (entry === undefined) return { status: 'not-found', reason: 'review-not-found' };
     if (entry.reviewIdentity !== index.payload.currentReviewIdentity) {
       return { status: 'fixed', reason: 'review-not-current' };
     }
@@ -2784,7 +2784,8 @@ export class WorkspaceProjection {
       this.#repositoryFiles.delete(live);
       return { status: 'unavailable', reason: repository.reason };
     }
-    return { status: 'available', live, files: layLiveChanges(repository.files, live.projection.files) };
+    const files = layLiveChangesOnce(repository.files, live.projection.files);
+    return { status: 'available', liveChangesIdentity: live.liveChangesIdentity, files };
   }
 
   async #liveFiles(
@@ -2792,41 +2793,17 @@ export class WorkspaceProjection {
     index: LoadedIndex,
     entry: ReviewIndexEntry | undefined,
   ): Promise<ReviewLiveFilesView> {
-    const unavailable = (
-      status: Exclude<ReviewLiveFilesView['status'], 'available'>,
-      reason: Extract<
-        ReviewLiveFilesView,
-        { readonly status: Exclude<ReviewLiveFilesView['status'], 'available'> }
-      >['reason'],
-    ): ReviewLiveFilesView => ({
-      kind: 'review.live-files',
-      status,
-      projectionVersion: WORKSPACE_PROJECTION_VERSION,
-      stateVersion: index.stateVersion,
-      reviewIdentity: request.reviewIdentity,
-      liveChangesIdentity: request.liveChangesIdentity,
-      reason,
-    });
-    if (entry === undefined) return unavailable('not-found', 'review-not-found');
-    const listed = await this.#liveFileList(entry, index, request.liveChangesIdentity);
-    if (listed.status !== 'available') return unavailable(listed.status, listed.reason);
-    const { live, files: all } = listed;
-    const items = withinFileListBudget(all.slice(request.offset, request.offset + request.limit));
-    const next = request.offset + items.length;
-    return {
-      kind: 'review.live-files',
-      status: 'available',
-      projectionVersion: WORKSPACE_PROJECTION_VERSION,
-      stateVersion: index.stateVersion,
-      reviewIdentity: entry.reviewIdentity,
-      liveChangesIdentity: live.liveChangesIdentity,
-      files: {
-        total: all.length,
-        offset: request.offset,
-        items,
-        nextOffset: next < all.length ? next : null,
-      },
-    };
+    const listing = await this.#liveFileList(entry, index, request.liveChangesIdentity);
+    return liveFilesView(request, index.stateVersion, listing);
+  }
+
+  async #liveFolder(
+    request: ReviewLiveFolderViewRequest,
+    index: LoadedIndex,
+    entry: ReviewIndexEntry | undefined,
+  ): Promise<ReviewLiveFolderView> {
+    const listing = await this.#liveFileList(entry, index, request.liveChangesIdentity);
+    return liveFolderView(request, index.stateVersion, listing);
   }
 
   async #liveFileContent(

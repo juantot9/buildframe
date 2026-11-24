@@ -79,3 +79,6 @@ export const MAX_FILE_LIST_READ_FILES = 10_000;
  * A read that reaches it stops early and says where the next one starts.
  */
 export const MAX_FILE_LIST_READ_BYTES: number = 512 * 1024;
+
+/** The most rows (subfolders and files) one live folder read returns, within the same byte bound. */
+export const MAX_LIVE_FOLDER_READ_ENTRIES = 1_000;

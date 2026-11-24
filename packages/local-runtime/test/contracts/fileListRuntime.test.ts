@@ -109,4 +109,25 @@ it('reads a file list larger than one message over real IPC, piece by piece', as
   });
   if (manifest.status !== 'available') throw new Error('Manifest unavailable');
   expect(manifest.manifest.nextOffset).not.toBeNull();
+
+  // The folder that holds them reads in windows of at most 1,000 rows, each cut to fit one message.
+  const folderRows: string[] = [];
+  offset = 0;
+  pieces = 0;
+  while (offset !== null) {
+    const view = await connected.workspace.read({
+      kind: 'review.live-folder',
+      reviewIdentity: review.reviewIdentity,
+      liveChangesIdentity: live.liveChangesIdentity,
+      pathBytesBase64: Buffer.from(path.basename(folder)).toString('base64'),
+      offset,
+      limit: 1_000,
+    });
+    if (view.status !== 'available') throw new Error('Live folder unavailable');
+    folderRows.push(...view.entries.items.map(entry => (entry.kind === 'file' ? entry.file.fileIdentity : '')));
+    offset = view.entries.nextOffset;
+    pieces += 1;
+  }
+  expect(pieces).toBeGreaterThan(3);
+  expect(new Set(folderRows).size).toBe(newFiles);
 }, 120_000);

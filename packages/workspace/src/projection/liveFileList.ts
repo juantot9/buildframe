@@ -1,5 +1,5 @@
 import type { CurrentChangedFile, CurrentRepositoryFile } from '../workspaceEvidence/index.js';
-import type { ReviewLiveFileItem } from './contracts.js';
+import type { ReviewLiveFileItem } from './liveFileContracts.js';
 import { ProjectionRecordsInvalid } from './internalTypes.js';
 import { projectedFile } from './views.js';
 
@@ -35,4 +35,24 @@ export function layLiveChanges(
     if (changedOrder !== 0) return changedOrder;
     return Buffer.compare(Buffer.from(left.path.bytesBase64, 'base64'), Buffer.from(right.path.bytesBase64, 'base64'));
   });
+}
+
+const laid = new WeakMap<
+  readonly CurrentRepositoryFile[],
+  { readonly changedFiles: readonly CurrentChangedFile[]; readonly files: readonly ReviewLiveFileItem[] }
+>();
+
+/**
+ * `layLiveChanges`, kept for as long as both lists stay the same, so every read
+ * of one working-tree state shares one list (and its folder index).
+ */
+export function layLiveChangesOnce(
+  repositoryFiles: readonly CurrentRepositoryFile[],
+  changedFiles: readonly CurrentChangedFile[],
+): readonly ReviewLiveFileItem[] {
+  const cached = laid.get(repositoryFiles);
+  if (cached?.changedFiles === changedFiles) return cached.files;
+  const files = layLiveChanges(repositoryFiles, changedFiles);
+  laid.set(repositoryFiles, { changedFiles, files });
+  return files;
 }

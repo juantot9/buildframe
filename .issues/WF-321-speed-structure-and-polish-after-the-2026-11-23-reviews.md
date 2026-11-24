@@ -76,6 +76,15 @@ border title in one colour) and a Sage `↳` (it would split every answer row).
 Left: side-by-side room (4), loading frame shape (5), theme keyword hues
 (10), wrapped-row continuation (m).
 
+## Files pane folders and search (brief `docs/research/files-pane-folders-on-demand-2026-11-24.md`)
+
+Approved 2026-11-24 with the recommended answers. Step 1 (`58e26e4`): every
+file-list read fits under the 1 MiB message cap and the app joins the
+pieces. Step 2: the `review.live-folder` read, one folder's subfolders
+(with file and changed counts) and files, at most 1,000 rows and 512 KiB per
+read; 0.4 ms per folder on the 5,000-file repo once the index is built
+(2.8 ms for the first). Next: folders that load when opened, then Code search.
+
 ## D. Larger changes
 
 1. A persistent screen tree instead of rebuilding it on every key (with WF-214).
