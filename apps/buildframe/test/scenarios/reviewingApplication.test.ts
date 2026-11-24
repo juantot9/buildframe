@@ -1319,7 +1319,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
         ).toBe(true);
       }
       const captured: string[] = [];
-      // A presented frame can lag the model under load; a capture is only
+      // A presented frame can lag the model under load; a capture is
       // settled once two consecutive presented frames are identical.
       const captureSettled = async (): Promise<string> => {
         let previous = '';
@@ -1343,9 +1343,9 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
         if (diffPane === undefined) throw new Error('Diff pane missing');
         const availableRowHeight = Math.max(1, diffPane.height - 3);
         for (const row of rows) {
-          const code = row.getChildren()[1] as TextRenderable;
+          const code = row.getChildren()[3] as TextRenderable;
           const text = code.content.chunks.map(chunk => chunk.text).join('');
-          expect(code.screenX - row.screenX).toBe(14);
+          expect(code.screenX - row.screenX).toBe(17);
           expect(row.height, JSON.stringify({ lane, width, rowWidth: row.width, codeWidth: code.width, text })).toBe(
             Math.min(availableRowHeight, wrappedDisplayRows(text, code.width)),
           );
@@ -1369,7 +1369,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
             terminal.setup
               .captureCharFrame()
               .split('\n')
-              .find(line => line.includes('1 -old one'))
+              .find(line => line.includes('1    -old one'))
               ?.includes('▌') ?? false
           );
         }, `selection moved to the first Diff row in ${lane}`);
@@ -1391,7 +1391,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
               terminal.setup
                 .captureCharFrame()
                 .split('\n')
-                .find(line => line.includes('2 -shared'))
+                .find(line => line.includes('2    -shared'))
                 ?.includes('▌') ?? false
             );
           },
@@ -1446,7 +1446,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await waitFor(async () => {
       await terminal.flush();
       const row = terminal.renderer.root.findDescendantById('reviewing-content-line-1');
-      const code = row?.getChildren()[1] as TextRenderable | undefined;
+      const code = row?.getChildren()[2] as TextRenderable | undefined;
       return (
         code?.content.chunks.some(
           chunk => chunk.text.includes('const') && chunk.fg?.equals(RGBA.fromHex(QUIET_GRAPHITE.tokens.keyword!)),
@@ -1696,7 +1696,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       .filter(line => /#[12] · /u.test(line));
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(row.trimEnd()).toMatch(/✗ failed$/u);
-    // And every row fits the card's real inner width (border and padding taken off), counted in cells.
+    // And every row fits the card's inner width (border and padding taken off), counted in cells.
     const cardWidth = terminal.renderer.root.findDescendantById('reviewing-expanded-message-card')?.width ?? 0;
     for (const row of rows) {
       expect(wrappedDisplayRows(row.trimEnd(), Math.max(1, cardWidth - 4))).toBe(1);
@@ -2621,19 +2621,19 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     // Clicking a file while its folder owns the tree cursor must move that
     // cursor onto the file and load unchanged bytes into the Diff pane.
     await terminal.clickRenderable(deepFileRow.id);
-    await waitForOutput(terminal, '1  deep contents');
+    await waitForOutput(terminal, '1     deep contents');
     const selectedDeepFileRow = terminal.renderer.root.findDescendantById(deepFileRow.id);
     expect(renderableTreeText(selectedDeepFileRow).trimStart().startsWith('›')).toBe(true);
     // The content view has its own selected line (Diff focus); a composes there.
     terminal.send('j');
-    await waitForOutput(terminal, '▌   2  second line');
+    await waitForOutput(terminal, '▌   2     second line');
     terminal.send('a');
     await waitForOutput(terminal, 'New Message · notes/deep.txt:2');
     terminal.send('\u001b');
     terminal.send('\t');
     terminal.send('\t');
     terminal.send('j');
-    await waitForOutput(terminal, '1  unchanged');
+    await waitForOutput(terminal, '1     unchanged');
     expect(terminal.setup.captureCharFrame()).toContain('j/k selects');
     // Hovering a changed file loads its Diff without an explicit Enter.
     terminal.send('k');
@@ -2899,7 +2899,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     terminal.send('k');
     await waitFor(() => (inlineCardText() ?? '').includes('First inline anchor'), 'back to first inline card');
     await waitFor(() => selectedDiffRow('new one'), 'back to first Message Diff row');
-    // With History focused, the Diff keeps its selection on a neutral fill; only the focused pane wears the accent.
+    // History focused: the Diff keeps its selection on a neutral fill; only the focused pane wears the accent.
     const firstRow = descendantsWithIdPrefix(terminal.renderer.root, 'reviewing-diff-row-').find(row =>
       renderableTreeText(row).includes('new one'),
     ) as BoxRenderable | undefined;
@@ -3658,7 +3658,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       return current !== undefined && current.screenY > 0;
     }, 'unchanged file geometry');
     await terminal.clickRenderable(stableRow.id);
-    await waitForOutput(terminal, '1  alpha');
+    await waitForOutput(terminal, '1     alpha');
     terminal.send('j');
     await waitFor(
       () => /▌   2  (?:●\d |   )?second stable line/u.test(terminal.setup.captureCharFrame()),
@@ -4062,7 +4062,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(terminal.setup.captureCharFrame()).toContain(body);
     expect(adapter.directives).toHaveLength(1);
 
-    // F3 shows the exact outgoing bytes from inside the reopened gate without accepting anything.
+    // F3 shows the exact outgoing bytes from the reopened gate without accepting anything.
     const reopenCheckpoint = terminal.checkpoint();
     terminal.send('\r');
     await waitForOutput(terminal, 'Confirm before sending', reopenCheckpoint);

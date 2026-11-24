@@ -77,6 +77,7 @@ import {
   wrappedRows,
   type ThemeColor,
   toneColor,
+  spans,
 } from './shellLook.js';
 import { REVIEWING_KEYS, reviewingFooterMode, reviewingHelpMode } from './reviewingKeys.js';
 import { footerSentence, keyList, keysRow } from './shellKeys.js';
@@ -457,7 +458,7 @@ function paneTitle(
 ): RenderChild {
   const colors = theme(state);
   const focused = shownFocus(state) === region;
-  const marker = focused ? (state.presentation.ascii ? '|' : '▌') : ' ';
+  const marker = focused && !state.presentation.ascii ? '▌' : ' ';
   // A self-describing window beats an abstract position bar: which slice of the
   // bounded projection is on screen, in ordinals.
   const position =
@@ -474,13 +475,16 @@ function paneTitle(
           paneWidth - 4 - displayCells(lead) - displayCells(position),
           state.presentation.ascii ? '...' : '…',
         );
-  return label(state, `${lead}${shownDetail}${position}`, {
-    fg: tone ?? (focused ? colors.accent : colors.text),
-    bold: true,
-    height: 1,
-    paddingLeft: 1,
-    paddingRight: 1,
-  });
+  // The name is bold; its detail and position are regular and muted, so the eye finds the pane first.
+  return label(
+    state,
+    spans(state, [
+      { text: lead, fg: tone ?? (focused ? colors.accent : colors.text), bold: true },
+      // A state tone (Brass on a past step) holds across the detail, so `PAST` never fades to meta.
+      { text: `${shownDetail}${position}`, fg: tone ?? colors.muted },
+    ]),
+    { height: 1, paddingLeft: 1, paddingRight: 1 },
+  );
 }
 
 /**
@@ -636,11 +640,7 @@ function filesPane(
       `${state.loading?.region === 'files' ? state.loading.label : allShown ? 'All' : 'Changed'}${balancedSibling(state, 'files')}`,
       column.span,
     ),
-    label(state, `${sourceTotal} ${allShown ? 'repository' : 'changed'} files`, {
-      fg: colors.muted,
-      height: 1,
-      paddingLeft: 1,
-    }),
+    label(state, `  ${sourceTotal} ${allShown ? 'repository' : 'changed'} files`, { fg: colors.muted, height: 1 }),
     column.body,
   );
 }
@@ -875,8 +875,8 @@ function questionsPane(
   const emptyMessagesRows = (paddingLeft: number): RenderChild[] =>
     wrapDisplayCellRows(
       'No Messages yet. Press a on a line or a file to write one.',
-      Math.max(8, estimatedWidth - 2 - 2 * paddingLeft),
-    ).map(row => label(state, row, { fg: colors.muted, paddingLeft }));
+      Math.max(8, estimatedWidth - 3 - 2 * paddingLeft),
+    ).map(row => label(state, `${' '.repeat(paddingLeft + 1)}${row}`, { fg: colors.muted }));
 
   const completeRows = (value: string, available: number): readonly string[] => {
     const exact = safeText(value, state.presentation.ascii);
@@ -972,8 +972,8 @@ function questionsPane(
         ? state.width - geometry.files - geometry.questions - (state.filePaneVisible ? 2 : 1)
         : state.width - geometry.balancedContext - 1;
     const { fixedRows, detailRows } = messageThreadRows(state, thread, Math.max(1, diffWidth - 2));
-    // Only when the Diff card needs no paging even at its smallest height.
-    return fixedRows.length + detailRows.length + 2 <= 10;
+    // Only when the Diff card shows it all without paging, at the height the Diff gives it.
+    return fixedRows.length + detailRows.length + 2 <= messageCardMaximum(viewportHeight);
   })();
   const messageCardLines = (item: ReviewMessageListItem, absolute: number, compact: boolean): MessageCardLine[] => {
     const selected = item.reviewMessageIdentity === state.selectedMessageIdentity;
@@ -1048,7 +1048,7 @@ function questionsPane(
     responseRows.forEach((row, index) =>
       lines.push({
         text: `${index === 0 ? `${bodyIndent}${responseMark}` : responseIndent}${row}`,
-        fg: index === 0 ? colors.success : colors.text,
+        fg: colors.text,
       }),
     );
     if (full && !responseComplete) {
@@ -1749,12 +1749,8 @@ function lineMessagesMark(
   };
 }
 
-/** Cells the Message mark column takes when the shown file has Messages. */
+/** Cells the Message mark column takes. Always reserved, so the code never shifts when the first Message lands. */
 const LINE_MESSAGES_WIDTH = 3;
-
-function hasLineMessages(lines: LineMessages): boolean {
-  return lines.old.size > 0 || lines.new.size > 0;
-}
 
 /** The Message mark column beside a code line; blank on lines without Messages. */
 function lineMessagesCell(
@@ -1867,7 +1863,7 @@ function messageThreadRows(
       : wrappedRows(response, responseWidth).map((content, index) => ({
           content: `${index === 0 ? responseMark : responseIndent}${content}`,
           markdown: true,
-          foreground: index === 0 ? colors.success : colors.text,
+          foreground: colors.text,
         }))),
     ...(responseComplete
       ? []
@@ -1888,6 +1884,11 @@ function messageThreadRows(
         ? colors.accent
         : colors.text;
   return { fixedRows, detailRows, title, titleColor };
+}
+
+/** The tallest a Message card gets inside the Diff; History uses the same rule to know it's shown in full. */
+function messageCardMaximum(viewportHeight: number): number {
+  return Math.min(Math.max(10, Math.floor(Math.max(1, viewportHeight - 3) * 0.45)), 12);
 }
 
 /** Rows the inline card takes in the Diff, borders and paging row included. */
@@ -2101,7 +2102,6 @@ function diffLine(
   const selected = row.rowIdentity === state.selectedRowIdentity;
   const marker = row.kind === 'addition' ? '+' : row.kind === 'deletion' ? '-' : ' ';
   const numbers = `${selected ? (state.presentation.ascii ? '>' : '▌') : ' '} ${String(row.oldLine ?? '').padStart(4)} ${String(row.newLine ?? '').padStart(4)} `;
-  const withMarks = hasLineMessages(lines);
   const code = decodeDiffRow(row, state.presentation.ascii);
   const foreground = row.kind === 'addition' ? colors.success : row.kind === 'deletion' ? colors.danger : colors.code;
   const background = selected
@@ -2126,31 +2126,20 @@ function diffLine(
         side: row.newLine !== undefined ? 'new' : 'old',
       }),
     },
-    // Files without Messages keep the one-piece gutter; the mark column sits between the numbers and +/-.
-    ...(withMarks
-      ? [
-          label(state, numbers, {
-            fg: selected ? selectionColors(state, 'diff').fg : colors.muted,
-            width: 12,
-            height: 1,
-            flexShrink: 0,
-          }),
-          lineMessagesCell(state, rowMessages(lines, row), `reviewing-line-messages-${row.rowIdentity}`, selected),
-          label(state, marker, {
-            fg: selected ? selectionColors(state, 'diff').fg : colors.muted,
-            width: 2,
-            height: 1,
-            flexShrink: 0,
-          }),
-        ]
-      : [
-          label(state, `${numbers}${marker}`, {
-            fg: selected ? selectionColors(state, 'diff').fg : colors.muted,
-            width: 14,
-            height: 1,
-            flexShrink: 0,
-          }),
-        ]),
+    // The mark column sits between the numbers and +/-.
+    label(state, numbers, {
+      fg: selected ? selectionColors(state, 'diff').fg : colors.muted,
+      width: 12,
+      height: 1,
+      flexShrink: 0,
+    }),
+    lineMessagesCell(state, rowMessages(lines, row), `reviewing-line-messages-${row.rowIdentity}`, selected),
+    label(state, marker, {
+      fg: selected ? selectionColors(state, 'diff').fg : colors.muted,
+      width: 2,
+      height: 1,
+      flexShrink: 0,
+    }),
     richLabel(
       state,
       code.length === 0 ? ' ' : code,
@@ -2258,20 +2247,15 @@ function sideBySideLine(
         height: 1,
         flexShrink: 0,
       }),
-      ...(hasLineMessages(lines)
-        ? [
-            lineMessagesCell(
-              state,
-              (direction === 'old' ? row.oldLine : row.newLine) === undefined
-                ? []
-                : ((direction === 'old' ? lines.old : lines.new).get(
-                    (direction === 'old' ? row.oldLine : row.newLine)!,
-                  ) ?? []),
-              `reviewing-line-messages-${row.rowIdentity}-${direction}`,
-              selected,
-            ),
-          ]
-        : []),
+      lineMessagesCell(
+        state,
+        (direction === 'old' ? row.oldLine : row.newLine) === undefined
+          ? []
+          : ((direction === 'old' ? lines.old : lines.new).get((direction === 'old' ? row.oldLine : row.newLine)!) ??
+              []),
+        `reviewing-line-messages-${row.rowIdentity}-${direction}`,
+        selected,
+      ),
       label(state, marker, {
         fg: selected ? selectionColors(state, 'diff').fg : colors.muted,
         width: 1,
@@ -2330,14 +2314,14 @@ function diffPane(
   const discussion = composer === undefined ? selectedDiscussionThread(state) : undefined;
   const messageThread = composer === undefined && discussion === undefined ? selectedMessageThread(state) : undefined;
   const lineMessages = messagesOnLines(state);
-  const markWidth = hasLineMessages(lineMessages) ? LINE_MESSAGES_WIDTH : 0;
+  const markWidth = LINE_MESSAGES_WIDTH;
   const availableHeight = Math.max(1, viewportHeight - 3);
   const embeddedHeight =
     composer !== undefined
       ? Math.min(Math.max(9, Math.floor(availableHeight * 0.5)), 12)
       : discussion === undefined && messageThread === undefined
         ? 0
-        : Math.min(Math.max(10, Math.floor(availableHeight * 0.45)), 12);
+        : messageCardMaximum(viewportHeight);
   const estimatedPaneWidth =
     typeof width === 'number'
       ? width
@@ -2430,16 +2414,12 @@ function diffPane(
                 height: 1,
                 flexShrink: 0,
               }),
-              ...(markWidth === 0
-                ? []
-                : [
-                    lineMessagesCell(
-                      state,
-                      lineMessages.new.get(lineNumber) ?? [],
-                      `reviewing-line-messages-content-${lineNumber}`,
-                      selected,
-                    ),
-                  ]),
+              lineMessagesCell(
+                state,
+                lineMessages.new.get(lineNumber) ?? [],
+                `reviewing-line-messages-content-${lineNumber}`,
+                selected,
+              ),
               richLabel(state, code.length === 0 ? ' ' : code, filetype, interaction, {
                 fg: selected ? colors.text : colors.code,
                 width: codeWidth,
@@ -3188,10 +3168,11 @@ function linearPaneStrip(state: ReviewingApplicationState, interaction: ReviewPo
     },
     ...regions.map(region => {
       const focused = shownFocus(state) === region;
-      return label(state, ` ${name(region)} `, {
+      // A bar, not a wash behind one word; ASCII has `>`, so the open pane shows without colour too.
+      const lead = focused ? (state.presentation.ascii ? '>' : '▌') : ' ';
+      return label(state, `${lead}${name(region)} `, {
         id: reviewRenderableId(state, `reviewing-pane-tab-${region}`),
         fg: focused ? colors.accent : colors.muted,
-        bg: focused ? colors.accentSoft : colors.background,
         bold: focused,
         height: 1,
         ...pointerMouseHandlers(interaction, { kind: 'region', region }),

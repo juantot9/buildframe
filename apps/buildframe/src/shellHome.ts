@@ -3,7 +3,7 @@ import type { MouseEvent } from '@opentui/core';
 import { displayCells, fitDisplayCellsEnd } from './displayCells.js';
 import type { RenderChild } from './renderTree.js';
 import type { SizedLook } from './shellChrome.js';
-import { borderedBox, label, theme, wrappedRows, type ThemeColor } from './shellLook.js';
+import { borderedBox, label, spans, theme, wrappedRows, type ThemeColor } from './shellLook.js';
 
 /** Home's card: one pane centred in the body, with a list of choices and what the selected one does. */
 
@@ -57,13 +57,14 @@ export function homePane(
       backgroundColor: colors.surface,
       overflow: 'hidden',
     },
-    label(state, `${state.presentation.ascii ? '|' : '▌'} ${title} FOCUSED  ${detail}`, {
-      fg: colors.accent,
-      bold: true,
-      height: 1,
-      paddingLeft: 1,
-      paddingRight: 1,
-    }),
+    label(
+      state,
+      spans(state, [
+        { text: `${state.presentation.ascii ? ' ' : '▌'} ${title} FOCUSED  `, fg: colors.accent, bold: true },
+        { text: detail, fg: colors.muted },
+      ]),
+      { height: 1, paddingLeft: 1, paddingRight: 1 },
+    ),
     ...children,
   );
   return { node, height };

@@ -1,4 +1,4 @@
-import { StyledText, TextAttributes, type BorderCharacters, type MouseEvent } from '@opentui/core';
+import { RGBA, StyledText, TextAttributes, type BorderCharacters, type MouseEvent } from '@opentui/core';
 
 import { Box, Text, type RenderChild } from './renderTree.js';
 import type { StatusTone } from './shellStatus.js';
@@ -400,4 +400,27 @@ export function borderedBox(state: Look, options: Parameters<typeof Box>[0], ...
 export function toneColor(colors: SemanticTheme, tone: StatusTone): ThemeColor {
   // Work in progress is said by the spinner's motion; the accent means focus only.
   return tone === 'accent' ? colors.text : colors[tone];
+}
+
+/** One part of a line drawn in several styles. */
+export interface Span {
+  readonly text: string;
+  readonly fg: ThemeColor;
+  readonly bold?: boolean;
+}
+
+/**
+ * A line in several styles, such as a pane title's bold name and its regular
+ * muted detail. Without colour it is the plain text.
+ */
+export function spans(state: Look, parts: readonly Span[]): string | StyledText {
+  if (state.presentation.noColor) return parts.map(part => part.text).join('');
+  return new StyledText(
+    parts.map(part => ({
+      __isChunk: true as const,
+      text: safeText(part.text, state.presentation.ascii),
+      fg: part.fg === 'transparent' ? RGBA.defaultForeground() : RGBA.fromHex(part.fg),
+      attributes: part.bold === true ? TextAttributes.BOLD : 0,
+    })),
+  );
 }

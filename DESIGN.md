@@ -78,8 +78,6 @@ Every visual signal has a plain-text equivalent. A state is always a glyph and a
 - Tinted ground with a one-step-offset pane surface; light and dark presets share one role set, and the default follows the terminal.
 - Thin rounded pane borders (`╭╮╰╯`) that switch to `+ - |` under `--ascii`.
 - One accent per theme. It marks focus and selection, nothing else.
-- Every state is a glyph, a word and a color tone. Color is never the only channel.
-- Bold titles, muted metadata, no size hierarchy (the terminal has one size).
 - Motion only where it carries meaning: a braille spinner for work in progress and optional eased scrolling.
 
 ## Colors
@@ -141,7 +139,7 @@ The layout is a horizontal row of bordered panes (Files, Diff, Questions) under 
 - **Pane widths:** Files prefers 34 cells (minimum 16) and Messages 40 (minimum 20); users can resize both and hide Files. The Diff always keeps at least half the terminal (never under 32 cells). When the side panes want more than that leaves, they give way in proportion to their preferred widths.
 - **Arrangements:** `workspace` (default), `code-spotlight` and `review-notebook` rearrange the same panes.
 - **Header:** one row at every size, or none when the user hides it in Configuration. Below 100 columns the source word shortens (`LIVE CHANGES` to `LIVE`).
-- **Pane title row:** `▌ Title FOCUSED  detail · start-end/total`. The visible window is given as ordinals rather than drawn as a scrollbar.
+- **Pane title row:** `▌ Title FOCUSED  detail · start-end/total`: the title bold, the rest Meta, a state tone (Brass on a past step) across all of it. The window is ordinals, not a scrollbar.
 - **Padding:** one cell inside panes and two cells in the header. There is no other spacing scale.
 - **Long lines:** the Diff supports `wrap` and `clip`. Wrapped code breaks after a space or delimiter, so identifiers and strings stay whole, and only cuts mid-token when a token is longer than half a row. A clipped line ends with `›`.
 - **Text that doesn't fit:** never cut from the middle. Sentences wrap or keep their start and end in `…`. Pane titles keep the file name: the path shortens first, then basis words drop, and `PAST` always stays. A state word is never cut: in a stack of Messages the preview gives way, counted in terminal cells. A preview that gives way ends on a whole word before its `…`. A location keeps `file:line`, drops its folders first, and when the name still doesn't fit says `line N` (the Diff title already names the file); a name is never cut. A count such as "5 files" is dropped whole rather than cut.
@@ -160,7 +158,7 @@ There are no shadows. Depth is three tonal steps: Ground, then Pane, then Raised
 
 The terminal's box-drawing set is the whole shape language. Pane borders are rounded (`╭ ╮ ╰ ╯ │ ─`), and `--ascii` swaps them for `+ - |`. Inside panes, structure comes from leading glyphs, not boxes:
 
-- `▌` the focused pane or selected diff row (`|` or `>` in ASCII)
+- `▌` the focused pane (blank in ASCII: `FOCUSED` says it), the selected diff row and the open pane in the strip (`>`)
 - `›` the selected list row (`>`)
 - `▸ ▾` collapsed and expanded tree nodes (`> v`)
 - `● ○ ◆ ▶ │ ┃` history rail nodes and lines (current, other, start, now)
@@ -182,7 +180,7 @@ Under `--ascii`, every interface character has a stand-in (`·`→`-`, `…`→`
 - **Meta:** counts such as `●3` (Messages on a file) and change marks trail the name in Pewter or Brass.
 
 ### Diff rows
-- **Gutter:** `▌` when selected, then old and new line numbers right-aligned to 4 cells, then the `+`/`-` marker.
+- **Gutter:** `▌` when selected, old and new line numbers (4 cells each), a 3-cell Message mark column (`●1`), always kept so code never shifts, then `+`/`-`.
 - **Added and removed:** Sage Wash and Rose Wash fill the row, on the theme background and the terminal's alike. Syntax colors stay intact on top.
 - **Selected:** Harbor Cyan Wash, which takes precedence over add and remove washes.
 
