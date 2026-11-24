@@ -392,6 +392,15 @@ async function journey(variant: Variant): Promise<void> {
     await snap('message-answered');
     await focus('History');
     await snap('history-focused');
+    // History stays short beside the card, so it must lead back to the card: scroll the code away, then Enter.
+    const cardShown = (): boolean => /(?:╭─|\+-) #1 /u.test(frame());
+    await focus('Diff');
+    for (let page = 0; page < 4; page += 1) terminal.renderer.stdin.emit('data', Buffer.from('\u001b[6~'));
+    await wait(() => !cardShown(), 'card scrolled away');
+    await focus('History');
+    terminal.mockInput.pressEnter();
+    await wait(cardShown, 'Enter in History brings the card back');
+    await snap('history-enter-card');
     await focus('Files');
     await snap('files-focused');
 

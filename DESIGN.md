@@ -193,7 +193,7 @@ Under `--ascii`, every interface character has a stand-in (`·`→`-`, `…`→`
 
 ### Cards and dialogs
 - **Background:** Graphite Raised, with a Harbor Cyan border. The send confirmation uses a Brass border, because it is a caution.
-- **Placement:** the Question composer and a saved Message's card both open directly beneath their anchored line, never above it. Dialogs are centred in the body and are as tall as their content; their hints sit inside the box, never in a border.
+- **Placement:** the composer and a Message's card open beneath their anchored line, one cell in from the Diff's border. Dialogs are centred and as tall as their content, hints inside the box; behind them the panes fade (not under `--no-color` or a terminal background).
 - **Steady size:** a dialog whose text changes as you move through it keeps the height of its longest text. Configuration reserves the rows of the longest description any setting or value can show, so moving between settings or changing one never makes the box grow, shrink or move.
 - **Focus while writing:** the composer lives in the Diff, so the Diff shows `FOCUSED` while a Message is being written, wherever it was started from.
 - **Send confirmation:** only when an earlier Message never reported back, so sending may repeat work. Plain words ("An earlier Message here never reported back."), never internal names. A Message's content never triggers it: BuildFrame does not scan for secrets. A plain backdrop hides the panes behind it, so nothing competes with the question.
@@ -227,7 +227,7 @@ Under `--ascii`, every interface character has a stand-in (`·`→`-`, `…`→`
 
 ### Header
 - **Form:** one row on Graphite Pane: `BuildFrame / <route>` on the left; the source word (Pewter) and the agent's connection (`● Pi`) on the right. On a Review the row below already names it (`Current Review · ◆ ━━━━ … now`), so the header reads just `BuildFrame`, and that row adds nothing after `now`; the Diff title says what it covers.
-- **Say it once:** a name or a whole answer appears in one place on screen. When the Diff card beside History holds the selected Message without paging, History shows its short preview. Home with a Review open says "Welcome back" and names the Current Review only in its first choice.
+- **Say it once:** a name or a whole answer appears in one place on screen. When the Diff card beside History holds the selected Message, paged or not, History shows its short preview; Enter there brings the card back into view. Home with a Review open says "Welcome back" and names the Current Review only in its first choice.
 - **Past step:** the source word becomes `PAST STEP` in Brass, so the header never says live while the Diff shows the past.
 - **Hidden:** the agent's connection moves to the end of the history row, so it is never lost.
 
@@ -240,7 +240,6 @@ Under `--ascii`, every interface character has a stand-in (`·`→`-`, `…`→`
 - **Do** give every Unicode glyph an ASCII twin and every color a meaning that survives `--no-color`.
 - **Do** add new colors as roles in `SemanticTheme` with values in all three themes, never as one-off hex literals in views.
 - **Do** collapse chrome before code at narrow widths (shorter header words, ranked keys, then single pane below 90 columns).
-- **Do** show the visible window as ordinals (`· 12-40/310`) rather than drawing scrollbars.
 - **Do** let a key that acts on the Review (write, copy, switch, send, interrupt, quit) wait while it loads: say "Still loading (…); press a again in a moment." rather than act on the wrong thing or do nothing. Movement keeps working, and `q` quits only when nothing is loading or saving.
 - **Do** fit text to the width it actually has. Wrap instructions and recovery sentences; never let OpenTUI's middle truncation cut them.
 - **Do** state an empty result plainly in Pewter with the way on ("No changes since your last commit. [f] shows all files."). Nothing changed is a fact, not a caution.

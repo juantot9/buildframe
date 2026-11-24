@@ -77,7 +77,6 @@ import {
   wrappedRows,
   type ThemeColor,
   toneColor,
-  spans,
 } from './shellLook.js';
 import { REVIEWING_KEYS, reviewingFooterMode, reviewingHelpMode } from './reviewingKeys.js';
 import { footerSentence, keyList, keysRow } from './shellKeys.js';
@@ -99,7 +98,8 @@ import { agentIndicator, centeredStart, dialogHeight, dialogTop, shellHeader } f
 import { composeFrame, type FrameScreen, type ShellLayers } from './shellCompose.js';
 import { messageOutcomeLabel, questionStateLabel, responseSize, stateBadge } from './reviewingMessageWords.js';
 import { homeLauncherCard, homePane, homeRow, homeSentence, type HomeCard } from './shellHome.js';
-import { fitPaneDetail, shortDisplayPath, treeName } from './reviewingPathText.js';
+import { shortDisplayPath, treeName } from './reviewingPathText.js';
+import { balancedSibling, paneTitle, shownFocus } from './reviewingPaneTitle.js';
 import { reviewingOwnSettings } from './reviewingSettings.js';
 import { commitName, headMoveNote, shortHash } from './reviewingHeadMoves.js';
 import { homeChoices } from './reviewingHomeRows.js';
@@ -425,15 +425,6 @@ function filePositionDetail(state: ReviewingApplicationState): string {
   return position === undefined ? '' : ` · file ${position.position} of ${position.total}`;
 }
 
-/**
- * The pane that reads as focused. While a Message is being written its
- * composer lives in the Diff, so the Diff shows focus there even when the
- * Message was started from another pane.
- */
-function shownFocus(state: ReviewingApplicationState): ReviewingApplicationState['focus'] {
-  return state.editor !== undefined ? 'diff' : state.focus;
-}
-
 /** Selection wears the accent only in the focused pane; elsewhere its cursor sits on a neutral fill. */
 function selectionColors(
   state: ReviewingApplicationState,
@@ -443,60 +434,6 @@ function selectionColors(
   return shownFocus(state) === region
     ? { fg: colors.accent, bg: colors.accentSoft }
     : { fg: colors.text, bg: colors.raised };
-}
-
-function paneTitle(
-  state: ReviewingApplicationState,
-  region: ReviewRegion,
-  title: string,
-  detail: string,
-  span?: ReviewingScrollSpan,
-  /** Overrides the title's color, as for a Diff showing the past. */
-  tone?: ThemeColor,
-  /** The pane's outer width in cells, when known, so the detail can be fitted rather than cut mid-word. */
-  paneWidth?: number,
-): RenderChild {
-  const colors = theme(state);
-  const focused = shownFocus(state) === region;
-  const marker = focused && !state.presentation.ascii ? '▌' : ' ';
-  // A self-describing window beats an abstract position bar: which slice of the
-  // bounded projection is on screen, in ordinals.
-  const position =
-    span !== undefined && span.size > 0 && span.size < span.total
-      ? ` · ${span.start + 1}-${span.start + span.size}/${span.total}`
-      : '';
-  const lead = `${marker} ${title}${focused ? ' FOCUSED' : ''}  `;
-  const shownDetail =
-    paneWidth === undefined
-      ? detail
-      : fitPaneDetail(
-          detail,
-          // Border and padding take two cells on each side.
-          paneWidth - 4 - displayCells(lead) - displayCells(position),
-          state.presentation.ascii ? '...' : '…',
-        );
-  // The name is bold; its detail and position are regular and muted, so the eye finds the pane first.
-  return label(
-    state,
-    spans(state, [
-      { text: lead, fg: tone ?? (focused ? colors.accent : colors.text), bold: true },
-      // A state tone (Brass on a past step) holds across the detail, so `PAST` never fades to meta.
-      { text: `${shownDetail}${position}`, fg: tone ?? colors.muted },
-    ]),
-    { height: 1, paddingLeft: 1, paddingRight: 1 },
-  );
-}
-
-/**
- * In the balanced arrangement Files and History share one side pane; its title
- * names the other one, so a pane you can't see is never a pane you don't know about.
- */
-function balancedSibling(state: ReviewingApplicationState, region: 'files' | 'questions'): string {
-  if (state.layout !== 'balanced' || !state.filePaneVisible) return '';
-  const separator = state.presentation.ascii ? '-' : '·';
-  return region === 'files'
-    ? `  ${separator} ${messagesPaneName(state)} ${state.review?.messages.messages.total ?? 0}`
-    : `  ${separator} Files`;
 }
 
 function filesPane(
@@ -953,27 +890,21 @@ function questionsPane(
   const railLabel = (text: string, fg: ThemeColor): RenderChild =>
     label(state, text, { fg, height: 1, width: 2, flexShrink: 0, truncate: false });
 
-  /** The Diff beside History already shows the selected Message in full, so History keeps it short. */
+  /**
+   * The Diff beside History holds the selected Message's card (paged or not), so History keeps it short:
+   * the answer is said once. With its file not shown, History says it in full.
+   */
   const diffShowsSelected = ((): boolean => {
     if (state.arrangement !== 'workspace' || state.layout === 'linear') return false;
     const thread = selectedMessageThread(state);
     if (thread === undefined) return false;
-    // Judge the fit on the whole text, never on a truncated list preview.
     const picked = thread.selected;
     const bodyLoaded =
       !picked.body.truncated || state.selectedMessageBody?.reviewMessageIdentity === picked.reviewMessageIdentity;
     const responseLoaded =
       picked.response?.body.truncated !== true ||
       state.selectedMessageResponseBody?.reviewMessageIdentity === picked.reviewMessageIdentity;
-    if (!bodyLoaded || !responseLoaded) return false;
-    const geometry = effectivePaneGeometry(state);
-    const diffWidth =
-      state.layout === 'wide'
-        ? state.width - geometry.files - geometry.questions - (state.filePaneVisible ? 2 : 1)
-        : state.width - geometry.balancedContext - 1;
-    const { fixedRows, detailRows } = messageThreadRows(state, thread, Math.max(1, diffWidth - 2));
-    // Only when the Diff card shows it all without paging, at the height the Diff gives it.
-    return fixedRows.length + detailRows.length + 2 <= messageCardMaximum(viewportHeight);
+    return bodyLoaded && responseLoaded;
   })();
   const messageCardLines = (item: ReviewMessageListItem, absolute: number, compact: boolean): MessageCardLine[] => {
     const selected = item.reviewMessageIdentity === state.selectedMessageIdentity;
@@ -1886,9 +1817,14 @@ function messageThreadRows(
   return { fixedRows, detailRows, title, titleColor };
 }
 
-/** The tallest a Message card gets inside the Diff; History uses the same rule to know it's shown in full. */
+/** The tallest a Message card gets inside the Diff. */
 function messageCardMaximum(viewportHeight: number): number {
   return Math.min(Math.max(10, Math.floor(Math.max(1, viewportHeight - 3) * 0.45)), 12);
+}
+
+/** A card one cell in from each side of the Diff. */
+function insetCard(card: RenderChild): RenderNode {
+  return Box({ width: '100%', flexShrink: 0, flexDirection: 'column', paddingLeft: 1, paddingRight: 1 }, card);
 }
 
 /** Rows the inline card takes in the Diff, borders and paging row included. */
@@ -2342,8 +2278,10 @@ function diffPane(
             return state.width - geometry.balancedContext - 1;
           })();
   const paneContentWidth = Math.max(1, estimatedPaneWidth - 2);
+  // Cards sit one cell in from the Diff's border, so they read as objects in the code, not a second frame.
+  const cardWidth = Math.max(1, paneContentWidth - 2);
   const messageCardHeight =
-    messageThread === undefined ? 0 : messageThreadCardHeight(state, messageThread, embeddedHeight, paneContentWidth);
+    messageThread === undefined ? 0 : messageThreadCardHeight(state, messageThread, embeddedHeight, cardWidth);
   const sourceIdentity =
     changes !== undefined
       ? `changes:${changes.key}`
@@ -2434,20 +2372,15 @@ function diffPane(
         if (selected && composer !== undefined && questionTextarea !== undefined) {
           items.push({
             size: embeddedHeight,
-            render: () => questionComposerCard(state, embeddedHeight, questionTextarea),
+            render: () => insetCard(questionComposerCard(state, embeddedHeight, questionTextarea)),
           });
         }
         if (anchoredThread !== undefined) {
           items.push({
             size: messageCardHeight,
             render: () =>
-              messageThreadCard(
-                state,
-                anchoredThread,
-                messageCardHeight,
-                paneContentWidth,
-                interaction,
-                onDiscussionPage,
+              insetCard(
+                messageThreadCard(state, anchoredThread, messageCardHeight, cardWidth, interaction, onDiscussionPage),
               ),
           });
         }
@@ -2600,7 +2533,7 @@ function diffPane(
         if (selectionFirst < 0) selectionFirst = items.length;
         items.push({
           size: embeddedHeight,
-          render: () => questionComposerCard(state, embeddedHeight, questionTextarea),
+          render: () => insetCard(questionComposerCard(state, embeddedHeight, questionTextarea)),
         });
         selectionLast = items.length - 1;
       };
@@ -2609,14 +2542,16 @@ function diffPane(
         items.push({
           size: embeddedHeight,
           render: () =>
-            discussionThreadCard(
-              state,
-              discussion,
-              anchorRow,
-              embeddedHeight,
-              paneContentWidth,
-              interaction,
-              onDiscussionPage,
+            insetCard(
+              discussionThreadCard(
+                state,
+                discussion,
+                anchorRow,
+                embeddedHeight,
+                cardWidth,
+                interaction,
+                onDiscussionPage,
+              ),
             ),
         });
         if (anchorRow.rowIdentity === state.selectedRowIdentity) selectionLast = items.length - 1;
@@ -2626,7 +2561,9 @@ function diffPane(
         items.push({
           size: messageCardHeight,
           render: () =>
-            messageThreadCard(state, messageThread, messageCardHeight, paneContentWidth, interaction, onDiscussionPage),
+            insetCard(
+              messageThreadCard(state, messageThread, messageCardHeight, cardWidth, interaction, onDiscussionPage),
+            ),
         });
         if (anchorRow.rowIdentity === state.selectedRowIdentity) selectionLast = items.length - 1;
       };

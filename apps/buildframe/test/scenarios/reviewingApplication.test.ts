@@ -2833,7 +2833,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       descendantsWithIdPrefix(terminal.renderer.root, 'reviewing-diff-row-').some(row => {
         if (!renderableTreeText(row).includes(needle)) return false;
         const background = (row as BoxRenderable).backgroundColor;
-        // The accent wash while the Diff has focus; a neutral fill keeps the selection visible otherwise.
+        // The accent wash while the Diff has focus; a neutral fill otherwise.
         return (
           background !== undefined &&
           (background.equals(RGBA.fromHex(QUIET_GRAPHITE.accentSoft)) ||
@@ -3489,7 +3489,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       descendantsWithIdPrefix(terminal.renderer.root, 'reviewing-diff-row-').some(row => {
         if (!renderableTreeText(row).includes(needle)) return false;
         const background = (row as BoxRenderable).backgroundColor;
-        // The accent wash while the Diff has focus; a neutral fill keeps the selection visible otherwise.
+        // The accent wash while the Diff has focus; a neutral fill otherwise.
         return (
           background !== undefined &&
           (background.equals(RGBA.fromHex(QUIET_GRAPHITE.accentSoft)) ||
@@ -5624,7 +5624,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     // A dim divider row separates adjacent entries; the first entry has none.
     expect(collapsedText).not.toContain('----');
     const selectedText = renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-message-card-2'));
-    // The complete body and Response show once: in History, or in the Diff card when it fits there unpaged.
+    // The complete body and Response show once: in History, or in the Diff card beside it.
     const wholeSelected = `${selectedText} ${renderableTreeText(
       terminal.renderer.root.findDescendantById('reviewing-expanded-message-card'),
     )}`;
@@ -5646,7 +5646,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(hoveredText).toContain('-> Response 0');
     expect(hoveredText).not.toContain('MessageTail0');
     expect(hoveredText).not.toContain('ResponseTail0');
-    // Hover never replaces the selected Message's whole text (here in the Diff card, which fits it unpaged).
+    // Hover never replaces the selected Message's whole text (here in the Diff card).
     expect(
       renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-expanded-message-card')).replace(
         /\s+/gu,
@@ -5696,8 +5696,15 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       'complete selected Response body',
     );
     const oversizedFrame = (): string => oversizedMessageTerminal.setup.captureCharFrame();
+    // Beside the Diff card History is short; alone (linear) it scrolls to the end.
+    await waitForOutput(oversizedMessageTerminal, 'Ctrl+J');
     expect(oversizedFrame()).not.toContain('MessageTail0');
-    expect(oversizedFrame()).not.toContain('ResponseTail0');
+    oversizedMessageTerminal.resize(80, 24);
+    await waitForLayout(oversizedMessageTerminal, 'linear');
+    expect(
+      oversizedMessageTerminal.renderer.root.findDescendantById('reviewing-questions-pane')?.height,
+    ).toBeGreaterThan(6);
+    expect(oversizedMessageTerminal.renderer.root.findDescendantById('reviewing-diff-pane')).toBeUndefined();
     for (let index = 0; index < 120 && !oversizedFrame().includes('MessageTail0'); index += 1) {
       await oversizedMessageTerminal.scrollRenderable('reviewing-messages-viewport', 'down');
     }
@@ -5711,12 +5718,6 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       'reviewing-message-card-1',
     ) as BoxRenderable | undefined;
     expect(selectedOversizedMessage?.backgroundColor.equals(RGBA.fromHex(QUIET_GRAPHITE.accentSoft))).toBe(true);
-    oversizedMessageTerminal.resize(80, 24);
-    await waitForLayout(oversizedMessageTerminal, 'linear');
-    expect(
-      oversizedMessageTerminal.renderer.root.findDescendantById('reviewing-questions-pane')?.height,
-    ).toBeGreaterThan(6);
-    expect(oversizedMessageTerminal.renderer.root.findDescendantById('reviewing-diff-pane')).toBeUndefined();
 
     const longWorkspace = new StressWorkspace(2, 5_000);
     const longTerminal = await ScriptedTerminal.create(80, 24);

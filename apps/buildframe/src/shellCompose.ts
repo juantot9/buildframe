@@ -2,11 +2,14 @@ import type { MouseEvent } from '@opentui/core';
 import type { HarnessConnectionView } from '@buildframe/workspace/harness-interaction';
 
 import { noticeGlyph, noticeStatusTone, type NoticeTone } from './shellStatus.js';
-import type { RenderChild, RenderNode } from './renderTree.js';
+import { Box, type RenderChild, type RenderNode } from './renderTree.js';
 import { actionChecksPanel, agentIndicator, keyListPanel, shellHeader } from './shellChrome.js';
 import { shellFrame, type FrameLook, type FrameParts, type FrameStatus } from './shellFrame.js';
 import { footerSentence, keyList, keysRow, type KeyListItem, type KeyTable } from './shellKeys.js';
 import type { ScreenSettings, ShellSettings } from './shellSettings.js';
+
+/** How much of the panes shows through behind a dialog. */
+const DIMMED_BODY_OPACITY = 0.4;
 
 /**
  * What a screen gives the frame. A screen made with `defineScreen` has all it
@@ -74,20 +77,39 @@ export function composeFrame<S>(look: FrameLook, screen: FrameScreen<S>, state: 
     idPrefix: screen.name,
     header,
     context: screen.context?.(state, look) ?? [],
-    body: height => [
-      ...screen.body(state, look, height),
-      ...(shell.checksOpen ? actionChecksPanel(look, screen.checks?.(state) ?? []) : []),
-      ...(shell.keyListOpen
-        ? keyListPanel(
-            look,
-            screen.keyList?.(state) ?? (table === undefined ? [] : keyList(table, mode, state)),
-            height,
-            screen.name,
-          )
-        : []),
-      ...(shell.settings?.dialog(look, screen.settings?.(state), height, header.height, screen.name) ?? []),
-      ...(screen.layers?.(state, look, height, header.height) ?? []),
-    ],
+    body: height => {
+      const dialogs = [
+        ...(shell.keyListOpen
+          ? keyListPanel(
+              look,
+              screen.keyList?.(state) ?? (table === undefined ? [] : keyList(table, mode, state)),
+              height,
+              screen.name,
+            )
+          : []),
+        ...(shell.settings?.dialog(look, screen.settings?.(state), height, header.height, screen.name) ?? []),
+        ...(screen.layers?.(state, look, height, header.height) ?? []),
+      ];
+      const body = screen.body(state, look, height);
+      return [
+        // Behind a dialog the panes fade toward the ground, so the dialog is the one place to look.
+        // Fading blends colours, so it needs colour and a ground of our own to fade toward.
+        dialogs.length === 0 || look.presentation.noColor || look.background !== 'theme'
+          ? body
+          : Box(
+              {
+                id: `${screen.name}-dimmed-body`,
+                width: '100%',
+                flexGrow: 1,
+                flexDirection: 'column',
+                opacity: DIMMED_BODY_OPACITY,
+              },
+              ...body,
+            ),
+        ...(shell.checksOpen ? actionChecksPanel(look, screen.checks?.(state) ?? []) : []),
+        ...dialogs,
+      ];
+    },
     said:
       said === undefined
         ? (screen.said?.(state, look) ?? { text: '', tone: 'muted' })
