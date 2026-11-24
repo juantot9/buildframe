@@ -33,7 +33,7 @@ describe('Workspace routing by owner declaration', () => {
       expect(new Set(all).size).toBe(all.length);
     }
     expect(OWNERS.command.flat()).toHaveLength(25);
-    expect(OWNERS.view.flat()).toHaveLength(53);
+    expect(OWNERS.view.flat()).toHaveLength(54);
     expect(OWNERS.subscription.flat()).toHaveLength(14);
   });
 

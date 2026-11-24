@@ -2899,7 +2899,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     terminal.send('k');
     await waitFor(() => (inlineCardText() ?? '').includes('First inline anchor'), 'back to first inline card');
     await waitFor(() => selectedDiffRow('new one'), 'back to first Message Diff row');
-    // History focused: the Diff keeps its selection on a neutral fill; only the focused pane wears the accent.
+    // History focused: the Diff keeps a neutral fill; only the focused pane wears the accent.
     const firstRow = descendantsWithIdPrefix(terminal.renderer.root, 'reviewing-diff-row-').find(row =>
       renderableTreeText(row).includes('new one'),
     ) as BoxRenderable | undefined;
@@ -4099,7 +4099,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await waitForOutput(terminal, 'Home FOCUSED');
     let frame = terminal.setup.captureCharFrame();
     const rows = frame.split('\n');
-    // Header, then the context row; the card sits centred in the body below, with the Review's frame.
+    // Header, then the context row; the card sits centred in the body below.
     expect(rows[1]?.trim()).toBe('No Review open');
     const top = rows.findIndex(row => row.trimStart().startsWith('╭'));
     const bottom = rows.findIndex(row => row.trimStart().startsWith('╰'));
@@ -4216,7 +4216,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     await terminal.clickRenderable('reviewing-home-choice-comparison');
     await waitForOutput(terminal, 'Commits FOCUSED');
 
-    // HEAD is a merge: the card says what to do, the keys row offers it, the status line stays quiet.
+    // HEAD is a merge: the card says what to do, the keys row offers it.
     await waitFor(async () => {
       await terminal.flush();
       return preview().includes('A merge has two parents. [h/l] picks which one to compare against.');
@@ -5564,11 +5564,6 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       expect(scrollbar?.screenX).toBe(pane.screenX + pane.width - 1);
     }
 
-    const frameLineWith = (needle: string): string | undefined =>
-      terminal.setup
-        .captureCharFrame()
-        .split('\n')
-        .find(line => line.includes(needle));
     // The wheel moves the view; the next 64-row window is read before the view
     // reaches the loaded end.
     const diffWindowRequested = (): boolean =>
@@ -5701,9 +5696,9 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(oversizedFrame()).not.toContain('MessageTail0');
     oversizedMessageTerminal.resize(80, 24);
     await waitForLayout(oversizedMessageTerminal, 'linear');
-    expect(
-      oversizedMessageTerminal.renderer.root.findDescendantById('reviewing-questions-pane')?.height,
-    ).toBeGreaterThan(6);
+    const historyHeight = () =>
+      oversizedMessageTerminal.renderer.root.findDescendantById('reviewing-questions-pane')?.height ?? 0;
+    await waitFor(() => historyHeight() > 6, 'linear History height');
     expect(oversizedMessageTerminal.renderer.root.findDescendantById('reviewing-diff-pane')).toBeUndefined();
     for (let index = 0; index < 120 && !oversizedFrame().includes('MessageTail0'); index += 1) {
       await oversizedMessageTerminal.scrollRenderable('reviewing-messages-viewport', 'down');

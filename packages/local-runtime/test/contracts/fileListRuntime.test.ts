@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import type { ReviewLiveFilesView, ReviewLiveFolderView } from '@buildframe/workspace/projection';
 import { openWorkspaceRuntimeOwner, type WorkspaceRuntimeOwner } from '@buildframe/workspace/runtime';
 import { afterEach, expect, it } from 'vitest';
 
@@ -86,7 +87,7 @@ it('reads a file list larger than one message over real IPC, piece by piece', as
   let offset: number | null = 0;
   let pieces = 0;
   while (offset !== null) {
-    const files = await connected.workspace.read({
+    const files: ReviewLiveFilesView = await connected.workspace.read({
       kind: 'review.live-files',
       reviewIdentity: review.reviewIdentity,
       liveChangesIdentity: live.liveChangesIdentity,
@@ -112,22 +113,22 @@ it('reads a file list larger than one message over real IPC, piece by piece', as
 
   // The folder that holds them reads in windows of at most 1,000 rows, each cut to fit one message.
   const folderRows: string[] = [];
-  offset = 0;
-  pieces = 0;
-  while (offset !== null) {
-    const view = await connected.workspace.read({
+  let folderOffset: number | null = 0;
+  let folderPieces = 0;
+  while (folderOffset !== null) {
+    const view: ReviewLiveFolderView = await connected.workspace.read({
       kind: 'review.live-folder',
       reviewIdentity: review.reviewIdentity,
       liveChangesIdentity: live.liveChangesIdentity,
       pathBytesBase64: Buffer.from(path.basename(folder)).toString('base64'),
-      offset,
+      offset: folderOffset,
       limit: 1_000,
     });
     if (view.status !== 'available') throw new Error('Live folder unavailable');
     folderRows.push(...view.entries.items.map(entry => (entry.kind === 'file' ? entry.file.fileIdentity : '')));
-    offset = view.entries.nextOffset;
-    pieces += 1;
+    folderOffset = view.entries.nextOffset;
+    folderPieces += 1;
   }
-  expect(pieces).toBeGreaterThan(3);
+  expect(folderPieces).toBeGreaterThan(3);
   expect(new Set(folderRows).size).toBe(newFiles);
 }, 120_000);
