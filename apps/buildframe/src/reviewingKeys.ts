@@ -1,4 +1,5 @@
-import { agentConnected, type ReviewingApplicationState } from './reviewingModel.js';
+import { agentConnected } from './reviewingAgent.js';
+import type { ReviewingApplicationState } from './reviewingModel.js';
 import { reviewingFiles } from './reviewingFileList.js';
 import {
   defineKeyTable,

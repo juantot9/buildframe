@@ -9,6 +9,7 @@ import type {
   ReviewedHarnessConnection,
 } from '@buildframe/workspace/harness-interaction';
 import {
+  connectorSessionLabel,
   openConnectorSession,
   type ConnectorScheduler,
   type ConnectorSession,
@@ -65,6 +66,8 @@ export interface CreatePiReviewedAdapterRequest {
   readonly canonicalCheckout: string;
   readonly hostVersion: string;
   readonly sessionIdentity: string;
+  /** Pi's own name for the session, when it has one. */
+  readonly sessionName?: string | undefined;
   readonly sessionEpoch: string;
   readonly native: PiNativeHost;
   readonly scheduler?: PiAdapterScheduler;
@@ -223,7 +226,7 @@ export class PiReviewedAdapter implements ReviewedHarnessAdapter {
       hostVersion: request.hostVersion,
       sessionIdentity: request.sessionIdentity,
       sessionEpoch: request.sessionEpoch,
-      sessionLabel: `Pi session ${request.sessionIdentity.slice(0, 12)}`,
+      sessionLabel: connectorSessionLabel(request.sessionName, request.sessionIdentity.slice(-8)),
       naming: {
         attachmentSeed: 'pi-attachment-v1',
         attachmentEvidence: 'pi-attachment',

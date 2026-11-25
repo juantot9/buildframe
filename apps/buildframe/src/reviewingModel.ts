@@ -53,6 +53,8 @@ import type {
 } from '@buildframe/workspace/reviewing';
 import type { ReviewComparisonSelection } from '@buildframe/workspace/workspace-evidence';
 
+import { agentConnected, agentName, connectionNotices } from './reviewingAgent.js';
+export { agentName } from './reviewingAgent.js';
 import { contentWindowContainsLine } from './reviewingContent.js';
 import { Key, matchesKey, printableInput, type ReviewingInput } from './reviewingInput.js';
 import {
@@ -993,16 +995,6 @@ export function noticeToneOf(state: ReviewingApplicationState): NoticeTone {
   return notice !== undefined && state.noticeTone?.text === notice ? state.noticeTone.tone : 'info';
 }
 
-/** The coding agent's name for sentences, e.g. "Claude Code"; generic until one is known. */
-export function agentName(state: ReviewingApplicationState): string {
-  return state.agentLabel ?? 'The agent';
-}
-
-/** Whether a coding agent is live now; previewing needs one to inspect against. */
-export function agentConnected(state: ReviewingApplicationState): boolean {
-  return state.harnessConnection?.harnesses.some(harness => harness.connected) === true;
-}
-
 /** Enter as a key press, for pointer actions that mean the same thing. */
 const ENTER_INPUT: ReviewingInput = Object.freeze({
   name: 'enter',
@@ -1179,10 +1171,14 @@ export class ReviewingApplicationModel {
     };
   }
 
+  readonly #connectionNotice = connectionNotices();
+
   setHarnessConnection(view: HarnessConnectionView): void {
     this.state.harnessConnection = view;
     const connected = view.harnesses.find(harness => harness.connected);
     if (connected !== undefined) this.state.agentLabel = connected.harnessLabel;
+    const notice = this.#connectionNotice(view);
+    if (notice !== undefined) this.say(notice, 'success');
   }
 
   setViewport(width: number, height: number): void {

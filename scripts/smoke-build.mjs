@@ -66,6 +66,7 @@ assert.deepEqual(
     'connectHarnessAdapterRuntime',
     'connectorIndicator',
     'connectorIndicatorText',
+    'connectorSessionLabel',
     'exactReviewMessageText',
     'openConnectorSession',
   ],

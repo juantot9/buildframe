@@ -5,6 +5,7 @@ import type {
   ReviewedHarnessConnection,
 } from '@buildframe/workspace/harness-interaction';
 import {
+  connectorSessionLabel,
   openConnectorSession,
   type ConnectorHostFact,
   type ConnectorScheduler,
@@ -37,6 +38,8 @@ export interface CreateOpenCodeAdapterRequest {
   readonly hostVersion: string;
   /** OpenCode's session ID. */
   readonly sessionIdentity: string;
+  /** The session's title, when it has one. */
+  readonly sessionName?: string | undefined;
   readonly sessionEpoch: string;
   readonly native: OpenCodeNativeSession;
   readonly scheduler?: ConnectorScheduler;
@@ -91,7 +94,7 @@ export class OpenCodeReviewedAdapter implements ReviewedHarnessAdapter {
       hostVersion: request.hostVersion,
       sessionIdentity: request.sessionIdentity,
       sessionEpoch: request.sessionEpoch,
-      sessionLabel: `OpenCode session ${request.sessionIdentity.slice(4, 12)}`,
+      sessionLabel: connectorSessionLabel(request.sessionName, request.sessionIdentity.slice(-8)),
       naming: {
         attachmentSeed: 'opencode-attachment-v1',
         attachmentEvidence: 'opencode-attachment',

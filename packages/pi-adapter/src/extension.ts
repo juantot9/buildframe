@@ -139,6 +139,8 @@ export function createPiAdapterExtension(pi: ExtensionAPI, hostEntrypoint: strin
         canonicalCheckout: identity.canonicalCheckout,
         hostVersion: compatibility.version,
         sessionIdentity: ctx.sessionManager.getSessionId(),
+        // Older Pi has no session names.
+        sessionName: (ctx.sessionManager as { getSessionName?: () => string | undefined }).getSessionName?.(),
         sessionEpoch: randomUUID(),
         native: nativeHost(pi, ctx),
         authority,

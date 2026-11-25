@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ConnectorStatus } from '../../src/connector/contracts.js';
-import { connectorIndicator, connectorIndicatorText } from '../../src/connector/indicator.js';
+import { connectorIndicator, connectorIndicatorText, connectorSessionLabel } from '../../src/connector/indicator.js';
 
 const DIAGNOSTIC = { code: 'runtime-role-rejected' } as never;
 const WRITE = { readOnly: false, command: '/buildframe' };
@@ -64,5 +64,16 @@ describe('connector indicator', () => {
 
   it('shows nothing once the session disconnected on purpose', () => {
     expect(connectorIndicator({ kind: 'cancelled', first: false, text: '' }, WRITE)).toBeUndefined();
+  });
+});
+
+describe('connector session label', () => {
+  it('uses the harness’s own name on one line, cut to fit, or the start of the id', () => {
+    expect(connectorSessionLabel('Fix the\n login  redirect ', '1a2b3c4d')).toBe('Fix the login redirect');
+    expect(connectorSessionLabel(undefined, '1a2b3c4d')).toBe('session 1a2b3c4d');
+    expect(connectorSessionLabel('   ', '1a2b3c4d')).toBe('session 1a2b3c4d');
+    const long = connectorSessionLabel('x'.repeat(80), '1a2b3c4d');
+    expect([...long]).toHaveLength(60);
+    expect(long.endsWith('…')).toBe(true);
   });
 });

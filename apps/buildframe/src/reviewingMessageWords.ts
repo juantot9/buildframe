@@ -1,6 +1,7 @@
 import type { ReviewMessageListItem, ReviewProjectedQuestionItem } from '@buildframe/workspace/projection';
 
-import { agentName, messageState, type ReviewingApplicationState } from './reviewingModel.js';
+import { agentName } from './reviewingAgent.js';
+import { messageState, type ReviewingApplicationState } from './reviewingModel.js';
 import { messageBadge, type StatusBadge } from './reviewingStatus.js';
 
 /** The words Reviewing uses for where a Message or Question stands. */

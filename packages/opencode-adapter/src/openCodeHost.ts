@@ -73,7 +73,10 @@ export const BUILDFRAME_RPC = {
 export interface OpenCodeServerContext {
   readonly app: { readonly version: string };
   readonly session: {
-    get(input: { readonly sessionID: string }): Promise<{ readonly location: { readonly directory: string } }>;
+    get(input: { readonly sessionID: string }): Promise<{
+      readonly location: { readonly directory: string };
+      readonly title?: string;
+    }>;
     prompt(input: {
       readonly sessionID: string;
       readonly id: string;

@@ -159,10 +159,15 @@ export async function runCodexCommand(
 }
 
 /** Connects to Codex's shared server and checks it is a server this connector can work with. */
-async function openThread(
-  request: ConnectRequest,
-): Promise<
-  | { readonly status: 'open'; readonly client: CodexAppServerClient; readonly version: string; readonly idle: boolean }
+async function openThread(request: ConnectRequest): Promise<
+  | {
+      readonly status: 'open';
+      readonly client: CodexAppServerClient;
+      readonly version: string;
+      readonly idle: boolean;
+      /** The thread's name, when the person gave it one. */
+      readonly name: string | undefined;
+    }
   | { readonly status: 'refused'; readonly line: string; readonly retry: boolean }
 > {
   let client: CodexAppServerClient;
@@ -196,7 +201,7 @@ async function openThread(
     // The live check: the experimental queue BuildFrame sends through must still answer.
     await client.request('thread/queue/list', { threadId: request.threadId });
     const read = (await client.request('thread/read', { threadId: request.threadId })) as {
-      readonly thread?: { readonly status?: { readonly type?: string } };
+      readonly thread?: { readonly status?: { readonly type?: string }; readonly name?: string | null };
     };
     const status = read.thread?.status?.type;
     if (status === undefined || status === 'notLoaded') {
@@ -206,7 +211,7 @@ async function openThread(
       );
     }
     await client.request('thread/resume', { threadId: request.threadId, excludeTurns: true });
-    return { status: 'open', client, version, idle: status === 'idle' };
+    return { status: 'open', client, version, idle: status === 'idle', name: read.thread?.name ?? undefined };
   } catch (error) {
     return refuse(
       error instanceof CodexRpcError
@@ -259,6 +264,7 @@ export async function runCodexHelper(): Promise<void> {
     canonicalCheckout: identity.canonicalCheckout,
     hostVersion: first.version,
     threadId: request.threadId,
+    threadName: first.name,
     sessionEpoch: randomUUID(),
     server: { request: async (method, params) => await client.request(method, params) },
     idle: first.idle,

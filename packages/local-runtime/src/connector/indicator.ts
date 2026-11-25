@@ -68,3 +68,18 @@ export function connectorIndicatorText(
   const detail = indicator.access ?? (options.problem ? indicator.problem : undefined);
   return `${indicator.glyph} BuildFrame${detail === undefined ? '' : ` ${detail}`}`;
 }
+
+const SESSION_NAME_MAX_CHARACTERS = 60;
+
+/**
+ * How BuildFrame names a connected session: the harness's own name for it,
+ * on one line and cut to fit, or else the start of its id.
+ */
+export function connectorSessionLabel(name: string | undefined, shortIdentity: string): string {
+  const oneLine = name?.replaceAll(/\s+/gu, ' ').trim() ?? '';
+  if (oneLine === '') return `session ${shortIdentity}`;
+  const characters = [...oneLine];
+  return characters.length <= SESSION_NAME_MAX_CHARACTERS
+    ? oneLine
+    : `${characters.slice(0, SESSION_NAME_MAX_CHARACTERS - 1).join('')}…`;
+}

@@ -6,6 +6,7 @@ import type {
 } from '@buildframe/workspace/harness-interaction';
 import {
   exactReviewMessageText,
+  connectorSessionLabel,
   openConnectorSession,
   type ConnectorHostFact,
   type ConnectorScheduler,
@@ -68,7 +69,7 @@ export class ClaudeDirectAdapter implements ReviewedHarnessAdapter {
       hostVersion: request.hostVersion,
       sessionIdentity: request.sessionIdentity,
       sessionEpoch: request.sessionEpoch,
-      sessionLabel: `Claude session ${request.sessionIdentity.slice(0, 8)}`,
+      sessionLabel: connectorSessionLabel(undefined, request.sessionIdentity.slice(0, 8)),
       naming: {
         attachmentSeed: 'claude-direct-attachment-v1',
         attachmentEvidence: 'claude-direct-attachment',

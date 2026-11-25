@@ -118,6 +118,7 @@ export async function setUpBuildFrame(
       canonicalCheckout: identity.canonicalCheckout,
       hostVersion: version,
       sessionIdentity: sessionID,
+      sessionName: session.title,
       sessionEpoch: randomUUID(),
       native: {
         prompt: async input => ({

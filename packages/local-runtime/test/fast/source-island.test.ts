@@ -22,6 +22,7 @@ describe('local-runtime client Interface', () => {
       'connectHarnessAdapterRuntime',
       'connectorIndicator',
       'connectorIndicatorText',
+      'connectorSessionLabel',
       'exactReviewMessageText',
       'openConnectorSession',
     ]);

@@ -5,6 +5,7 @@ import type {
   ReviewedHarnessConnection,
 } from '@buildframe/workspace/harness-interaction';
 import {
+  connectorSessionLabel,
   openConnectorSession,
   type ConnectorHostFact,
   type ConnectorScheduler,
@@ -29,6 +30,8 @@ export interface CreateCodexAdapterRequest {
   readonly hostVersion: string;
   /** Codex's thread ID (`CODEX_THREAD_ID`). */
   readonly threadId: string;
+  /** The thread's name, when the person gave it one. */
+  readonly threadName?: string | undefined;
   readonly sessionEpoch: string;
   readonly server: CodexServerPort;
   /** Whether the thread was idle when the helper subscribed. */
@@ -89,7 +92,7 @@ export class CodexReviewedAdapter implements ReviewedHarnessAdapter {
       hostVersion: request.hostVersion,
       sessionIdentity: request.threadId,
       sessionEpoch: request.sessionEpoch,
-      sessionLabel: `Codex session ${request.threadId.slice(-8)}`,
+      sessionLabel: connectorSessionLabel(request.threadName, request.threadId.slice(-8)),
       naming: {
         attachmentSeed: 'codex-attachment-v1',
         attachmentEvidence: 'codex-attachment',
