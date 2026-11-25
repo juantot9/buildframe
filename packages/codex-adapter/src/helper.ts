@@ -6,7 +6,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { bootstrapWorkspace } from '@buildframe/workspace';
-import type { ConnectorStatus } from '@buildframe/local-runtime/harness-adapter';
+import { connectorIndicator, type ConnectorStatus } from '@buildframe/local-runtime/harness-adapter';
 
 import { CodexAppServerClient, CodexRpcError, type CodexNotification } from './appServerClient.js';
 import { codexVersionFromUserAgent, CODEX_HOST_COMPATIBILITY_RANGE, isReviewedCodexHostVersion } from './capability.js';
@@ -30,20 +30,68 @@ interface Outcome {
   readonly running: boolean;
 }
 
-function registryFile(threadId: string): string {
+/** Where the helper for one Codex thread keeps its record. */
+export function registryFile(threadId: string): string {
   const directory = path.join(tmpdir(), `buildframe-codex-${userInfo().uid}`);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   return path.join(directory, `${createHash('sha256').update(threadId).digest('hex').slice(0, 32)}.pid`);
 }
 
-function runningHelper(threadId: string): number | undefined {
+/**
+ * What the helper last knew, kept beside its pid for `!buildframe status`. A
+ * final record outlives the helper, so a session another one took says so.
+ */
+interface HelperRecord {
+  readonly pid: number;
+  readonly line: string;
+  readonly final: boolean;
+}
+
+function readRecord(threadId: string): HelperRecord | undefined {
   try {
-    const pid = Number(readFileSync(registryFile(threadId), 'utf8'));
-    process.kill(pid, 0);
-    return pid;
+    const parsed: unknown = JSON.parse(readFileSync(registryFile(threadId), 'utf8'));
+    // A helper from before the record wrote its pid alone.
+    if (typeof parsed === 'number') return { pid: parsed, line: 'BuildFrame: connected', final: false };
+    const record = parsed as Partial<HelperRecord>;
+    return typeof record.pid === 'number' && typeof record.line === 'string'
+      ? { pid: record.pid, line: record.line, final: record.final === true }
+      : undefined;
   } catch {
     return undefined;
   }
+}
+
+function writeRecord(threadId: string, record: HelperRecord): void {
+  writeFileSync(registryFile(threadId), JSON.stringify(record), { mode: 0o600 });
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runningHelper(threadId: string): number | undefined {
+  const record = readRecord(threadId);
+  return record !== undefined && !record.final && alive(record.pid) ? record.pid : undefined;
+}
+
+/** The one line `!buildframe status` prints: the state first, then what to do. */
+function statusReply(threadId: string): string {
+  const record = readRecord(threadId);
+  return record !== undefined && (record.final || alive(record.pid))
+    ? record.line
+    : 'BuildFrame: not connected · !buildframe to connect';
+}
+
+/** The record for one status: connected, or the problem the other harnesses show. */
+function recordLine(status: ConnectorStatus): string | undefined {
+  const indicator = connectorIndicator(status, { readOnly: false, command: '!buildframe' });
+  if (indicator === undefined) return undefined;
+  return indicator.connected ? 'BuildFrame: connected' : `BuildFrame: ${indicator.problem}`;
 }
 
 /**
@@ -60,15 +108,12 @@ export async function runCodexCommand(
   const action = (argv[0] ?? '').toLowerCase();
   const running = runningHelper(threadId);
   if (action === 'status') {
-    process.stdout.write(
-      running === undefined
-        ? 'BuildFrame is not connected to this session.\n'
-        : 'BuildFrame is connected to this session.\n',
-    );
+    process.stdout.write(`${statusReply(threadId)}\n`);
     return;
   }
   if (action === 'disconnect') {
     if (running !== undefined) process.kill(running, 'SIGTERM');
+    else rmSync(registryFile(threadId), { force: true });
     process.stdout.write(
       running === undefined
         ? 'BuildFrame is not connected to this session.\n'
@@ -219,7 +264,7 @@ export async function runCodexHelper(): Promise<void> {
     idle: first.idle,
   });
   const pidFile = registryFile(request.threadId);
-  writeFileSync(pidFile, String(process.pid), { mode: 0o600 });
+  writeRecord(request.threadId, { pid: process.pid, line: 'BuildFrame: connecting…', final: false });
 
   // Codex's notifications are applied one at a time, in order.
   let applying = Promise.resolve();
@@ -227,13 +272,14 @@ export async function runCodexHelper(): Promise<void> {
     applying = applying.then(work).catch(() => undefined);
   };
   let stopping = false;
-  const stop = async (): Promise<void> => {
+  /** Stops; a final record stays for `!buildframe status`, any other goes with the helper. */
+  const stop = async (keepRecord = false): Promise<void> => {
     if (stopping) return;
     stopping = true;
     await applying;
     await adapter.session.close().catch(() => undefined);
     client.close();
-    rmSync(pidFile, { force: true });
+    if (!keepRecord) rmSync(pidFile, { force: true });
     process.exit(0);
   };
   process.once('SIGTERM', () => void stop());
@@ -268,7 +314,10 @@ export async function runCodexHelper(): Promise<void> {
 
   await adapter.session.attach(status => {
     const outcome = statusLine(status, identity.canonicalCheckout);
+    const final = status.kind === 'refused' || status.kind === 'replaced';
+    const line = recordLine(status);
+    if (line !== undefined) writeRecord(request.threadId, { pid: process.pid, line, final });
     if (status.first) report(outcome);
-    if (!outcome.running) void stop();
+    if (!outcome.running) void stop(final);
   });
 }
