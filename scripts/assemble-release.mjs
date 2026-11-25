@@ -293,7 +293,11 @@ try {
   const codex = await execFileAsync(process.execPath, [path.join(installedCli, 'dist/buildframe.js'), 'status'], {
     env: { ...process.env, CODEX_THREAD_ID: 'release-check-thread' },
   });
-  assert.equal(codex.stdout, 'BuildFrame is not connected to this session.\n', 'buildframe answers !buildframe status');
+  assert.equal(
+    codex.stdout,
+    'BuildFrame: not connected · !buildframe to connect\n',
+    'buildframe answers !buildframe status',
+  );
   const doctor = await execFileAsync(process.execPath, [
     path.join(installedCli, 'dist/buildframe.js'),
     'doctor',
