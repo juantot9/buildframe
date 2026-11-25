@@ -118,16 +118,16 @@ describe('BuildFrame Pi extension', () => {
 
     const started = fakeContext();
     for (const handler of events.get('session_start') ?? []) await handler({ type: 'session_start' }, started.ctx);
-    expect(started.statuses.at(-1)).toBe('BuildFrame: /buildframe to attach this session');
+    expect(started.statuses).toEqual([undefined]);
     expect(started.notifications).toEqual([]);
 
     const command = commands.get('buildframe');
     if (command === undefined) throw new Error('buildframe command missing');
-    expect(command.description).toContain('Attach');
+    expect(command.description).toBe('Connect this session to BuildFrame');
 
     const status = fakeContext();
     await command.handler('status', status.ctx);
-    expect(status.notifications).toEqual([{ message: 'BuildFrame is not attached to this session.', type: 'info' }]);
+    expect(status.notifications).toEqual([{ message: 'BuildFrame is not connected to this session.', type: 'info' }]);
 
     const usage = fakeContext();
     await command.handler('later', usage.ctx);
@@ -141,7 +141,7 @@ describe('BuildFrame Pi extension', () => {
 
     const detach = fakeContext();
     await command.handler('disconnect', detach.ctx);
-    expect(detach.notifications).toEqual([{ message: 'BuildFrame is not attached to this session.', type: 'info' }]);
+    expect(detach.notifications).toEqual([{ message: 'BuildFrame is not connected to this session.', type: 'info' }]);
 
     const shutdown = fakeContext();
     for (const handler of events.get('session_shutdown') ?? []) {
@@ -208,10 +208,13 @@ describe('BuildFrame Pi extension against a live runtime', () => {
     const command = commands.get('buildframe');
     if (command === undefined) throw new Error('buildframe command missing');
     const attached = fakeContext(checkout);
+    // A theme that names its colours, so the light's tones are visible.
+    Object.assign(attached.ctx.ui, { theme: { fg: (color: string, text: string) => `<${color}>${text}</${color}>` } });
     await command.handler('', attached.ctx);
     expect(attached.notifications).toEqual([
-      { message: 'BuildFrame Review attached (workspace write).', type: 'info' },
+      { message: 'BuildFrame connected to this session (workspace write).', type: 'info' },
     ]);
+    expect(attached.statuses.at(-1)).toBe('<success>●</success><dim> BuildFrame</dim>');
     expect(await connectedSessions()).toEqual([true]);
 
     const shutdown = fakeContext(checkout);

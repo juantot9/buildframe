@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { bootstrapWorkspace } from '@buildframe/workspace';
-import type { ConnectorStatus } from '@buildframe/local-runtime/harness-adapter';
+import {
+  connectorIndicator,
+  connectorIndicatorText,
+  type ConnectorIndicator,
+  type ConnectorStatus,
+} from '@buildframe/local-runtime/harness-adapter';
 
 import { CORRELATION_ENTRY_TYPE, PiReviewedAdapter, type PiNativeHost } from './piAdapter.js';
 import type { PiDirectReviewAuthority } from './capability.js';
@@ -48,27 +53,27 @@ function nativeHost(pi: ExtensionAPI, ctx: ExtensionContext): PiNativeHost {
   };
 }
 
+/** The footer light: the glyph in the tone's colour, quiet while connected, all in it otherwise. */
+function paintIndicator(ctx: ExtensionContext, indicator: ConnectorIndicator): string {
+  const text = connectorIndicatorText(indicator);
+  const theme = (ctx.ui as { readonly theme?: { fg(color: string, text: string): string } }).theme;
+  if (theme === undefined) return text;
+  if (!indicator.connected) return theme.fg(indicator.tone, text);
+  return `${theme.fg(indicator.tone, indicator.glyph)}${theme.fg('dim', text.slice(indicator.glyph.length))}`;
+}
+
 /** Later statuses only update the footer; the first one answers the command. */
-function showStatus(ctx: ExtensionContext, status: ConnectorStatus): void {
-  switch (status.kind) {
-    case 'connected':
-      ctx.ui.setStatus('buildframe', status.text);
-      return;
-    case 'retrying':
-      ctx.ui.setStatus('buildframe', status.label === undefined ? status.text : `BuildFrame: ${status.label}`);
-      return;
-    case 'refused':
-      ctx.ui.setStatus('buildframe', status.text);
-      return;
-    case 'replaced':
-      ctx.ui.setStatus('buildframe', status.text);
-      ctx.ui.notify(
-        'BuildFrame: another session connected to this repository, so this one was disconnected. Run /buildframe here to take it back.',
-        'warning',
-      );
-      return;
-    case 'cancelled':
-      return;
+function showStatus(ctx: ExtensionContext, status: ConnectorStatus, authority: PiDirectReviewAuthority): void {
+  const indicator = connectorIndicator(status, {
+    readOnly: authority === 'discussion-only',
+    command: '/buildframe',
+  });
+  ctx.ui.setStatus('buildframe', indicator === undefined ? undefined : paintIndicator(ctx, indicator));
+  if (status.kind === 'replaced') {
+    ctx.ui.notify(
+      'BuildFrame: another session connected to this repository, so this one was disconnected. Run /buildframe here to take it back.',
+      'warning',
+    );
   }
 }
 
@@ -93,7 +98,7 @@ export function createPiAdapterExtension(pi: ExtensionAPI, hostEntrypoint: strin
 
   if (compatibility.status === 'unsupported') {
     pi.registerCommand('buildframe', {
-      description: 'Attach this Pi session to the BuildFrame Reviewing application',
+      description: 'Connect this session to BuildFrame',
       handler: async (_args, ctx) => {
         ctx.ui.notify(`BuildFrame: ${piHostCompatibilityLabel(compatibility)}`, 'error');
       },
@@ -104,10 +109,11 @@ export function createPiAdapterExtension(pi: ExtensionAPI, hostEntrypoint: strin
   bindPiReviewedAdapterEvents(pi, () => active?.adapter);
 
   // Attachment is explicit: an unattached session must never become a
-  // default-route candidate just because the extension happens to be loaded.
+  // default-route candidate just because the extension happens to be loaded,
+  // and it shows nothing until /buildframe connects it.
   events.on('session_start', async (_event, ctx) => {
     await closeActive();
-    ctx.ui.setStatus('buildframe', 'BuildFrame: /buildframe to attach this session');
+    ctx.ui.setStatus('buildframe', undefined);
   });
 
   events.on('session_shutdown', async (_event, ctx) => {
@@ -144,12 +150,12 @@ export function createPiAdapterExtension(pi: ExtensionAPI, hostEntrypoint: strin
     const next: ActiveSessionAttachment = { adapter, authority };
     active = next;
     const outcome = await adapter.session.attach(status => {
-      showStatus(ctx, status);
+      showStatus(ctx, status, authority);
       // A refused or replaced session stops for good; a new /buildframe starts over.
       if ((status.kind === 'refused' || status.kind === 'replaced') && active === next) active = undefined;
     });
     if (outcome.kind === 'connected') {
-      ctx.ui.notify(`BuildFrame Review attached (${authorityLabel(authority)}).`, 'info');
+      ctx.ui.notify(`BuildFrame connected to this session (${authorityLabel(authority)}).`, 'info');
       return;
     }
     if (outcome.kind === 'retrying') {
@@ -165,30 +171,30 @@ export function createPiAdapterExtension(pi: ExtensionAPI, hostEntrypoint: strin
   };
 
   pi.registerCommand('buildframe', {
-    description: 'Attach this Pi session to the BuildFrame Reviewing application',
+    description: 'Connect this session to BuildFrame',
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const action = args.trim().toLowerCase();
       if (action === 'status') {
         ctx.ui.notify(
           active === undefined
-            ? 'BuildFrame is not attached to this session.'
-            : `BuildFrame is attached as ${active.adapter.attachment.destination.sessionLabel} (${authorityLabel(active.authority)}).`,
+            ? 'BuildFrame is not connected to this session.'
+            : `BuildFrame is connected as ${active.adapter.attachment.destination.sessionLabel} (${authorityLabel(active.authority)}).`,
           'info',
         );
         return;
       }
       if (action === 'disconnect' || action === 'detach') {
         if (active === undefined) {
-          ctx.ui.notify('BuildFrame is not attached to this session.', 'info');
+          ctx.ui.notify('BuildFrame is not connected to this session.', 'info');
           return;
         }
         await closeActive();
-        ctx.ui.notify('BuildFrame detached from this session.', 'info');
+        ctx.ui.notify('BuildFrame disconnected from this session.', 'info');
         return;
       }
       if (action === 'readonly' || action === 'read-only') {
         if (active?.authority === 'discussion-only') {
-          ctx.ui.notify('BuildFrame is attached read-only already.', 'info');
+          ctx.ui.notify('BuildFrame is connected read-only already.', 'info');
           return;
         }
         await closeActive();
@@ -197,7 +203,7 @@ export function createPiAdapterExtension(pi: ExtensionAPI, hostEntrypoint: strin
       }
       if (action === 'write') {
         if (active?.authority === 'workspace-write') {
-          ctx.ui.notify('BuildFrame is attached with workspace write already.', 'info');
+          ctx.ui.notify('BuildFrame is connected with workspace write already.', 'info');
           return;
         }
         await closeActive();
@@ -210,7 +216,7 @@ export function createPiAdapterExtension(pi: ExtensionAPI, hostEntrypoint: strin
       }
       if (active !== undefined) {
         ctx.ui.notify(
-          `BuildFrame is attached to this session already (${authorityLabel(active.authority)}). Use /buildframe disconnect first.`,
+          `BuildFrame is connected to this session already (${authorityLabel(active.authority)}). Use /buildframe disconnect first.`,
           'info',
         );
         return;
