@@ -145,7 +145,10 @@ describe('the OpenCode plugin', () => {
     await opencode.run('ses_one', 'disconnect');
     expect(opencode.told.at(-1)?.message).toBe('BuildFrame disconnected from this session.');
     expect(opencode.lights.at(-1)).toEqual({ sessionID: 'ses_one', text: '', tone: 'success' });
+    opencode.lights.length = 0;
     await expect(opencode.run('ses_one', 'disconnect')).rejects.toThrow('BuildFrame is not connected to this session.');
+    // It also dismisses a light left by a session another one took.
+    expect(opencode.lights).toEqual([{ sessionID: 'ses_one', text: '', tone: 'success' }]);
     await expect(opencode.run('ses_one', 'sideways')).rejects.toThrow('Usage: /buildframe');
   });
 

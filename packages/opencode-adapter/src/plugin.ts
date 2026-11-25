@@ -178,7 +178,11 @@ export async function setUpBuildFrame(
           return;
         }
         if (action === 'disconnect' || action === 'detach') {
-          if (!here) throw new BuildFrameCommandError('BuildFrame is not connected to this session.');
+          if (!here) {
+            // A session another one took keeps its light until it is dismissed here.
+            show({ sessionID, text: '', tone: 'success' });
+            throw new BuildFrameCommandError('BuildFrame is not connected to this session.');
+          }
           await closeActive();
           tell({ sessionID, message: 'BuildFrame disconnected from this session.', variant: 'info' });
           return;

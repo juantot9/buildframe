@@ -142,6 +142,8 @@ describe('BuildFrame Pi extension', () => {
     const detach = fakeContext();
     await command.handler('disconnect', detach.ctx);
     expect(detach.notifications).toEqual([{ message: 'BuildFrame is not connected to this session.', type: 'info' }]);
+    // It also dismisses a light left by a session another one took.
+    expect(detach.statuses).toEqual([undefined]);
 
     const shutdown = fakeContext();
     for (const handler of events.get('session_shutdown') ?? []) {

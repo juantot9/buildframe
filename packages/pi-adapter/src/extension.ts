@@ -187,6 +187,8 @@ export function createPiAdapterExtension(pi: ExtensionAPI, hostEntrypoint: strin
       }
       if (action === 'disconnect' || action === 'detach') {
         if (active === undefined) {
+          // A session another one took keeps its light until it is dismissed here.
+          ctx.ui.setStatus('buildframe', undefined);
           ctx.ui.notify('BuildFrame is not connected to this session.', 'info');
           return;
         }

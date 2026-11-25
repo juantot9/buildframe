@@ -211,6 +211,13 @@ test('shows the connection as a light beside the prompt, and only problems under
   const after = await $.ui.mount(BESIDE_PROMPT as any);
   expect((await after.find({ type: 'Text', text: /BuildFrame/ }))?.text).toBe('○ BuildFrame');
   await after.unmount();
+
+  // /buildframe disconnect dismisses the light another session left behind.
+  await $.command.run({ command: 'buildframe', args: 'disconnect' });
+  expect(harness.statuses.at(-1)).toBeUndefined();
+  const dismissed = await $.ui.mount(BESIDE_PROMPT as any);
+  expect(await dismissed.find({ type: 'Text', text: /BuildFrame/ })).toBeUndefined();
+  await dismissed.unmount();
 });
 
 test('shows a helper from before the light as it did', async ($, on) => {

@@ -273,8 +273,11 @@ export function register(on) {
           : 'BuildFrame is connected to this session.',
       );
     } else if (action === 'disconnect' || action === 'detach') {
-      if (link === undefined) $.ui.toast('BuildFrame is not connected to this session.');
-      else {
+      if (link === undefined) {
+        // A session another one took keeps its light until it is dismissed here.
+        clear($, undefined);
+        $.ui.toast('BuildFrame is not connected to this session.');
+      } else {
         await detach($);
         $.ui.toast('BuildFrame disconnected from this session.');
       }
