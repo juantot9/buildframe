@@ -23,6 +23,47 @@ let turnSeenSince = false;
 let foreignPending = false;
 let outbox = [];
 let posting = false;
+/** The light beside the prompt: `{ text, tone }`, or undefined when there is none. */
+let light;
+/** Whether Claude Code has drawn the cell beside the prompt in this session. */
+let cellDrawn = false;
+/** Whether the light is standing in for the cell under the prompt, until the cell is drawn. */
+let lightInStatus = false;
+
+/**
+ * Shows the helper's indicator: the light beside the prompt, and under it
+ * only a problem. Under the prompt Claude Code draws every line as a notice,
+ * so the connected light goes there only where the cell never appears.
+ * A helper from before the light sends `label` alone.
+ */
+function show($, message) {
+  if (typeof message.light !== 'string') {
+    light = undefined;
+    lightInStatus = false;
+    $.ui.status('BuildFrame: ' + message.label);
+    return;
+  }
+  light = { text: message.light, tone: message.tone ?? 'warning' };
+  lightInStatus = message.problem === undefined && !cellDrawn;
+  $.ui.status(message.problem ?? (lightInStatus ? message.light : undefined));
+  redraw($);
+}
+
+/** Asks Claude Code to draw the cell again; an older one without it never draws the cell. */
+function redraw($) {
+  try {
+    $.ui.invalidate('ui.render');
+  } catch {
+    // Nothing to redraw.
+  }
+}
+
+function clear($, problem) {
+  light = problem === undefined ? undefined : { text: '○ BuildFrame', tone: 'error' };
+  lightInStatus = false;
+  $.ui.status(problem);
+  redraw($);
+}
 
 function record(fact) {
   if (link !== undefined) outbox.push(fact);
@@ -98,11 +139,11 @@ async function attach($) {
   const current = { port: outcome.port, token: outcome.token };
   link = current;
   outbox = [];
-  $.ui.status('BuildFrame: ' + outcome.label);
+  show($, outcome);
   $.ui.toast(
     outcome.status === 'connected'
-      ? 'BuildFrame Review attached.'
-      : 'BuildFrame runtime is unavailable; the helper keeps retrying in the background.',
+      ? 'BuildFrame connected to this session.'
+      : 'BuildFrame isn’t open yet; this session connects when it opens.',
   );
   $.clock.after(0, () => poll($, current));
 }
@@ -116,7 +157,7 @@ async function detach($) {
   } catch {
     // The helper also detaches once polling stops.
   }
-  $.ui.status(undefined);
+  clear($, undefined);
 }
 
 async function poll($, current) {
@@ -141,7 +182,7 @@ async function poll($, current) {
     }
     for (const command of commands) await perform($, current, command);
   }
-  if (forget(current)) $.ui.status('BuildFrame: helper stopped; /buildframe to attach again');
+  if (forget(current)) clear($, 'helper stopped · /buildframe to connect again');
 }
 
 async function perform($, current, command) {
@@ -153,10 +194,10 @@ async function perform($, current, command) {
     return;
   }
   if (command.type === 'status') {
-    $.ui.status('BuildFrame: ' + command.label);
+    show($, command);
   } else if (command.type === 'detach') {
     forget(current);
-    $.ui.status('BuildFrame: ' + command.label);
+    show($, command);
   } else if (command.type === 'abort') {
     try {
       await $.turn.abort({ turnId: command.turnId });
@@ -214,7 +255,7 @@ export function register(on) {
     try {
       await $.command.register({
         name: 'buildframe',
-        description: 'Attach this Claude session to the BuildFrame Reviewing application',
+        description: 'Connect this session to BuildFrame',
         argumentHint: '[status|disconnect]',
       });
     } catch {
@@ -227,23 +268,45 @@ export function register(on) {
     const action = e.args.trim().toLowerCase();
     if (action === 'status') {
       $.ui.toast(
-        link === undefined ? 'BuildFrame is not attached to this session.' : 'BuildFrame is attached to this session.',
+        link === undefined
+          ? 'BuildFrame is not connected to this session.'
+          : 'BuildFrame is connected to this session.',
       );
     } else if (action === 'disconnect' || action === 'detach') {
-      if (link === undefined) $.ui.toast('BuildFrame is not attached to this session.');
+      if (link === undefined) $.ui.toast('BuildFrame is not connected to this session.');
       else {
         await detach($);
-        $.ui.toast('BuildFrame detached from this session.');
+        $.ui.toast('BuildFrame disconnected from this session.');
       }
     } else if (action !== '') {
       $.ui.toast('Usage: /buildframe, /buildframe status, or /buildframe disconnect');
     } else if (link !== undefined) {
-      $.ui.toast('BuildFrame is attached to this session already. Use /buildframe disconnect first.');
+      $.ui.toast('BuildFrame is connected to this session already. Use /buildframe disconnect first.');
     } else {
       await attach($);
     }
     return {};
   });
+
+  // The light: a glyph in the tone's colour and a dim name while connected,
+  // all in the tone otherwise. It leaves the cell to the engine when it does
+  // not fit, and Claude Code hides it while it asks something.
+  on('ui.render', { component: 'BesidePrompt' }, ($, e, next) => {
+    if (light === undefined || e.props.maxColumns < light.text.length) return next(e);
+    if (!cellDrawn) {
+      cellDrawn = true;
+      if (lightInStatus) {
+        lightInStatus = false;
+        $.clock.after(0, () => $.ui.status(undefined));
+      }
+    }
+    const { Text } = $.ui.resolve(e);
+    const glyph = light.text.slice(0, 1);
+    const rest = light.text.slice(1);
+    return light.tone === 'success'
+      ? Text({ children: [Text({ color: 'success', children: glyph }), Text({ dimColor: true, children: rest })] })
+      : Text({ color: light.tone, children: light.text });
+  }).catch(($, e, next) => next(e));
 
   // Observers only: every hook passes the event on unchanged.
   on('prompt.submit', async ($, e, next) => {
@@ -294,7 +357,7 @@ export function register(on) {
       // helper would keep accepting Sends for a conversation that is gone. It
       // settles any open Send on its own, so unsent facts are not needed.
       forget(current);
-      $.ui.status(undefined);
+      clear($, undefined);
       await postFacts($, current, [{ type: 'session-ending' }]);
     }
     return next(e);

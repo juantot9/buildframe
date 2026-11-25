@@ -10,11 +10,23 @@ export const CLAUDE_MOD_PROTOCOL_VERSION: 1 = 1;
 /** Native `turn.complete` reasons, exactly as the reviewed Mod types spell them. */
 export type ClaudeTurnCompleteReason = 'answer' | 'aborted' | 'refusal' | 'error';
 
+/**
+ * The connection light the Mod draws beside the prompt, its tone, and the
+ * problem it shows under the prompt, if any. Optional so that a Mod and a
+ * helper from different releases still understand each other: an older Mod
+ * reads `label` alone, and a newer one falls back to it without `light`.
+ */
+export interface ClaudeModIndicator {
+  readonly light?: string;
+  readonly tone?: 'success' | 'warning' | 'error';
+  readonly problem?: string;
+}
+
 export type ClaudeModCommand =
   | { readonly type: 'submit'; readonly dispatchId: string; readonly text: string }
   | { readonly type: 'abort'; readonly dispatchId: string; readonly turnId: string }
-  | { readonly type: 'status'; readonly label: string }
-  | { readonly type: 'detach'; readonly label: string };
+  | ({ readonly type: 'status'; readonly label: string } & ClaudeModIndicator)
+  | ({ readonly type: 'detach'; readonly label: string } & ClaudeModIndicator);
 
 export type ClaudeModFact =
   /** The Mod found Claude busy and did not call submit. */
@@ -46,8 +58,13 @@ export interface ClaudeModAttachRequest {
 }
 
 export type ClaudeModAttachOutcome =
-  | { readonly status: 'connected' | 'retrying'; readonly port: number; readonly token: string; readonly label: string }
-  | { readonly status: 'refused'; readonly label: string };
+  | ({
+      readonly status: 'connected' | 'retrying';
+      readonly port: number;
+      readonly token: string;
+      readonly label: string;
+    } & ClaudeModIndicator)
+  | ({ readonly status: 'refused'; readonly label: string } & ClaudeModIndicator);
 
 const MAX_IDENTITY_LENGTH = 256;
 /** The Mod never sends a longer answer: it could not fit the 16 KiB Response bound. */

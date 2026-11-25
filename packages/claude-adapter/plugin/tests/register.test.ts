@@ -7,23 +7,36 @@ interface Harness {
   readonly facts: Record<string, unknown>[];
   readonly prompts: { text: string; origin: unknown }[];
   readonly commands: unknown[][];
+  /** Every line set under the prompt, `undefined` for a cleared one. */
+  readonly statuses: (string | undefined)[];
   /** How long the helper takes to answer a `/facts` post. */
   factDelayMs: number;
 }
 
 /** Stubs Claude Code's side and a scripted helper that hands out `commands` one poll at a time. */
 function stub(on: any, clock: any, commands: unknown[][]): Harness {
-  const harness: Harness = { launches: [], facts: [], prompts: [], commands, factDelayMs: 0 };
+  const harness: Harness = { launches: [], facts: [], prompts: [], commands, statuses: [], factDelayMs: 0 };
   on('session.start', () => ({ cwd: '/work/repo' }));
   on('command.register', () => ({ value: undefined }));
   on('ui.toast', () => ({ value: undefined }));
-  on('ui.status', () => ({ value: undefined }));
+  on('ui.status', ($: any, e: any) => {
+    harness.statuses.push(e.text);
+    return { value: undefined };
+  });
+  on('ui.invalidate', () => ({ value: undefined }));
   on('session.id', () => ({ value: 'session-1' }));
   on('session.cwd', () => ({ value: '/work/repo' }));
   on('session.version', () => ({ value: { version: '2.1.310', base: '2.1.310' } }));
   on('process.run', ($: any, e: any) => {
     harness.launches.push({ argv: e.argv, stdin: e.init.stdin });
-    const outcome = { status: 'connected', port: 41234, token: 'f'.repeat(64), label: 'BuildFrame Review attached' };
+    const outcome = {
+      status: 'connected',
+      port: 41234,
+      token: 'f'.repeat(64),
+      label: 'connected',
+      light: '● BuildFrame',
+      tone: 'success',
+    };
     return { value: { exitCode: 0, stdout: JSON.stringify(outcome) + '\n', stderr: '' } };
   });
   on('http.fetch', async ($: any, e: any) => {
@@ -161,4 +174,48 @@ test('refuses a Send handed to a poll that outlived its session', async ($, on) 
 
   expect(harness.prompts).toEqual([]);
   expect(harness.facts).toEqual([{ type: 'session-ending' }, { type: 'submit-refused', dispatchId: 'cdd_9' }]);
+});
+
+const BESIDE_PROMPT = {
+  plugin: 'buildframe',
+  component: 'BesidePrompt',
+  surface: 'terminal',
+  props: { maxColumns: 40, floatRows: 0, floatColumns: 0, isWorking: false, view: {} },
+} as const;
+
+test('shows the connection as a light beside the prompt, and only problems under it', async ($, on) => {
+  const clock = mock.clock(on);
+  const harness = stub(on, clock, []);
+  await attach($, clock);
+  // Until Claude Code draws the cell, the light stands in under the prompt.
+  expect(harness.statuses).toEqual(['● BuildFrame']);
+
+  const ui = await $.ui.mount(BESIDE_PROMPT as any);
+  expect((await ui.find({ type: 'Text', text: /BuildFrame/ }))?.text).toBe('● BuildFrame');
+  await clock.settle();
+  expect(harness.statuses).toEqual(['● BuildFrame', undefined]);
+  await ui.unmount();
+
+  harness.commands.push([
+    {
+      type: 'detach',
+      label: 'another session connected to this repository',
+      light: '○ BuildFrame',
+      tone: 'warning',
+      problem: 'moved to another session · /buildframe to take it back',
+    },
+  ]);
+  await clock.advance(20);
+  await clock.settle();
+  expect(harness.statuses.at(-1)).toBe('moved to another session · /buildframe to take it back');
+  const after = await $.ui.mount(BESIDE_PROMPT as any);
+  expect((await after.find({ type: 'Text', text: /BuildFrame/ }))?.text).toBe('○ BuildFrame');
+  await after.unmount();
+});
+
+test('shows a helper from before the light as it did', async ($, on) => {
+  const clock = mock.clock(on);
+  const harness = stub(on, clock, [[{ type: 'status', label: 'runtime disconnected; retrying' }]]);
+  await attach($, clock);
+  expect(harness.statuses.at(-1)).toBe('BuildFrame: runtime disconnected; retrying');
 });

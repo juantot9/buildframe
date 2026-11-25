@@ -3,16 +3,31 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import process from 'node:process';
 
 import { bootstrapWorkspace } from '@buildframe/workspace';
-import type { ConnectorStatus } from '@buildframe/local-runtime/harness-adapter';
+import {
+  connectorIndicator,
+  connectorIndicatorText,
+  type ConnectorStatus,
+} from '@buildframe/local-runtime/harness-adapter';
 
 import { isReviewedClaudeDirectHostVersion } from './capability.js';
 import { ClaudeDirectAdapter } from './claudeDirectAdapter.js';
 import { ClaudeHelperServer } from './helperServer.js';
-import { parseClaudeModAttachRequest, type ClaudeModAttachOutcome } from './modProtocol.js';
+import { parseClaudeModAttachRequest, type ClaudeModAttachOutcome, type ClaudeModIndicator } from './modProtocol.js';
 
 /** The launcher answers the Mod's one-shot `$.process.run` well inside its timeout. */
 const FIRST_OUTCOME_TIMEOUT_MS = 12_000;
 const MAX_ATTACH_REQUEST_BYTES = 16 * 1024;
+
+/** The light beside Claude's prompt and the problem under it; Claude Code has no read-only connection. */
+function modIndicator(status: ConnectorStatus): ClaudeModIndicator {
+  const indicator = connectorIndicator(status, { readOnly: false, command: '/buildframe' });
+  if (indicator === undefined) return {};
+  return {
+    light: connectorIndicatorText(indicator, { problem: false }),
+    tone: indicator.tone,
+    ...(indicator.problem === undefined ? {} : { problem: indicator.problem }),
+  };
+}
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -127,25 +142,27 @@ export async function runClaudeDirectHelperDaemon(): Promise<void> {
   });
 
   // The first outcome answers the launcher; later ones reach the Mod.
+  // `label` is what a Mod from before the light shows; a newer one draws the indicator.
   await adapter.session.attach((status: ConnectorStatus) => {
+    const indicator = modIndicator(status);
     switch (status.kind) {
       case 'connected':
-        if (status.first) report({ status: 'connected', port, token, label: status.text });
-        else server.deliver({ type: 'status', label: status.text });
+        if (status.first) report({ status: 'connected', port, token, label: 'connected', ...indicator });
+        else server.deliver({ type: 'status', label: 'connected', ...indicator });
         return;
       case 'retrying': {
         const label = status.label === undefined ? 'runtime disconnected; retrying' : `${status.label}; retrying`;
-        if (status.first) report({ status: 'retrying', port, token, label });
-        else server.deliver({ type: 'status', label });
+        if (status.first) report({ status: 'retrying', port, token, label, ...indicator });
+        else server.deliver({ type: 'status', label, ...indicator });
         return;
       }
       case 'refused':
-        if (status.first) report({ status: 'refused', label: status.label });
-        else server.deliver({ type: 'detach', label: status.label });
+        if (status.first) report({ status: 'refused', label: status.label, ...indicator });
+        else server.deliver({ type: 'detach', label: status.label, ...indicator });
         void shutdown();
         return;
       case 'replaced':
-        server.deliver({ type: 'detach', label: 'another session connected to this repository' });
+        server.deliver({ type: 'detach', label: 'another session connected to this repository', ...indicator });
         void shutdown();
         return;
       case 'cancelled':
