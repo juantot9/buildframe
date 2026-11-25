@@ -105,6 +105,7 @@ import { balancedSibling, paneTitle, shownFocus } from './reviewingPaneTitle.js'
 import { reviewingOwnSettings } from './reviewingSettings.js';
 import { commitName, headMoveNote, shortHash } from './reviewingHeadMoves.js';
 import { homeChoices } from './reviewingHomeRows.js';
+import { unchangedContentDelta } from './reviewingUnchangedKeys.js';
 
 export { INDIGO_NIGHT, MATCH_TERMINAL_THEME, QUIET_GRAPHITE, QUIET_PAPER, WARM_CARBON } from './shellLook.js';
 
@@ -4788,21 +4789,7 @@ export class ReviewingView {
       return;
     }
 
-    const contentDelta =
-      this.#model.state.screen === 'review' &&
-      this.#model.state.focus === 'diff' &&
-      this.#model.state.editor === undefined &&
-      this.#model.state.unchangedContent?.view.status === 'available'
-        ? input.text === 'k' || input.name === 'up'
-          ? -1
-          : input.text === 'j' || input.name === 'down'
-            ? 1
-            : input.name === 'pageUp'
-              ? -(this.#contentPageSize ?? 20)
-              : input.name === 'pageDown'
-                ? (this.#contentPageSize ?? 20)
-                : 0
-        : 0;
+    const contentDelta = unchangedContentDelta(this.#model.state, input, this.#contentPageSize ?? 20);
     if (contentDelta !== 0) {
       event.preventDefault();
       event.stopPropagation();
