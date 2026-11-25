@@ -530,6 +530,8 @@ export function openConnectorSession(options: OpenConnectorSessionOptions): Conn
 }
 
 export { exactReviewMessageText } from './connector/turnEvidence.js';
+export { connectorIndicator, connectorIndicatorText } from './connector/indicator.js';
+export type { ConnectorIndicator, ConnectorIndicatorOptions, ConnectorIndicatorTone } from './connector/indicator.js';
 export type {
   ConnectorDispatchDirective,
   ConnectorHost,

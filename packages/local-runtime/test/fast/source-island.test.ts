@@ -20,6 +20,8 @@ describe('local-runtime client Interface', () => {
     expect(Object.keys(harnessAdapterRuntime).sort()).toEqual([
       'HARNESS_ADAPTER_PROTOCOL_VERSION',
       'connectHarnessAdapterRuntime',
+      'connectorIndicator',
+      'connectorIndicatorText',
       'exactReviewMessageText',
       'openConnectorSession',
     ]);

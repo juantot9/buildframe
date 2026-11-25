@@ -64,6 +64,8 @@ assert.deepEqual(
   [
     'HARNESS_ADAPTER_PROTOCOL_VERSION',
     'connectHarnessAdapterRuntime',
+    'connectorIndicator',
+    'connectorIndicatorText',
     'exactReviewMessageText',
     'openConnectorSession',
   ],

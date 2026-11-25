@@ -38,7 +38,7 @@ export function diagnosticLabel(diagnostic: HarnessAdapterRuntimeDiagnostic): st
     case 'runtime-unavailable':
       return 'runtime unavailable';
     case 'harness-adapter-establishment-refused':
-      return `attachment refused: ${diagnostic.reason}`;
+      return `connection refused: ${diagnostic.reason}`;
     case 'runtime-protocol-incompatible':
       return 'runtime protocol incompatible';
     case 'workspace-interface-incompatible':
@@ -48,7 +48,7 @@ export function diagnosticLabel(diagnostic: HarnessAdapterRuntimeDiagnostic): st
     case 'runtime-role-rejected':
       return 'Adapter role rejected';
     default:
-      return 'attachment invalid';
+      return 'connection invalid';
   }
 }
 
