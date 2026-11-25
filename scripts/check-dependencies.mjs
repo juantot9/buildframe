@@ -94,10 +94,13 @@ const v1Packages = [
   },
   {
     directory: path.join(repoRoot, 'packages/opencode-adapter'),
-    // OpenCode supplies its own plugin modules at load; the connector imports none of them.
+    // OpenCode supplies its own plugin modules at load; the connector imports none of
+    // them, except OpenTUI Solid, which OpenTUI maps to OpenCode's own copy for the
+    // TUI part's light. Nothing is installed for it.
     allowedV1Dependencies: new Set(['@buildframe/local-runtime', '@buildframe/workspace']),
     allowedProductionSubpaths: CONNECTOR_PRODUCTION_SUBPATHS,
     allowedExternalDependencies: externalDependencyPolicy({
+      production: ['solid-js', '@opentui/solid'],
       test: [TEST_RUNNER_PACKAGE],
     }),
   },

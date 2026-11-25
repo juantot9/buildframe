@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type {
+  BuildFrameLightEvent,
   BuildFrameStatusEvent,
   OpenCodeCommandInvocation,
   OpenCodePromptHookEvent,
@@ -16,6 +17,7 @@ import { setUpBuildFrame, type BuildFrameServerDependencies } from '../../src/pl
 /** An OpenCode server context that records what the plugin registers and says. */
 class FakeOpenCode {
   readonly told: BuildFrameStatusEvent[] = [];
+  readonly lights: BuildFrameLightEvent[] = [];
   readonly prompts: { sessionID: string; id: string; text: string; delivery: string }[] = [];
   command: ((invocation: OpenCodeCommandInvocation) => Promise<void>) | undefined;
   promptHook: ((event: OpenCodePromptHookEvent) => void) | undefined;
@@ -53,7 +55,14 @@ class FakeOpenCode {
         }),
       },
       rpc: {
-        register: async () => ({ events: { emit: (_name, data) => this.told.push(data) } }),
+        register: async () => ({
+          events: {
+            emit: (name: 'status' | 'light', data: BuildFrameStatusEvent | BuildFrameLightEvent) =>
+              name === 'light'
+                ? this.lights.push(data as BuildFrameLightEvent)
+                : this.told.push(data as BuildFrameStatusEvent),
+          },
+        }),
       },
     };
   }
@@ -124,12 +133,18 @@ describe('the OpenCode plugin', () => {
       message: 'BuildFrame isn’t open for /repository yet. This session connects as soon as it opens.',
       variant: 'warning',
     });
+    expect(opencode.lights.at(-1)).toEqual({
+      sessionID: 'ses_one',
+      text: '○ BuildFrame not open yet · connects when it opens',
+      tone: 'warning',
+    });
     await opencode.run('ses_one', 'status');
     expect(opencode.told.at(-1)?.message).toBe('BuildFrame is connected to this session.');
     await opencode.run('ses_two', 'status');
     expect(opencode.told.at(-1)?.message).toBe('BuildFrame is not connected to this session.');
     await opencode.run('ses_one', 'disconnect');
     expect(opencode.told.at(-1)?.message).toBe('BuildFrame disconnected from this session.');
+    expect(opencode.lights.at(-1)).toEqual({ sessionID: 'ses_one', text: '', tone: 'success' });
     await expect(opencode.run('ses_one', 'disconnect')).rejects.toThrow('BuildFrame is not connected to this session.');
     await expect(opencode.run('ses_one', 'sideways')).rejects.toThrow('Usage: /buildframe');
   });

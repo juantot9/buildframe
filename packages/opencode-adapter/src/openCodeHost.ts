@@ -31,7 +31,14 @@ export interface BuildFrameStatusEvent {
   readonly variant: 'info' | 'success' | 'warning' | 'error';
 }
 
-/** The plugin's RPC: no methods, one event the TUI part listens to. */
+/** The connection light in the prompt footer of one session; an empty `text` takes it away. */
+export interface BuildFrameLightEvent {
+  readonly sessionID: string;
+  readonly text: string;
+  readonly tone: 'success' | 'warning' | 'error';
+}
+
+/** The plugin's RPC: no methods; the TUI part listens to its toasts and its light. */
 export const BUILDFRAME_RPC = {
   id: 'buildframe',
   methods: {},
@@ -45,6 +52,18 @@ export const BUILDFRAME_RPC = {
           variant: { type: 'string', enum: ['info', 'success', 'warning', 'error'] },
         },
         required: ['sessionID', 'message', 'variant'],
+        additionalProperties: false,
+      },
+    },
+    light: {
+      schema: {
+        type: 'object',
+        properties: {
+          sessionID: { type: 'string' },
+          text: { type: 'string' },
+          tone: { type: 'string', enum: ['success', 'warning', 'error'] },
+        },
+        required: ['sessionID', 'text', 'tone'],
         additionalProperties: false,
       },
     },
@@ -88,6 +107,11 @@ export interface OpenCodeServerContext {
     register(
       definition: typeof BUILDFRAME_RPC,
       implementation: Record<string, never>,
-    ): Promise<{ readonly events: { emit(name: 'status', data: BuildFrameStatusEvent): unknown } }>;
+    ): Promise<{
+      readonly events: {
+        emit(name: 'status', data: BuildFrameStatusEvent): unknown;
+        emit(name: 'light', data: BuildFrameLightEvent): unknown;
+      };
+    }>;
   };
 }

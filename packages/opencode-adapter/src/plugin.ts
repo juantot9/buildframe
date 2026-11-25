@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto';
 
 import { bootstrapWorkspace } from '@buildframe/workspace';
-import type { ConnectorStatus } from '@buildframe/local-runtime/harness-adapter';
+import {
+  connectorIndicator,
+  connectorIndicatorText,
+  type ConnectorStatus,
+} from '@buildframe/local-runtime/harness-adapter';
 
 import { isReviewedOpenCodeHostVersion, OPENCODE_HOST_COMPATIBILITY_RANGE } from './capability.js';
 import { OpenCodeReviewedAdapter } from './openCodeAdapter.js';
 import {
   BUILDFRAME_RPC,
+  type BuildFrameLightEvent,
   type BuildFrameStatusEvent,
   type OpenCodeCommandInvocation,
   type OpenCodeServerContext,
@@ -66,6 +71,13 @@ export async function setUpBuildFrame(
       // A TUI that isn't listening misses the toast; nothing else depends on it.
     }
   };
+  const show = (light: BuildFrameLightEvent): void => {
+    try {
+      void Promise.resolve(rpc.events.emit('light', light)).catch(() => undefined);
+    } catch {
+      // A TUI that isn't listening shows no light; the toasts still say what happened.
+    }
+  };
 
   const closeActive = async (): Promise<void> => {
     const closing = active;
@@ -117,14 +129,19 @@ export async function setUpBuildFrame(
     });
     const next: Active = { sessionID, adapter };
     active = next;
-    let told: string | undefined;
     const outcome = await adapter.session.attach(status => {
       if ((status.kind === 'refused' || status.kind === 'replaced') && active === next) active = undefined;
-      // The first status answers the command below; later ones are news, once each.
-      const later = status.first ? undefined : laterStatus(status);
-      if (later === undefined || later.message === told) return;
-      told = later.message;
-      tell({ sessionID, ...later });
+      show(lightOf(sessionID, status));
+      // The first status answers the command below; later the light says the
+      // rest, and only losing the session to another one is also news.
+      if (!status.first && status.kind === 'replaced') {
+        tell({
+          sessionID,
+          message:
+            'BuildFrame: another session connected to this repository, so this one was disconnected. Run /buildframe here to take it back.',
+          variant: 'warning',
+        });
+      }
     });
     if (outcome.kind === 'connected') {
       tell({ sessionID, message: 'BuildFrame connected to this session.', variant: 'success' });
@@ -183,21 +200,10 @@ export async function setUpBuildFrame(
   };
 }
 
-function laterStatus(status: ConnectorStatus): Omit<BuildFrameStatusEvent, 'sessionID'> | undefined {
-  switch (status.kind) {
-    case 'connected':
-      return { message: 'BuildFrame connected to this session.', variant: 'success' };
-    case 'retrying':
-      return { message: `BuildFrame: ${status.label ?? 'waiting for BuildFrame to open'}.`, variant: 'warning' };
-    case 'refused':
-      return { message: status.text, variant: 'error' };
-    case 'replaced':
-      return {
-        message:
-          'BuildFrame: another session connected to this repository, so this one was disconnected. Run /buildframe here to take it back.',
-        variant: 'warning',
-      };
-    case 'cancelled':
-      return undefined;
-  }
+/** The light for one status; an empty text once the session disconnected on purpose. */
+function lightOf(sessionID: string, status: ConnectorStatus): BuildFrameLightEvent {
+  const indicator = connectorIndicator(status, { readOnly: false, command: '/buildframe' });
+  return indicator === undefined
+    ? { sessionID, text: '', tone: 'success' }
+    : { sessionID, text: connectorIndicatorText(indicator), tone: indicator.tone };
 }

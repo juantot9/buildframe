@@ -164,6 +164,8 @@ await build({
     tui: at('packages/opencode-adapter/dist/tui.js'),
   },
   outdir: path.join(opencode, 'dist'),
+  // OpenTUI hands a plugin OpenCode's own copies of these when it imports them.
+  external: ['solid-js', '@opentui/solid'],
 });
 await writeFile(
   path.join(opencode, 'package.json'),
