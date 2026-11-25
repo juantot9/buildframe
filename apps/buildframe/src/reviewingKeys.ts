@@ -61,6 +61,8 @@ const BINDINGS: Readonly<Record<Id, KeyBinding>> = {
   steps: { show: '[ and ]' },
   zoom: { show: 'z' },
   fileJump: { show: 'J/K' },
+  nextMatch: { show: 'n/N' },
+  goToLine: { show: ':' },
   diffMode: { show: 'v/w' },
   listFiles: { show: 'e' },
   listMessages: { show: 'm' },
@@ -99,6 +101,8 @@ type Id =
   | 'steps'
   | 'zoom'
   | 'fileJump'
+  | 'nextMatch'
+  | 'goToLine'
   | 'diffMode'
   | 'listFiles'
   | 'listMessages'
@@ -189,7 +193,10 @@ const FOOTER: Readonly<Record<FooterName, FooterMode<S, Id>>> = {
     'Your files are never checked out; the whole screen switches together.',
   ),
   configuration: typing([key('change', 'change'), key('enterEsc', 'close')], 'Changes show and save right away.'),
-  search: typing([key('enter', 'open'), key('esc', 'close')], 'Type to filter; Up/Down move, Ctrl+U clears.'),
+  search: typing(
+    [key('enter', 'open'), key('tab', 'scope'), key('esc', 'close')],
+    'Type to search; Tab: this file, changes, files, code. Up/Down move, Ctrl+U clears.',
+  ),
   continuation: typing(
     [key('enter', 'choose'), key('esc', 'cancel')],
     'Tab moves between the choices; the saved Review stays unchanged either way.',
@@ -311,7 +318,9 @@ const HELP: Readonly<Record<HelpName, HelpMode<S, Id>>> = {
       ),
       help('VIEW', 'live', 'Return to Live Changes'),
       help('VIEW', 'diffMode', 'Diff mode / wrapping'),
-      help('VIEW', 'search', 'Search this Review'),
+      help('VIEW', 'search', 'Search this file, the changes, files or code'),
+      help('MOVE', 'nextMatch', 'Next / previous match in this file'),
+      help('MOVE', 'goToLine', 'Go to a line of this file'),
       help('VIEW', 'filesPane', 'Show / hide Files'),
       help('VIEW', 'zoom', zoomHelp),
       help('VIEW', 'listFiles', 'List files / Messages', { show: 'e / m', alsoCovers: ['listMessages'] }),

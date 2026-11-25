@@ -1,6 +1,7 @@
 import type { ReviewIdentity } from '../reviewing/index.js';
 import type { EvidencePath } from '../workspaceEvidence/index.js';
-import type { ReviewProjectedFile } from './contracts.js';
+import type { ReviewProjectedAction, ReviewProjectedDiffRow, ReviewProjectedFile } from './contracts.js';
+import type { ReviewProjectedDiffUnavailableReason } from '../reviewing/index.js';
 import type { WORKSPACE_PROJECTION_VERSION } from './limits.js';
 
 /** The current Review's live changes laid over every repository file: as one list, or one folder at a time. */
@@ -181,3 +182,57 @@ export type ReviewLiveFileContentView =
         | 'fixed-comparison'
         | 'live-changes-moved';
     };
+
+export interface ReviewLiveDiffViewRequest {
+  readonly kind: 'review.live-diff';
+  readonly reviewIdentity: ReviewIdentity;
+  readonly liveChangesIdentity: string;
+  readonly fileIdentity: string;
+  readonly offset: number;
+  readonly limit: number;
+  /** One-based source line whose row should be the first row of the window. */
+  readonly anchorLine?: number;
+}
+
+export interface ReviewLiveDiffAvailableView {
+  readonly kind: 'review.live-diff';
+  readonly status: 'available';
+  readonly projectionVersion: typeof WORKSPACE_PROJECTION_VERSION;
+  readonly stateVersion: number;
+  readonly reviewIdentity: ReviewIdentity;
+  readonly latestReviewSnapshotIdentity: string;
+  readonly liveChangesIdentity: string;
+  readonly matchesLatestSnapshot: boolean;
+  readonly file: ReviewProjectedFile;
+  /** Absolute row ordinal of the first addition/deletion, if the file has one. */
+  readonly firstChangedRow?: number;
+  readonly window: {
+    readonly totalRows: number;
+    readonly offset: number;
+    readonly rows: readonly ReviewProjectedDiffRow[];
+    readonly nextOffset: number | null;
+  };
+  readonly actions: readonly ReviewProjectedAction[];
+}
+
+export interface ReviewLiveDiffUnavailableView {
+  readonly kind: 'review.live-diff';
+  readonly status: 'unavailable' | 'not-found' | 'fixed' | 'moved';
+  readonly projectionVersion: typeof WORKSPACE_PROJECTION_VERSION;
+  readonly stateVersion: number;
+  readonly reviewIdentity: ReviewIdentity;
+  readonly liveChangesIdentity: string;
+  readonly fileIdentity: string;
+  readonly reason:
+    | ReviewProjectedDiffUnavailableReason
+    | 'inspection-failed'
+    | 'review-not-found'
+    | 'review-not-current'
+    | 'file-not-found'
+    | 'fixed-comparison'
+    | 'live-changes-moved';
+  readonly file?: ReviewProjectedFile;
+  readonly actions?: readonly ReviewProjectedAction[];
+}
+
+export type ReviewLiveDiffView = ReviewLiveDiffAvailableView | ReviewLiveDiffUnavailableView;

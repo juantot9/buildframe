@@ -16,6 +16,7 @@ export async function runGit(
     readonly maxStdoutBytes: number;
     readonly stdin?: Buffer;
     readonly allowedExitCodes?: readonly number[];
+    readonly keepOutputAtLimit?: boolean;
   },
 ): Promise<GitProcessResult> {
   return await runGitProcess({
@@ -27,6 +28,7 @@ export async function runGit(
     timeoutMilliseconds: DEFAULT_GIT_PROCESS_TIMEOUT_MILLISECONDS,
     ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
     ...(options.allowedExitCodes === undefined ? {} : { allowedExitCodes: options.allowedExitCodes }),
+    ...(options.keepOutputAtLimit === undefined ? {} : { keepOutputAtLimit: options.keepOutputAtLimit }),
   });
 }
 

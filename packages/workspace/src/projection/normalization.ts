@@ -6,6 +6,7 @@ import {
 } from '../reviewing/index.js';
 import { normalizeReviewComparisonSelection } from '../workspaceEvidence/index.js';
 import { normalizeLiveFolderRequest, normalizeLiveFoldersRequest } from './liveFolderRequests.js';
+import { normalizeCodeSearchRequest } from './codeSearch.js';
 import type {
   ReviewBasesViewRequest,
   ReviewCommandResultViewRequest,
@@ -168,6 +169,9 @@ function normalizeSearchRequest(request: Record<string, unknown>, value: unknown
     (typeof request.liveChangesIdentity !== 'string' || !LIVE_CHANGES_ID_PATTERN.test(request.liveChangesIdentity))
   ) {
     throw new TypeError('Invalid Live Changes identity');
+  }
+  if (request.only !== undefined && request.only !== 'paths' && request.only !== 'changes') {
+    throw new TypeError('Invalid Review search filter');
   }
   assertWindow(request.offset as number, request.limit as number, MAX_REVIEW_SEARCH_RESULTS, 'Review search');
   return value as ReviewSearchViewRequest;
@@ -422,6 +426,8 @@ export function normalizeRequest(value: unknown): WorkspaceProjectionViewRequest
       return normalizeLiveFolderRequest(request, value);
     case 'review.live-folders':
       return normalizeLiveFoldersRequest(request, value);
+    case 'review.code-search':
+      return normalizeCodeSearchRequest(request, value);
     case 'review.live-file-content':
       return normalizeLiveFileContentRequest(request, value);
     case 'review.search':

@@ -1,140 +1,19 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { constants as fsConstants, type Stats } from 'node:fs';
-import {
-  access,
-  chmod,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  realpath,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const MAXIMUM_STDERR_BYTES = 64 * 1024;
 
-export type GitExecutableResolutionFailure =
-  | 'git-missing'
-  | 'git-not-file'
-  | 'git-not-executable'
-  | 'git-resolution-changed'
-  | 'git-resolution-failed';
+import { isErrno, resolveGitExecutable } from './gitExecutable.js';
 
-export class GitExecutableResolutionError extends Error {
-  readonly reason: GitExecutableResolutionFailure;
-
-  constructor(reason: GitExecutableResolutionFailure, options: { readonly cause?: unknown } = {}) {
-    super(reason, { cause: options.cause });
-    this.name = 'GitExecutableResolutionError';
-    this.reason = reason;
-  }
-}
-
-export type GitExecutableResolver = () => Promise<string>;
-
-interface ResolvedGitExecutable {
-  readonly executable: string;
-  readonly searchPath: string;
-}
-
-function isErrno(error: unknown, code: string): boolean {
-  return error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === code;
-}
-
-async function selectGitExecutable(searchPath: string | undefined): Promise<ResolvedGitExecutable> {
-  if (searchPath === undefined) {
-    throw new GitExecutableResolutionError('git-missing');
-  }
-
-  let firstInvalidCandidate: GitExecutableResolutionError | undefined;
-  for (const directory of searchPath.split(path.delimiter)) {
-    const candidate = path.resolve(directory || '.', 'git');
-    let resolvedCandidate: string;
-    try {
-      resolvedCandidate = await realpath(candidate);
-    } catch (cause) {
-      if (isErrno(cause, 'ENOENT') || isErrno(cause, 'ENOTDIR')) continue;
-      firstInvalidCandidate ??= new GitExecutableResolutionError('git-resolution-failed', { cause });
-      continue;
-    }
-
-    let candidateStatus: Stats;
-    try {
-      candidateStatus = await stat(resolvedCandidate);
-    } catch (cause) {
-      throw new GitExecutableResolutionError('git-resolution-changed', {
-        cause,
-      });
-    }
-    if (!candidateStatus.isFile()) {
-      firstInvalidCandidate ??= new GitExecutableResolutionError('git-not-file');
-      continue;
-    }
-    if ((candidateStatus.mode & 0o111) === 0) {
-      firstInvalidCandidate ??= new GitExecutableResolutionError('git-not-executable');
-      continue;
-    }
-
-    try {
-      await access(resolvedCandidate, fsConstants.X_OK);
-    } catch (cause) {
-      if (isErrno(cause, 'EACCES') || isErrno(cause, 'EPERM')) {
-        firstInvalidCandidate ??= new GitExecutableResolutionError('git-not-executable', { cause });
-        continue;
-      }
-      if (isErrno(cause, 'ENOENT') || isErrno(cause, 'ENOTDIR')) {
-        throw new GitExecutableResolutionError('git-resolution-changed', {
-          cause,
-        });
-      }
-      throw new GitExecutableResolutionError('git-resolution-failed', {
-        cause,
-      });
-    }
-
-    let confirmedCandidate: string;
-    try {
-      confirmedCandidate = await realpath(candidate);
-    } catch (cause) {
-      throw new GitExecutableResolutionError('git-resolution-changed', {
-        cause,
-      });
-    }
-    if (confirmedCandidate !== resolvedCandidate) {
-      throw new GitExecutableResolutionError('git-resolution-changed');
-    }
-
-    return {
-      executable: resolvedCandidate,
-      searchPath,
-    };
-  }
-
-  throw firstInvalidCandidate ?? new GitExecutableResolutionError('git-missing');
-}
-
-export function createGitExecutableResolver(
-  readSearchPath: () => string | undefined = () => process.env.PATH,
-): GitExecutableResolver {
-  let selected: Promise<ResolvedGitExecutable> | undefined;
-  return async (): Promise<string> => {
-    const searchPath = readSearchPath();
-    selected ??= selectGitExecutable(searchPath);
-    const resolution = await selected;
-    if (searchPath !== resolution.searchPath || readSearchPath() !== resolution.searchPath) {
-      throw new GitExecutableResolutionError('git-resolution-changed');
-    }
-    return resolution.executable;
-  };
-}
-
-export const resolveGitExecutable: GitExecutableResolver = createGitExecutableResolver();
+export {
+  createGitExecutableResolver,
+  GitExecutableResolutionError,
+  resolveGitExecutable,
+  type GitExecutableResolutionFailure,
+  type GitExecutableResolver,
+} from './gitExecutable.js';
 
 export const DEFAULT_GIT_PROCESS_TIMEOUT_MILLISECONDS = 30_000;
 
@@ -159,6 +38,8 @@ export class GitInspectionError extends Error {
 export interface GitProcessResult {
   readonly stdout: Buffer;
   readonly exitCode: number;
+  /** Output stopped at `maxStdoutBytes` because `keepOutputAtLimit` asked for it. */
+  readonly truncated?: boolean;
 }
 
 export interface GitProcessOptions {
@@ -170,6 +51,8 @@ export interface GitProcessOptions {
   readonly timeoutMilliseconds: number;
   readonly stdin?: Buffer;
   readonly allowedExitCodes?: readonly number[];
+  /** Past `maxStdoutBytes`, stop Git and keep what arrived instead of failing. */
+  readonly keepOutputAtLimit?: boolean;
 }
 
 export async function runGitProcess(options: GitProcessOptions): Promise<GitProcessResult> {
@@ -199,7 +82,7 @@ export async function runGitProcess(options: GitProcessOptions): Promise<GitProc
     let stderrBytes = 0;
     let settled = false;
     let spawned = false;
-    let termination: 'output-limit' | 'stdin-failed' | 'timeout' | undefined;
+    let termination: 'output-limit' | 'output-kept' | 'stdin-failed' | 'timeout' | undefined;
     let terminationCause: unknown;
 
     const deadline = setTimeout(() => {
@@ -248,9 +131,16 @@ export async function runGitProcess(options: GitProcessOptions): Promise<GitProc
     });
     child.once('exit', clearDeadline);
     child.stdout.on('data', (chunk: Buffer) => {
+      if (termination === 'output-kept') return;
       stdoutBytes += chunk.byteLength;
       if (stdoutBytes > options.maxStdoutBytes) {
-        terminate('output-limit');
+        if (options.keepOutputAtLimit !== true) {
+          terminate('output-limit');
+          return;
+        }
+        stdout.push(chunk.subarray(0, chunk.byteLength - (stdoutBytes - options.maxStdoutBytes)));
+        stdoutBytes = options.maxStdoutBytes;
+        terminate('output-kept');
         return;
       }
       stdout.push(chunk);
@@ -266,6 +156,10 @@ export async function runGitProcess(options: GitProcessOptions): Promise<GitProc
       terminate('stdin-failed', cause);
     });
     child.once('close', code => {
+      if (termination === 'output-kept') {
+        resolveOnce({ stdout: Buffer.concat(stdout, stdoutBytes), exitCode: code ?? -1, truncated: true });
+        return;
+      }
       if (termination === 'output-limit') {
         rejectOnce('git-output-limit', terminationCause);
         return;

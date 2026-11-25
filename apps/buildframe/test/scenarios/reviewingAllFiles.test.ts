@@ -107,7 +107,8 @@ describe('every file, and searching it', () => {
 
     terminal.mockInput.pressKey('/');
     await shows('Search this Review');
-    expect(frame()).toContain('Paths of every file, and added or removed text in the saved Snapshot.');
+    // In All files, / starts on Files: every path in the repository.
+    expect(frame()).toContain('● Files');
     type('config');
     await shows('src/config.ts  · unchanged');
     expect(frame()).toContain('1 match ');
@@ -129,8 +130,12 @@ describe('every file, and searching it', () => {
     await waitFor(() => (frame().match(/const value = 1;/gu) ?? []).length === 1, 'one side again');
 
     // / opens a file in a folder never opened, loading the folders on its way.
+    // From the Diff, / starts on This file; Tab twice reaches Files.
     terminal.mockInput.pressKey('/');
-    await shows('Search this Review');
+    await shows('● This file');
+    terminal.mockInput.pressTab();
+    terminal.mockInput.pressTab();
+    await shows('● Files');
     type('plan');
     await shows('docs/notes/plan.md  · unchanged');
     terminal.mockInput.pressEnter();

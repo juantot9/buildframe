@@ -19,7 +19,6 @@ import {
   QUESTION_WINDOW_SIZE,
   REVIEW_BASIS_WINDOW_SIZE,
   REVIEW_MESSAGE_WINDOW_SIZE,
-  SEARCH_RESULT_WINDOW_SIZE,
   VERSION_WINDOW_SIZE,
   ReviewingApplicationModel,
   noticeToneOf,
@@ -32,6 +31,7 @@ import {
 import { firstListedFile, manifestFileItems } from './reviewingFileList.js';
 import { foldersToLoad, loadOpenedFolder, readLiveFolders } from './reviewingLiveFolders.js';
 import { withFileWindow } from './reviewingFileWindow.js';
+import { applySearch, readSearch } from './reviewingCodeSearch.js';
 import { ReviewingView } from './reviewingView.js';
 import type { ReviewingApplicationOptions } from './reviewingScreen.js';
 import { lendShellState } from './reviewingShellState.js';
@@ -714,7 +714,7 @@ export class ReviewingExtension implements ScreenExtension {
         sequence !== this.#loadSequence ||
         this.#route?.kind !== 'review' ||
         this.#route.target.reviewIdentity !== requested.reviewIdentity ||
-        // The reader moved on while this preview read ran (J then K back to the file already shown).
+        // The reader moved on while this preview read ran.
         (preview &&
           selection?.fileIdentity !== undefined &&
           selection.fileIdentity !== this.#model.state.selectedFileIdentity)
@@ -941,7 +941,7 @@ export class ReviewingExtension implements ScreenExtension {
             reviewSnapshotIdentity: snapshotManifest.header.reviewSnapshotIdentity as ReviewSnapshotIdentity,
             isLatest: snapshotManifest.header.version?.isLatest ?? false,
           };
-      // All files: the top folder, the folders on the way to a change or the file asked for, and those opened before.
+      // All files: the folders on the way to a change or the file asked for, and those opened before.
       const shown = this.#model.state.review;
       const folders =
         source.kind === 'live'
@@ -1309,13 +1309,13 @@ export class ReviewingExtension implements ScreenExtension {
   }
 
   async #searchReview(
-    { type: _effect, ...search }: Extract<ReviewingModelEffect, { readonly type: 'search-review' }>,
+    search: Extract<ReviewingModelEffect, { readonly type: 'search-review' }>,
     sequence: number,
   ): Promise<void> {
     try {
-      const view = await this.#workspace.read({ kind: 'review.search', ...search, limit: SEARCH_RESULT_WINDOW_SIZE });
+      const read = await readSearch(this.#workspace, search);
       if (this.#stopped || sequence !== this.#reviewSearchSequence) return;
-      const effects = this.#model.applyReviewSearch(view, search.query);
+      const effects = applySearch(this.#model, read, search.query);
       this.#render();
       this.#runEffects(effects);
     } catch (error) {

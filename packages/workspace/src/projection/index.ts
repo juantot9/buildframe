@@ -209,8 +209,9 @@ import {
 } from './views.js';
 import { layLiveChangesOnce } from './liveFileList.js';
 import { liveListView, type LiveFileListing } from './liveFolder.js';
+import { codeSearchView } from './codeSearch.js';
 import { GenerationCache } from './generationCache.js';
-import { matchReviewSearch } from './reviewSearch.js';
+import { reviewSearchView } from './reviewSearch.js';
 import { withinFileListBudget } from './fileListBudget.js';
 
 export { WORKSPACE_PROJECTION_VERSION } from './limits.js';
@@ -259,6 +260,10 @@ export type {
   ReviewLiveFolderContents,
   ReviewLiveFoldersView,
   ReviewLiveFoldersViewRequest,
+  ReviewCodeSearchMatch,
+  ReviewCodeSearchSource,
+  ReviewCodeSearchView,
+  ReviewCodeSearchViewRequest,
   ReviewLiveManifestAvailableView,
   ReviewLiveManifestUnavailableView,
   ReviewLiveManifestView,
@@ -687,6 +692,13 @@ export class WorkspaceProjection {
         return await this.#stepChangesDiff(request, index, entry);
       case 'review.search':
         return await this.#search(request, index, entry);
+      case 'review.code-search':
+        return await codeSearchView(
+          request,
+          index.stateVersion,
+          entry && (await this.#snapshot(entry, index.stateVersion)),
+          this.#evidence,
+        );
       case 'review.search-preview':
         return await this.#searchPreview(request, index, entry);
       case 'review.questions':
@@ -3305,42 +3317,19 @@ export class WorkspaceProjection {
     index: LoadedIndex,
     entry: ReviewIndexEntry | undefined,
   ): Promise<ReviewSearchView> {
-    if (entry === undefined) {
-      return {
-        kind: 'review.search',
-        status: 'not-found',
-        projectionVersion: WORKSPACE_PROJECTION_VERSION,
-        stateVersion: index.stateVersion,
-        reviewIdentity: request.reviewIdentity,
-        query: request.query,
-      };
-    }
+    if (entry === undefined) return reviewSearchView(request, index.stateVersion);
     const snapshot = await this.#snapshot(entry, index.stateVersion);
     const searchIndex = await this.#searchIndex(entry, snapshot, index.stateVersion);
     const listed =
       request.liveChangesIdentity === undefined
         ? undefined
         : await this.#liveFileList(entry, index, request.liveChangesIdentity);
-    const { results, totalResults } = matchReviewSearch(
+    return reviewSearchView(
+      request,
+      index.stateVersion,
       searchIndex,
       listed?.status === 'available' ? listed.files : [],
-      request,
     );
-    const next = request.offset + results.length;
-    return {
-      kind: 'review.search',
-      status: 'available',
-      projectionVersion: WORKSPACE_PROJECTION_VERSION,
-      stateVersion: index.stateVersion,
-      reviewIdentity: entry.reviewIdentity,
-      reviewSnapshotIdentity: searchIndex.reviewSnapshotIdentity,
-      query: request.query,
-      totalResults,
-      unsearchableChangeFiles: searchIndex.unsearchableChangeFiles,
-      offset: request.offset,
-      results,
-      nextOffset: next < totalResults ? next : null,
-    };
   }
 
   async #searchIndex(

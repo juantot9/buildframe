@@ -13,6 +13,8 @@ export interface ReviewSearchViewRequest {
    * of files they leave unchanged match too, after the saved Snapshot's results.
    */
   readonly liveChangesIdentity?: string;
+  /** Only file paths, or only added or removed text; both when absent. */
+  readonly only?: 'paths' | 'changes';
   readonly offset: number;
   readonly limit: number;
 }

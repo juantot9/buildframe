@@ -6,6 +6,7 @@ export const PROJECTION_VIEW_KINDS: readonly WorkspaceProjectionViewRequest['kin
   WorkspaceProjectionViewRequest['kind']
 >()([
   'review.bases',
+  'review.code-search',
   'review.command-result',
   'review.commit-graph',
   'review.comparison-preview',

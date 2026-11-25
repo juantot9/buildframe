@@ -1,4 +1,6 @@
 import type { ReviewingApplicationModel, ReviewingApplicationState, ReviewingModelEffect } from './reviewingModel.js';
+import { shownFilePath } from './reviewingShownFile.js';
+import { nextMatchLine } from './reviewingCodeSearch.js';
 import { firstListedFile, reviewingFiles } from './reviewingFileList.js';
 import { Key, type ReviewingInput } from './reviewingInput.js';
 import { dispatchKey, either, onKey, onText, type KeyAction } from './shellKeys.js';
@@ -98,9 +100,17 @@ function toggleFilesPane(model: M): readonly E[] {
 }
 
 function openSearch(model: M): readonly E[] {
+  // From the Diff, / looks in the open file; in All files, at every path; else at the changes.
   model.state.search = {
     query: '',
     cursor: 0,
+    scope:
+      model.state.focus === 'diff' && shownFilePath(model.state) !== undefined
+        ? 'file'
+        : model.state.fileScope === 'all'
+          ? 'files'
+          : 'changes',
+    code: undefined,
     view: undefined,
     selectedResultIdentity: undefined,
     loading: false,
@@ -111,6 +121,38 @@ function openSearch(model: M): readonly E[] {
   };
   model.state.notice = undefined;
   return [];
+}
+
+/** `:` opens This file with `:` typed: a number and Enter go to that line. */
+function openGoToLine(model: M): readonly E[] {
+  if (shownFilePath(model.state) === undefined) return say('Open a file first, then : and a line number.')(model);
+  openSearch(model);
+  const search = model.state.search!;
+  search.scope = 'file';
+  search.query = ':';
+  search.cursor = 1;
+  return [];
+}
+
+/** n / N: the next or previous match of the last This file search, without the dialog. */
+function nextMatch(model: M, input: ReviewingInput): readonly E[] {
+  const state = model.state;
+  const path = shownFilePath(state);
+  const matches = state.fileMatches;
+  if (path === undefined || matches?.pathBytesBase64 !== path) {
+    return say('Search this file first: / from the Diff, type, then n and N move between matches.')(model);
+  }
+  const line =
+    state.unchangedContent?.pathBytesBase64 === path
+      ? state.unchangedContentLine
+      : (model.selectedDiffRow?.newLine ?? 0);
+  const next = nextMatchLine(matches, line, input.text === 'N' ? -1 : 1);
+  if (next === undefined) return say(`No “${matches.query}” in this file.`)(model);
+  model.say(
+    `“${matches.query}” at line ${next} (${matches.lines.indexOf(next) + 1} of ${matches.lines.length}).`,
+    'info',
+  );
+  return model.openFileAt(path, next);
 }
 
 function scrollSideways(model: M, input: ReviewingInput): readonly E[] {
@@ -206,6 +248,8 @@ const REVIEW_KEYS: readonly KeyAction<M, E>[] = [
   { actsFor: ['fileJump'], match: onText('K'), run: model => model.jumpFile(-1) },
   { actsFor: ['filesPane'], match: onText('s'), run: toggleFilesPane },
   { actsFor: ['search'], match: onText('/'), run: openSearch },
+  { actsFor: ['goToLine'], match: onText(':'), run: openGoToLine },
+  { actsFor: ['nextMatch'], match: onText('n', 'N'), run: nextMatch },
   {
     actsFor: ['sideways'],
     match: onKey(Key.shift('left'), Key.shift('right')),

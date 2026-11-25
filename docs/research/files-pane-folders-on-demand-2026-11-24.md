@@ -1,6 +1,6 @@
 # Files pane: folders that load when opened
 
-Date: 2026-11-24. Status: approved 2026-11-24 (all three recommended answers); steps 1–3 done. Ticket: WF-321 (follows A5, `4d0db13`).
+Date: 2026-11-24. Status: approved 2026-11-24 (all three recommended answers); steps 1–4 done. Ticket: WF-321 (follows A5, `4d0db13`).
 
 ## Why
 
@@ -56,6 +56,12 @@ Every file-list read (`review.manifest`, `review.live-files`, the new one) also 
 - Folders load in batches (`review.live-folders`, whole folders while they fit one read; a folder too large for one read is paged with `review.live-folder`). One read per folder made opening the 5,000-file repo take 2.3 s.
 - Unchanged-file search results carry their path bytes, so `/` opens a file in a folder that was never opened.
 - Measured through the background process: on the 5,000-file repo with changes in all 50 folders, open 1.64 s and `f` 36 ms (1.68 s and 34 ms before); with one change, open 0.65 s, `f` 22 ms, opening a closed folder 24 ms median (target 16 ms; the read through the background process is most of it).
+
+## Step 4 as built
+
+- `/` has four scopes, Tab moving between them: This file (default from the Diff), Changes, Files (default in All files) and Code. Changes and Files filter `review.search` with its new `only`.
+- `review.code-search` runs `git grep -I -F -i --untracked` on the working tree for a live Review, or on the compared commit or tree for a fixed one; at most 200 matches, each line cut to 512 bytes, with the full count. Git's output stops at 512 KiB and keeps what arrived.
+- Enter on a result opens the file at its line with focus on the Diff (owner, 2026-11-25), loading the folders All files hasn't opened. `n`/`N` move between the last This file search's matches; `:` opens This file with `:` typed, and `:120` Enter goes to line 120.
 
 ## Order of work
 

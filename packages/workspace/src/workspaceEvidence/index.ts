@@ -91,6 +91,9 @@ import {
   inspect,
 } from './enumeration.js';
 import { runGit, withGitInspection } from './inspection.js';
+import { searchCode, type CodeSearchRequest, type CodeSearchResult } from './codeSearch.js';
+import type { GitInspectionContext } from '../gitProcess.js';
+import { commitsOnTop } from './history.js';
 import type {
   CaptureAttemptResult,
   CapturedEvidence,
@@ -399,30 +402,24 @@ export class WorkspaceEvidence {
 
   /** Package-private collaboration for the live Review's Changed ↔ All file list. */
   async readCurrentRepositoryFiles(): Promise<CurrentRepositoryFiles> {
-    try {
-      const paths = await withGitInspection(
-        this.#canonicalCheckout,
-        this.#gitDirectory,
-        async context => await enumerateCurrentRepositoryPaths(context, this.#limits),
-      );
-      return deepFreeze({
-        status: 'available',
-        files: paths.map(pathBytes =>
-          deepFreeze({
-            fileIdentity: `fil_${sha256(Buffer.concat([Buffer.from('repository-file\0', 'ascii'), pathBytes]))}`,
-            path: evidencePath(pathBytes),
-          }),
-        ),
-      });
-    } catch {
-      return deepFreeze({ status: 'unavailable', reason: 'inspection-failed' });
-    }
+    const paths = await this.#inspect(async context => await enumerateCurrentRepositoryPaths(context, this.#limits));
+    return paths === undefined
+      ? deepFreeze({ status: 'unavailable', reason: 'inspection-failed' })
+      : deepFreeze({
+          status: 'available',
+          files: paths.map(pathBytes =>
+            deepFreeze({
+              fileIdentity: `fil_${sha256(Buffer.concat([Buffer.from('repository-file\0', 'ascii'), pathBytes]))}`,
+              path: evidencePath(pathBytes),
+            }),
+          ),
+        });
   }
 
   /** Bounded working-tree content for one unchanged file; never follows symlinks out. */
   async readCurrentRepositoryFileContent(pathBytes: Buffer, anchorLine = 1): Promise<CurrentRepositoryFileContent> {
-    try {
-      return await withGitInspection(this.#canonicalCheckout, this.#gitDirectory, async context => {
+    return await this.#inspect(
+      async context => {
         validateRelativePath(pathBytes);
         const filename = absolutePath(context.checkout, pathBytes);
         return deepFreeze(
@@ -433,41 +430,36 @@ export class WorkspaceEvidence {
             anchorLine,
           ),
         );
-      });
-    } catch {
-      return deepFreeze({ status: 'unavailable' });
-    }
+      },
+      deepFreeze({ status: 'unavailable' }),
+    );
   }
 
   async readReviewCommitGraph(maximumCommits = 100): Promise<ReviewCommitGraph> {
     if (!Number.isSafeInteger(maximumCommits) || maximumCommits < 1 || maximumCommits > 1_000) {
       throw new TypeError('Invalid bounded commit graph size');
     }
-    try {
-      const result = await withGitInspection(
-        this.#canonicalCheckout,
-        this.#gitDirectory,
-        async context =>
-          await runGit(
-            context,
-            [
-              'log',
-              '--graph',
-              '--no-color',
-              '--topo-order',
-              '--decorate=short',
-              `--max-count=${maximumCommits + 1}`,
-              '--format=%x1e%H%x00%P%x00%D%x00%s',
-              'HEAD',
-              '--',
-            ],
-            { maxStdoutBytes: Math.min(this.#limits.maxManifestBytes, 4 * MEBIBYTE) },
-          ),
-      );
-      return parseCommitGraph(result.stdout, maximumCommits);
-    } catch {
-      return deepFreeze({ status: 'unavailable', reason: 'inspection-failed' });
-    }
+    return await this.#inspect(
+      async context => {
+        const result = await runGit(
+          context,
+          [
+            'log',
+            '--graph',
+            '--no-color',
+            '--topo-order',
+            '--decorate=short',
+            `--max-count=${maximumCommits + 1}`,
+            '--format=%x1e%H%x00%P%x00%D%x00%s',
+            'HEAD',
+            '--',
+          ],
+          { maxStdoutBytes: Math.min(this.#limits.maxManifestBytes, 4 * MEBIBYTE) },
+        );
+        return parseCommitGraph(result.stdout, maximumCommits);
+      },
+      deepFreeze({ status: 'unavailable', reason: 'inspection-failed' }) as ReviewCommitGraph,
+    );
   }
 
   /**
@@ -478,21 +470,25 @@ export class WorkspaceEvidence {
   async readCommitsOnTop(from: string, to: string): Promise<number | undefined> {
     const objectIdentity = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
     if (!objectIdentity.test(from) || !objectIdentity.test(to)) throw new TypeError('Invalid commit identity');
+    return await this.#inspect(context => commitsOnTop(context, from, to));
+  }
+
+  /** Package-private: text in the working tree, or in one commit's files, found with `git grep`. */
+  async searchCode(request: CodeSearchRequest): Promise<CodeSearchResult> {
+    return await this.#inspect(context => searchCode(context, request), {
+      status: 'unavailable',
+      reason: 'inspection-failed',
+    });
+  }
+
+  async #inspect<Result, Failed = undefined>(
+    inspect: (context: GitInspectionContext) => Promise<Result>,
+    failed?: Failed,
+  ): Promise<Result | Failed> {
     try {
-      return await withGitInspection(this.#canonicalCheckout, this.#gitDirectory, async context => {
-        const ancestry = await runGit(context, ['merge-base', '--is-ancestor', from, to], {
-          maxStdoutBytes: 1024,
-          allowedExitCodes: [0, 1],
-        });
-        if (ancestry.exitCode !== 0) return undefined;
-        const counted = await runGit(context, ['rev-list', '--count', `${from}..${to}`, '--'], {
-          maxStdoutBytes: 1024,
-        });
-        const count = Number(counted.stdout.toString('utf8').trim());
-        return Number.isSafeInteger(count) && count > 0 ? count : undefined;
-      });
+      return await withGitInspection(this.#canonicalCheckout, this.#gitDirectory, inspect);
     } catch {
-      return undefined;
+      return failed as Failed;
     }
   }
 

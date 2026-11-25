@@ -69,6 +69,18 @@ import { reviewingSettings } from './reviewingSettings.js';
 import { searchResultTarget } from './reviewingSearchOpen.js';
 import { shortHash, headMoveSentence } from './reviewingHeadMoves.js';
 import type { LiveFolders } from './reviewingLiveFolders.js';
+import { messagesOnLines, rowMessages, shownDiff, shownFilePath, type LineMessages } from './reviewingShownFile.js';
+export { messagesOnLines, rowMessages, shownDiff, shownFilePath, type LineMessages };
+import {
+  codeSearchKey,
+  goToLine,
+  searchRequest,
+  SEARCH_SCOPES,
+  type FileMatches,
+  type ReviewSearchState,
+  type SearchEffect,
+} from './reviewingCodeSearch.js';
+export type { ReviewSearchState };
 import {
   historyStepKey,
   historyStepText,
@@ -79,7 +91,7 @@ import {
 export { historyStepKey, historyStepText, historyStepWords, latestHeadMoveStep, navigableHistorySteps };
 import { homeLauncherOptions, homeSelectionAvailable, type ExtraHomeRow } from './reviewingHomeRows.js';
 import { dispatchReviewingKey } from './reviewingActions.js';
-import { reasonSentence } from './reviewingReasons.js';
+import { messageUnavailableNotice, reasonSentence } from './reviewingReasons.js';
 import { outgoingStateSpins, type MessageState, type NoticeTone } from './reviewingStatus.js';
 import {
   emptyReviewingPaneScroll,
@@ -175,18 +187,6 @@ interface ReviewComparisonMessageSearchState {
 }
 
 export type ReviewComparisonInputState = ReviewComparisonValueInputState | ReviewComparisonMessageSearchState;
-
-export interface ReviewSearchState {
-  query: string;
-  cursor: number;
-  view: ReviewSearchView | undefined;
-  selectedResultIdentity: string | undefined;
-  loading: boolean;
-  preview: ReviewSearchPreviewView | undefined;
-  previewResultIdentity: string | undefined;
-  previewLoading: boolean;
-  requestedResultAbsolute: number | undefined;
-}
 
 export interface ReviewingPresentation {
   readonly noColor: boolean;
@@ -579,6 +579,8 @@ export interface ReviewingApplicationState {
   selectedCommitIdentity: string | undefined;
   selectedMergeParentIdentity: string | undefined;
   search: ReviewSearchState | undefined;
+  /** The last This file search, for n and N. */
+  fileMatches: FileMatches | undefined;
   /** Durable visual positions for rebuilt Files, Diff, and Messages panes. */
   paneScroll: Record<ReviewRegion, ReviewingPaneScrollState>;
 }
@@ -623,14 +625,7 @@ export type ReviewingModelEffect =
       readonly type: 'preview-comparison';
       readonly selection: ReviewComparisonSelection;
     }
-  | {
-      readonly type: 'search-review';
-      readonly reviewIdentity: ReviewIdentity;
-      readonly query: string;
-      readonly offset: number;
-      /** With every file shown, the paths of unchanged files match too. */
-      readonly liveChangesIdentity?: string;
-    }
+  | SearchEffect
   | {
       readonly type: 'preview-search-result';
       readonly reviewIdentity: ReviewIdentity;
@@ -793,63 +788,6 @@ export function pickableBases(state: ReviewingApplicationState): readonly Review
       item.kind === 'git-commit' ||
       item.reviewBasisIdentity === state.activeReviewBasisIdentity,
   );
-}
-
-/** The Diff the panes show: one stretch of history while it is shown, else the Review's. */
-export function shownDiff(state: ReviewingApplicationState): ReviewViewBundle['diff'] {
-  return state.shownStep === undefined ? state.review?.diff : state.shownStep.diff;
-}
-
-/** The path the shown Diff or unchanged content belongs to, as base64 bytes. */
-export function shownFilePath(state: ReviewingApplicationState): string | undefined {
-  const changes = state.shownStep;
-  if (changes !== undefined) {
-    return changes.files?.find(file => file.fileIdentity === state.selectedFileIdentity)?.path.bytesBase64;
-  }
-  const file = reviewingFiles(state.review, state.fileScope).find(
-    candidate => candidate.fileIdentity === state.selectedFileIdentity,
-  );
-  return file?.pathBytesBase64;
-}
-
-/** The Messages anchored on the shown file's lines, by the side of the Diff they belong to. */
-export interface LineMessages {
-  readonly old: ReadonlyMap<number, readonly ReviewMessageListItem[]>;
-  readonly new: ReadonlyMap<number, readonly ReviewMessageListItem[]>;
-}
-
-/**
- * Where the shown file's Messages sit. A Message's line is a line of the code
- * as it was when it was sent. At now that is read against the current code; on
- * a past step only a Message sent at one of the step's ends can be placed: on
- * the old side when the step starts at its send, on the new side when it ends
- * there.
- */
-export function messagesOnLines(state: ReviewingApplicationState): LineMessages {
-  const old = new Map<number, ReviewMessageListItem[]>();
-  const next = new Map<number, ReviewMessageListItem[]>();
-  const path = shownFilePath(state);
-  if (path === undefined) return { old, new: next };
-  const step = state.shownStep;
-  const sentAt = (point: ReviewHistoryPoint, item: ReviewMessageListItem): boolean =>
-    point.kind === 'sent' && point.reviewMessageIdentity === item.reviewMessageIdentity;
-  for (const item of state.review?.messages.messages.items ?? []) {
-    if (item.location.file.bytesBase64 !== path) continue;
-    const side = step === undefined || sentAt(step.to, item) ? next : sentAt(step.from, item) ? old : undefined;
-    if (side === undefined) continue;
-    const line = side.get(item.location.line);
-    if (line === undefined) side.set(item.location.line, [item]);
-    else line.push(item);
-  }
-  return { old, new: next };
-}
-
-/** The Messages anchored on one Diff row. */
-export function rowMessages(lines: LineMessages, row: ReviewProjectedDiffRow): readonly ReviewMessageListItem[] {
-  return [
-    ...(row.oldLine === undefined ? [] : (lines.old.get(row.oldLine) ?? [])),
-    ...(row.newLine === undefined ? [] : (lines.new.get(row.newLine) ?? [])),
-  ];
 }
 
 export interface JumpListState {
@@ -1075,29 +1013,6 @@ const ENTER_INPUT: ReviewingInput = Object.freeze({
 });
 
 /** Why a comparison can't be shown, in plain words, with the way on where there is one. */
-export function comparisonUnavailableNotice(
-  reason: Extract<ReviewComparisonPreviewView, { status: 'unavailable' }>['reason'],
-): string {
-  if (reason === 'merge-parent-ambiguous') {
-    return 'A merge has two parents. [h/l] picks which one to compare against.';
-  }
-  if (reason === 'ancestry-not-found') {
-    return 'This repository doesn’t have that many commits before HEAD.';
-  }
-  if (reason === 'revision-not-found' || reason === 'local-ref-not-found') {
-    return 'No commit, branch or tag by that name here.';
-  }
-  return 'Git couldn’t compare that here.';
-}
-
-/** Human sentence for a refused Message inspection. */
-function messageUnavailableNotice(
-  reason: Extract<DefaultReviewMessageInspectionView, { status: 'unavailable' }>['reason'],
-  agent: string,
-): string {
-  return `Not sent. ${reasonSentence(reason, agent)}`;
-}
-
 export class ReviewingApplicationModel {
   readonly state: ReviewingApplicationState;
 
@@ -1253,6 +1168,7 @@ export class ReviewingApplicationModel {
       selectedCommitIdentity: undefined,
       selectedMergeParentIdentity: undefined,
       search: undefined,
+      fileMatches: undefined,
       harnessConnection: undefined,
       shownStep: undefined,
       paneScroll: {
@@ -5015,7 +4931,7 @@ export class ReviewingApplicationModel {
     return this.previewSelectedCommit();
   }
 
-  private requestReviewSearch(offset = 0, requestedResultAbsolute?: number): readonly ReviewingModelEffect[] {
+  requestReviewSearch(offset = 0, requestedResultAbsolute?: number): readonly ReviewingModelEffect[] {
     const search = this.state.search;
     const reviewIdentity = this.state.review?.manifest.header.reviewIdentity;
     if (search === undefined || reviewIdentity === undefined) return [];
@@ -5026,20 +4942,65 @@ export class ReviewingApplicationModel {
     search.previewLoading = false;
     if (query.length === 0) {
       search.view = undefined;
+      search.code = undefined;
       search.selectedResultIdentity = undefined;
       search.loading = false;
       return [];
     }
-    search.loading = true;
     const source = this.state.review?.source;
-    const allFiles = this.state.fileScope === 'all' && source?.kind === 'live';
+    const shownPath = shownFilePath(this.state);
+    const effect = searchRequest(search, reviewIdentity, query, offset, {
+      ...(source?.kind === 'live' ? { liveChangesIdentity: source.liveChangesIdentity } : {}),
+      ...(shownPath === undefined ? {} : { shownPath }),
+    });
+    search.loading = effect !== undefined;
+    return effect === undefined ? [] : [effect];
+  }
+
+  /** Shows a file of this Review at a line: the Diff row there, or the unchanged file at it, loading what it needs. */
+  openFileAt(pathBytesBase64: string, line: number): readonly ReviewingModelEffect[] {
+    const review = this.state.review;
+    if (review === undefined) return [];
+    this.state.focus = 'diff';
+    this.state.selectedDirectory = undefined;
+    const listed = (scope: ReviewingApplicationState['fileScope']) =>
+      reviewingFiles(review, scope).find(file => file.pathBytesBase64 === pathBytesBase64);
+    let file = listed(this.state.fileScope);
+    if (file === undefined && review.source.kind === 'live') {
+      this.state.fileScope = 'all';
+      file = listed('all');
+    }
+    const current = this.currentReviewTarget(file?.diffFileIdentity);
+    if (file === undefined) {
+      if (review.source.kind !== 'live' || current === undefined) {
+        this.say('Only changed files open in a fixed Review; that line is in the commit’s other files.', 'info');
+        return [];
+      }
+      // In a folder All files hasn't loaded: the Review loads the folders on its way, and selects it.
+      const { fileIdentity: _fileIdentity, fileAbsolute: _fileAbsolute, ...withoutFile } = current;
+      this.state.selectedFileIdentity = undefined;
+      this.setLoading('Opening the file', 'diff');
+      const target = { ...withoutFile, filePathBytesBase64: pathBytesBase64, liveFilesOffset: 0, diffOffset: 0 };
+      return [{ type: 'show-review', target, selection: { anchorLine: line } }];
+    }
+    this.state.selectedFileIdentity = file.fileIdentity;
+    const shown = diffView(this.state);
+    if (file.diffFileIdentity === undefined || shown?.file.fileIdentity !== file.diffFileIdentity) {
+      return this.previewSelectedFile(line);
+    }
+    const row = shown.window.rows.find(at => at.newLine === line) ?? shown.window.rows.find(at => at.oldLine === line);
+    if (row !== undefined) {
+      this.state.selectedRowIdentity = row.rowIdentity;
+      this.state.anchorSide = row.newLine !== undefined ? 'new' : 'old';
+      return [];
+    }
+    if (current === undefined) return [];
+    this.setLoading('Loading Diff rows', 'diff');
     return [
       {
-        type: 'search-review',
-        reviewIdentity,
-        query,
-        offset,
-        ...(allFiles ? { liveChangesIdentity: source.liveChangesIdentity } : {}),
+        type: 'show-review-diff',
+        target: { ...current, fileIdentity: file.diffFileIdentity, diffOffset: 0, anchorLine: line },
+        selection: { fileIdentity: file.fileIdentity, anchorLine: line },
       },
     ];
   }
@@ -5081,6 +5042,25 @@ export class ReviewingApplicationModel {
       this.state.notice = undefined;
       return [];
     }
+    const back = matchesKey(data, Key.shift('tab'));
+    if (back || matchesKey(data, Key.tab)) {
+      const at = SEARCH_SCOPES.indexOf(search.scope) + (back ? SEARCH_SCOPES.length - 1 : 1);
+      search.scope = SEARCH_SCOPES[at % SEARCH_SCOPES.length]!;
+      search.view = undefined;
+      search.code = undefined;
+      search.selectedResultIdentity = undefined;
+      return this.requestReviewSearch();
+    }
+    const path = shownFilePath(this.state);
+    const line = search.scope === 'file' && matchesKey(data, Key.enter) ? goToLine(search.query) : undefined;
+    const code = line === undefined ? codeSearchKey(search, data) : undefined;
+    if (code?.kind === 'moved') return [];
+    if ((line !== undefined && path !== undefined) || code?.kind === 'open') {
+      this.state.search = undefined;
+      return code?.kind === 'open'
+        ? this.openFileAt(code.match.path.bytesBase64, code.match.line)
+        : this.openFileAt(path!, line!);
+    }
     if (matchesKey(data, Key.enter)) {
       const searchView = search.view;
       const result = this.selectedSearchResult();
@@ -5091,7 +5071,7 @@ export class ReviewingApplicationModel {
       this.state.search = undefined;
       // The result's file becomes the selection, not the folder the cursor was on.
       this.state.selectedDirectory = undefined;
-      this.state.focus = result.kind === 'change' ? 'diff' : 'files';
+      this.state.focus = 'diff';
       if (result.kind === 'unchanged-file') this.state.fileScope = 'all';
       this.setLoading('Opening search result', this.state.focus);
       return [{ type: 'show-review', ...searchResultTarget(review, searchView, result), fromSearch: true }];

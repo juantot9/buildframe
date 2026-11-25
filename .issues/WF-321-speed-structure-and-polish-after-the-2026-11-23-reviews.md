@@ -89,8 +89,18 @@ the folders holding changes; any other folder is a closed row until opened
 a folder never opened. A batched `review.live-folders` read keeps opening to
 three reads (one per folder took 2.3 s on the 5,000-file repo). On that repo
 (changes in all 50 folders) open 1.64 s and `f` 36 ms, as before; with one
-change, open 0.65 s, `f` 22 ms, a closed folder opens in 24 ms. Next: Code
-search, with This file, `n`/`N` and `:120` (owner, 2026-11-24).
+change, open 0.65 s, `f` 22 ms, a closed folder opens in 24 ms. Step 4:
+`/` with This file, Changes, Files and Code scopes; `review.code-search`
+(`git grep`, 200 matches, the full count); results open at their line in
+the Diff; `n`/`N` and `:120`.
+
+## Owner notes, 2026-11-25
+
+- Opening a result in the search dialog puts focus on the Diff, whatever the
+  result (a file, a changed line or a code match). Lands with step 4.
+- Improve how each harness shows that BuildFrame is connected. UX change:
+  research what Pi, Claude Code and OpenCode show today (frames), then a
+  short brief before building. After step 4.
 
 ## D. Larger changes
 

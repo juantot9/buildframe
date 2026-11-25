@@ -1,3 +1,6 @@
+import type { DefaultReviewMessageInspectionView } from '@buildframe/workspace/harness-interaction';
+import type { ReviewComparisonPreviewView } from '@buildframe/workspace/projection';
+
 import { connectCommandIn, connectInstruction } from './supportFacts.js';
 
 /**
@@ -153,4 +156,27 @@ export function startupFailureSentence(diagnostic: { readonly code: string; read
     }
   })();
   return `${sentence} ${detail}`;
+}
+
+export function comparisonUnavailableNotice(
+  reason: Extract<ReviewComparisonPreviewView, { status: 'unavailable' }>['reason'],
+): string {
+  if (reason === 'merge-parent-ambiguous') {
+    return 'A merge has two parents. [h/l] picks which one to compare against.';
+  }
+  if (reason === 'ancestry-not-found') {
+    return 'This repository doesn’t have that many commits before HEAD.';
+  }
+  if (reason === 'revision-not-found' || reason === 'local-ref-not-found') {
+    return 'No commit, branch or tag by that name here.';
+  }
+  return 'Git couldn’t compare that here.';
+}
+
+/** Human sentence for a refused Message inspection. */
+export function messageUnavailableNotice(
+  reason: Extract<DefaultReviewMessageInspectionView, { status: 'unavailable' }>['reason'],
+  agent: string,
+): string {
+  return `Not sent. ${reasonSentence(reason, agent)}`;
 }

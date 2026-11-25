@@ -2012,6 +2012,7 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
       return { x: dialog.screenX, y: dialog.screenY, width: dialog.width, height: dialog.height };
     };
     const emptySearchGeometry = searchGeometry();
+    terminal.send('\t');
     terminal.send('one');
     await waitForOutput(terminal, '2 matches');
     await waitFor(async () => {
@@ -2024,8 +2025,8 @@ describe('OpenTUI Reviewing surface over the real Application model', () => {
     expect(renderableTreeText(terminal.renderer.root.findDescendantById('reviewing-search'))).not.toContain('Loading');
     expect(searchGeometry()).toEqual(emptySearchGeometry);
 
-    // A tall terminal must not let result count exceed the dialog's fixed
-    // inner height: the selected final result remains inside the border.
+    // A tall terminal keeps the selected final result inside the border.
+    terminal.send('\t');
     terminal.pressKey('u', { ctrl: true });
     terminal.send('.ts');
     await waitForOutput(terminal, '24 matches');

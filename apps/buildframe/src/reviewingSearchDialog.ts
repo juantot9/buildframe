@@ -5,7 +5,15 @@ import type { ReviewingApplicationState } from './reviewingModel.js';
 import { decodeDiffRow } from './reviewingContent.js';
 import { Box, type RenderChild } from './renderTree.js';
 import { centeredStart, dialogHeight, dialogTop } from './shellChrome.js';
-import { borderedBox, label, theme } from './shellLook.js';
+import { borderedBox, label, spans, theme } from './shellLook.js';
+import {
+  codeMatchKey,
+  codeMatches,
+  goToLine,
+  SEARCH_SCOPE_NAMES,
+  SEARCH_SCOPES,
+  type ReviewSearchState,
+} from './reviewingCodeSearch.js';
 
 /** The `/` dialog: the query, its results, and a preview of the selected one. */
 
@@ -25,7 +33,15 @@ export function searchBody(state: ReviewingApplicationState, bodyHeight: number)
   if (search === undefined) return Box({});
   const cursor = state.presentation.ascii ? '|' : '▏';
   const query = `${search.query.slice(0, search.cursor)}${cursor}${search.query.slice(search.cursor)}`;
-  const results = search.view?.status === 'available' ? search.view.results : [];
+  const codeScope = search.scope === 'file' || search.scope === 'code';
+  const results = !codeScope && search.view?.status === 'available' ? search.view.results : [];
+  // This file and Code list matching lines; the others list Review search results.
+  const rows: readonly { readonly key: string; readonly text: string }[] = codeScope
+    ? codeMatches(search).map(match => ({
+        key: codeMatchKey(match),
+        text: `${search.scope === 'file' ? '' : `${match.path.display}:`}${match.line}  ${match.text.replaceAll('\t', '  ')}`,
+      }))
+    : results.map(item => ({ key: item.resultIdentity, text: searchResultLabel(state, item, false).slice(2) }));
   // Telescope-style floating window over the review, not a full-screen mode.
   // Its frame stays fixed while results and previews change; recentering a
   // differently sized box on every async preview reads as a close/reopen.
@@ -37,9 +53,10 @@ export function searchBody(state: ReviewingApplicationState, bodyHeight: number)
   const previewCapacity = Math.max(0, changingContentRows - visible - 1);
   const selectedLocal = Math.max(
     0,
-    results.findIndex(item => item.resultIdentity === search.selectedResultIdentity),
+    rows.findIndex(row => row.key === search.selectedResultIdentity),
   );
-  const start = centeredStart(selectedLocal, 0, results.length, visible);
+  const start = centeredStart(selectedLocal, 0, rows.length, visible);
+  const marker = (selected: boolean) => (selected ? (state.presentation.ascii ? '>' : '›') : ' ');
   const preview = search.preview?.status === 'available' ? search.preview.window.rows.slice(0, previewCapacity) : [];
   return borderedBox(
     state,
@@ -61,35 +78,19 @@ export function searchBody(state: ReviewingApplicationState, bodyHeight: number)
       titleColor: colors.accent,
       titleAlignment: 'center',
     },
-    label(
-      state,
-      state.fileScope === 'all' && state.review?.source.kind === 'live'
-        ? 'Paths of every file, and added or removed text in the saved Snapshot.'
-        : 'File paths and added or removed text in the saved Snapshot.',
-      { fg: colors.muted },
-    ),
+    label(state, scopeRow(state, search, colors), { fg: colors.text }),
     label(state, `/ ${query}`, { fg: colors.accent, bold: true }),
-    label(
-      state,
-      search.loading
-        ? state.presentation.ascii
-          ? 'Searching the exact Snapshot...'
-          : 'Searching the exact Snapshot…'
-        : search.view?.status === 'available'
-          ? `${search.view.totalResults} ${search.view.totalResults === 1 ? 'match' : 'matches'}`
-          : 'Type a file path or changed text.',
-      { fg: search.loading ? colors.warning : colors.muted },
-    ),
-    ...results.slice(start, start + visible).map(item =>
-      label(state, searchResultLabel(state, item, item.resultIdentity === search.selectedResultIdentity), {
-        fg: item.resultIdentity === search.selectedResultIdentity ? colors.accent : colors.text,
-        bg: item.resultIdentity === search.selectedResultIdentity ? colors.accentSoft : colors.raised,
+    label(state, searchCount(state, search), { fg: search.loading ? colors.warning : colors.muted }),
+    ...rows.slice(start, start + visible).map(row =>
+      label(state, `${marker(row.key === search.selectedResultIdentity)} ${row.text}`, {
+        fg: row.key === search.selectedResultIdentity ? colors.accent : colors.text,
+        bg: row.key === search.selectedResultIdentity ? colors.accentSoft : colors.raised,
       }),
     ),
-    ...(results.length === 0 || previewCapacity === 0
+    ...(codeScope || results.length === 0 || previewCapacity === 0
       ? []
       : [label(state, 'Preview', { fg: colors.text, bold: true })]),
-    ...(previewCapacity === 0
+    ...(codeScope || previewCapacity === 0
       ? []
       : results.find(item => item.resultIdentity === search.selectedResultIdentity)?.kind === 'unchanged-file'
         ? [label(state, 'Unchanged here; Enter opens the file.', { fg: colors.muted })]
@@ -99,4 +100,51 @@ export function searchBody(state: ReviewingApplicationState, bodyHeight: number)
             }),
           )),
   );
+}
+
+/** `● This file  ○ Changes  ○ Files  ○ Code`, like the commit picker's radio row; Tab moves along it. */
+function scopeRow(
+  state: ReviewingApplicationState,
+  search: ReviewSearchState,
+  colors: ReturnType<typeof theme>,
+): ReturnType<typeof spans> {
+  const ascii = state.presentation.ascii;
+  return spans(
+    state,
+    SEARCH_SCOPES.flatMap((scope, index) => [
+      ...(index === 0 ? [] : [{ text: '  ', fg: colors.muted }]),
+      {
+        text: `${scope === search.scope ? (ascii ? '(*)' : '●') : ascii ? '( )' : '○'} ${SEARCH_SCOPE_NAMES[scope]}`,
+        fg: scope === search.scope ? colors.text : colors.muted,
+        bold: scope === search.scope,
+      },
+    ]),
+  );
+}
+
+/** What the search found, or what to type; a code search says what it looked in. */
+function searchCount(state: ReviewingApplicationState, search: ReviewSearchState): string {
+  const ellipsis = state.presentation.ascii ? '...' : '…';
+  const plural = (count: number) => `${count.toLocaleString('en-US')} ${count === 1 ? 'match' : 'matches'}`;
+  const line = search.scope === 'file' ? goToLine(search.query) : undefined;
+  if (line !== undefined) return `Enter goes to line ${line}.`;
+  if (search.loading)
+    return search.scope === 'file' || search.scope === 'code'
+      ? `Searching the code${ellipsis}`
+      : `Searching the exact Snapshot${ellipsis}`;
+  if (search.scope === 'file' || search.scope === 'code') {
+    const view = search.code;
+    if (view === undefined)
+      return search.scope === 'file' ? 'Type text in this file, or : and a line number.' : 'Type any text in any file.';
+    if (view.status !== 'available')
+      return view.reason === 'unsearchable-path'
+        ? 'This file’s name can’t be searched.'
+        : 'Git couldn’t search the code here.';
+    const where = view.searched.kind === 'now' ? 'code now' : `code at ${view.searched.abbreviatedObjectIdentity}`;
+    return view.totalMatches > view.matches.length
+      ? `${view.matches.length} of ${plural(view.totalMatches)}, refine the search · ${where}`
+      : `${plural(view.totalMatches)} · ${where}`;
+  }
+  if (search.view?.status === 'available') return plural(search.view.totalResults);
+  return search.scope === 'files' ? 'Type a file path.' : 'Type added or removed text.';
 }

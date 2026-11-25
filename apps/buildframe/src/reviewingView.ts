@@ -43,9 +43,9 @@ import {
   type ReviewingModelEffect,
   type ReviewingPointerTarget,
   agentName,
-  comparisonUnavailableNotice,
   noticeToneOf,
 } from './reviewingModel.js';
+import { comparisonUnavailableNotice } from './reviewingReasons.js';
 import { reviewTreeNodes, reviewingFiles } from './reviewingFileList.js';
 import { noticeGlyph, noticeStatusTone, outgoingBadge, spinnerGlyph, type StatusTone } from './reviewingStatus.js';
 
@@ -2194,7 +2194,7 @@ function diffPane(
             return state.width - geometry.balancedContext - 1;
           })();
   const paneContentWidth = Math.max(1, estimatedPaneWidth - 2);
-  // Cards sit one cell in from the Diff's border, so they read as objects in the code, not a second frame.
+  // Cards sit one cell in from the Diff's border: objects in the code, not a frame.
   const cardWidth = Math.max(1, paneContentWidth - 2);
   const messageCardHeight =
     messageThread === undefined ? 0 : messageThreadCardHeight(state, messageThread, embeddedHeight, cardWidth);
@@ -2765,7 +2765,7 @@ function historyRail(
     : nodes.findIndex(node => node.step && historyStepKey(node.step.from, node.step.to) === shownKey);
   const segment = 4;
   const width = (node: RailNode): number => displayCells(node.name) + segment + 2;
-  // Fold from the far end inward until the rail fits, always keeping start, now and the shown marker's neighbours.
+  // Fold from the far end inward until the rail fits, keeping start, now and the shown marker.
   const visible = nodes.map(() => true);
   const used = (): number => nodes.reduce((total, node, index) => total + (visible[index] ? width(node) : 0), 0) + 8;
   for (let distance = nodes.length; used() > room && distance > 1; distance -= 1) {
