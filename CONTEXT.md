@@ -389,13 +389,9 @@ _Avoid_: Hook correlation as authority, peer message means consent, transport ac
 The durable ordered authorization for one exact committed Direct Handoff to be dispatched to its bound Attachment. A queued Direct Delivery is not Harness activity; Workspace creates its Invocation only when it claims that Delivery for single-flight dispatch, and it never silently retargets or replays it. A route that cannot establish required Native Dispatch Provenance cannot exercise this authorization merely because it can deliver matching bytes.
 _Avoid_: Queued Invocation, Adapter-owned queue, pending prompt, automatic retry
 
-**User Pull Preparation** (retired route):
-A durable, one-use authorization for one exact Attachment Identity to retrieve one exact Workflow Handoff through a User Pull route. It remains open until atomically claimed, withdrawn, or semantically expired; it is not an Invocation or evidence of Harness activity.
-_Avoid_: Queued Invocation, Sent Handoff, active Harness turn
-
-**User Pull Claim** (retired route):
-The atomic Durable Commit by which one exact harness command occurrence consumes an open User Pull Preparation and creates an Invocation awaiting correlated start. It proves BuildFrame accepted the claim, not that the payload arrived or Harness execution began.
-_Avoid_: Harness start, payload receipt, latest prepared Handoff
+**User Pull Preparation** and **User Pull Claim** (retired route):
+A one-use authorization for one Attachment Identity to retrieve one Workflow Handoff, and the Durable Commit that consumed it into an Invocation. Neither proves payload receipt or Harness activity.
+_Avoid_: Queued Invocation, Sent Handoff, Harness start
 
 **Harness Offer**:
 An immutable, deadline-bound proposal occurrence initiated by an Attached Harness through a Native Gate. It preserves the exact native occurrence, Attachment and Workspace evidence, and captured proposal before Workflow association; it is not an Invocation, and matching content or destination evidence establishes neither ownership nor consent.
@@ -478,8 +474,12 @@ A reliable way an Attached Harness can fulfill one kind of Workflow Handoff, inc
 _Avoid_: Feature flag, supports Planning, universal harness behavior
 
 **Capability Manifest**:
-The versioned set of Handoff-specific Harness Capabilities declared for one Attached Harness by a reviewed first-party Adapter. An Adapter may narrow its reviewed Harness Host Compatibility Policy to the exactly observed host in this Manifest; BuildFrame validates that exact attachment match and the contract schema. Hosts outside the policy and malformed guarantees are unsupported, and user configuration cannot strengthen a declared guarantee.
+The versioned set of Handoff-specific Harness Capabilities declared for one Attached Harness by a reviewed first-party Adapter, or by an Unverified Integration as its own claim. An Adapter may narrow its reviewed Harness Host Compatibility Policy to the exactly observed host in this Manifest; BuildFrame validates that exact attachment match and the contract schema. Hosts outside the policy and malformed guarantees are unsupported, and user configuration cannot strengthen a declared guarantee.
 _Avoid_: User feature flags, public plugin claim, current Availability
+
+**Unverified Integration**:
+A Harness or tool attached through the public integration contract by an Adapter BuildFrame has not reviewed. It is offered the same Handoff authority choices as a reviewed Adapter, but its Capability Manifest is its own claim, and preview, History, and doctor mark it unverified.
+_Avoid_: Reviewed Adapter, trusted plugin
 
 **Capability Snapshot**:
 The immutable copy of the exact Harness Capability and contract version relied on when a Workflow Handoff or Invocation is committed. Later Adapter upgrades, reconnects, or Manifest changes never rewrite it.
