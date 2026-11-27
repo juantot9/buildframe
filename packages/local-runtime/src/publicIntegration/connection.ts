@@ -130,7 +130,16 @@ export class PublicIntegrationConnection {
         return;
       }
       const session = this.#openSession(params, identity.workspaceIdentity, identity.canonicalCheckout);
-      const result = await this.#host.establish(this.#adapter(session));
+      const adapter = this.#adapter(session);
+      // The Workspace may still be recording another change; that refusal only asks to try again.
+      let result = await this.#host.establish(adapter);
+      for (
+        let retry = 0;
+        retry < 3 && result.status === 'refused' && result.reason === 'state-version-changed';
+        retry += 1
+      ) {
+        result = await this.#host.establish(adapter);
+      }
       // The socket may have closed while the Workspace decided.
       if ((this.#state as string) === 'closed') return;
       if (result.status === 'refused') {

@@ -2,8 +2,8 @@ import type { ReviewedCapabilityManifest } from '@buildframe/workspace/harness-i
 
 import type { PublicIntegrationManifest } from './wire.js';
 
-/** The longest answer an integration sends; a longer one is cut and flagged so a turn end fits one frame. */
-export const PUBLIC_ANSWER_MAXIMUM_BYTES: number = 512 * 1024;
+/** The longest answer kept, the Workspace's one bound for every connector; a longer one settles without a Response. */
+export const PUBLIC_ANSWER_MAXIMUM_BYTES: number = 16 * 1024;
 
 /**
  * How long an accepted Message may wait for its turn to start. Accepted means

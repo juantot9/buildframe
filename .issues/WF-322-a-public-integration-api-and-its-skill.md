@@ -79,6 +79,14 @@ Ships in 0.2.0 as experimental; not in 0.1.0 (gate 2026-12-02).
     pending map, a lock, a reader thread); notifications would halve it.
   - Interrupt is two steps (`interrupting`, then `turn/ended cancelled`).
   - The basic level would be about 25 lines.
+- 5 (slice 1, `0f72abf` + fix): the public wire at the full level and
+  `bframe endpoint`. Checked live on the installed build with the Python
+  prototype: attach as unverified, exact delivery, start and end with the
+  answer in History, interrupt, a lost turn shown unknown, takeover.
+  Change from the brief (Q7): answers are capped at 16 KiB, not 512 KiB,
+  because the Workspace accepts one bound for every connector; raising it
+  is a Workspace change. Not yet: `basic`, the stored unverified label, the
+  cut answer kept in History.
 
 ## Branch
 
