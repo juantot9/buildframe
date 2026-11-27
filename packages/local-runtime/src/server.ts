@@ -5,7 +5,6 @@ import {
   WORKSPACE_INTERFACE_VERSION,
   type UnsubscribeWorkspace,
   type Workspace,
-  type WorkspaceAttention,
   type WorkspaceIdentity,
 } from '@buildframe/workspace';
 import type {
@@ -28,7 +27,11 @@ import {
   type RuntimeCodeIdentity,
   type RuntimeGeneration,
 } from './contracts.js';
+import { bootstrapRejection } from './bootstrapRejection.js';
+import { SharedRuntimeAttention } from './sharedAttention.js';
 import { FramedSocket } from './framing.js';
+import { PublicIntegrationConnection } from './publicIntegration/connection.js';
+import { opensPublicWire } from './publicIntegration/wire.js';
 import {
   BOOTSTRAP_TIMEOUT_MS,
   CLIENT_ROLES,
@@ -255,56 +258,6 @@ class RemoteReviewedHarnessAdapter implements ReviewedHarnessAdapter {
   }
 }
 
-function bootstrapRejection(
-  code: BootstrapRejectedFrame['code'],
-  receivedProtocolVersion?: number,
-  receivedWorkspaceInterfaceVersion?: number,
-): BootstrapRejectedFrame {
-  const frame: BootstrapRejectedFrame = {
-    type: 'bootstrap.rejected',
-    code,
-  };
-  if (receivedProtocolVersion !== undefined) {
-    return {
-      ...frame,
-      supportedProtocolVersion: LOCAL_RUNTIME_PROTOCOL_VERSION,
-      receivedProtocolVersion,
-    };
-  }
-  if (receivedWorkspaceInterfaceVersion !== undefined) {
-    return {
-      ...frame,
-      supportedWorkspaceInterfaceVersion: WORKSPACE_INTERFACE_VERSION,
-      receivedWorkspaceInterfaceVersion,
-    };
-  }
-  return frame;
-}
-
-/**
- * One Workspace serves every client, so it stays in the foreground while any
- * client is, or while none has said; only all-background clients slow it.
- */
-class SharedRuntimeAttention {
-  readonly #workspace: Workspace;
-  readonly #reports = new Map<object, WorkspaceAttention>();
-  #current: WorkspaceAttention = 'foreground';
-
-  constructor(workspace: Workspace) {
-    this.#workspace = workspace;
-  }
-
-  report(client: object, attention: WorkspaceAttention | undefined): void {
-    if (attention === undefined) this.#reports.delete(client);
-    else this.#reports.set(client, attention);
-    const reports = [...this.#reports.values()];
-    const next = reports.length > 0 && !reports.includes('foreground') ? 'background' : 'foreground';
-    if (next === this.#current) return;
-    this.#current = next;
-    this.#workspace.setAttention(next);
-  }
-}
-
 class RuntimeClientConnection {
   readonly #socket: Socket;
   readonly #peer: FramedSocket;
@@ -323,6 +276,7 @@ class RuntimeClientConnection {
   #closed = false;
   #role: LocalRuntimeClientRole | undefined;
   #remoteAdapter: RemoteReviewedHarnessAdapter | undefined;
+  #public: PublicIntegrationConnection | undefined;
   #pendingOperations = 0;
   #operationTail: Promise<void> = Promise.resolve();
   #sessionMutationBarrier: Promise<void> = Promise.resolve();
@@ -372,6 +326,29 @@ class RuntimeClientConnection {
   }
 
   #accept(frame: unknown): void {
+    if (this.#public !== undefined) {
+      this.#public.accept(frame);
+      return;
+    }
+    if (
+      !this.#accepted &&
+      opensPublicWire(frame) &&
+      this.#allowedRoles.has('harness-adapter') &&
+      this.#harnessAdapters
+    ) {
+      this.#accepted = true;
+      clearTimeout(this.#bootstrapTimer);
+      const end = (): void => void this.#socket.end();
+      this.#public = new PublicIntegrationConnection(
+        this.#peer,
+        this.#workspace,
+        this.#harnessAdapters,
+        this.#runtimeGeneration,
+        end,
+      );
+      this.#public.accept(frame);
+      return;
+    }
     if (!this.#accepted) {
       this.#acceptBootstrap(frame);
       return;
@@ -700,7 +677,7 @@ class RuntimeClientConnection {
     }
     this.#attention.report(this, undefined);
     this.#closeComplete = this.#operationTail
-      .then(async () => await this.#remoteAdapter?.disconnect())
+      .then(async () => await (this.#remoteAdapter ?? this.#public)?.disconnect())
       .catch(() => undefined)
       .then(() => this.#onClosed());
   }

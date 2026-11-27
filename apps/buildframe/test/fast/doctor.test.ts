@@ -175,7 +175,12 @@ describe('buildframe doctor', () => {
       command: 'doctor',
       startPath: 'doctor',
     });
-    expect(() => parseDeveloperArguments(['--json'], '/cwd')).toThrow('--json works only with doctor');
+    expect(() => parseDeveloperArguments(['--json'], '/cwd')).toThrow('--json works only with doctor and endpoint');
+    expect(parseDeveloperArguments(['endpoint', '--json'], '/cwd')).toMatchObject({
+      command: 'endpoint',
+      json: true,
+      startPath: '/cwd',
+    });
     expect(parseDeveloperArguments(['--version'], '/cwd')).toMatchObject({ version: true });
     expect(parseDeveloperArguments(['-v'], '/cwd')).toMatchObject({ version: true });
   });

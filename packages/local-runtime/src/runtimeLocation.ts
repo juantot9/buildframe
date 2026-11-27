@@ -61,7 +61,7 @@ function locationUnder(base: string, workspaceIdentity: WorkspaceIdentity, owned
   };
 }
 
-/** Private endpoint discovery. No caller receives this locator. */
+/** Endpoint discovery. Outside the runtime, only `bframe endpoint` (the public integration wire) reads it. */
 export function runtimeLocationForWorkspace(workspaceIdentity: WorkspaceIdentity): RuntimeLocation {
   const userId = currentUserId();
   const configuredBase = process.env.XDG_RUNTIME_DIR;

@@ -1,8 +1,8 @@
 import { connectInstruction, supportedHostNames } from './supportFacts.js';
 
 export interface DeveloperArguments {
-  /** `doctor` checks this machine and repository instead of opening BuildFrame. */
-  readonly command: 'review' | 'doctor';
+  /** `doctor` checks this machine and repository; `endpoint` prints where an integration connects. */
+  readonly command: 'review' | 'doctor' | 'endpoint';
   readonly startPath: string;
   readonly json: boolean;
   readonly noColor: boolean;
@@ -17,6 +17,7 @@ export function developerUsage(): string {
     '',
     'Usage: buildframe [--no-color] [--ascii] [repository]',
     '       buildframe doctor [--json] [--ascii] [repository]',
+    '       buildframe endpoint [--json] [repository]',
     '       buildframe --version',
     '',
     'bframe is a shorter name for the same command.',
@@ -27,6 +28,10 @@ export function developerUsage(): string {
     '',
     ...wrapped(
       `doctor checks Node, this repository, BuildFrame’s background process, its saved data, and the installed ${supportedHostNames()}. It changes nothing.`,
+    ),
+    '',
+    ...wrapped(
+      'endpoint prints the socket another harness or tool connects to, to receive Messages from BuildFrame (experimental).',
     ),
   ].join('\n');
 }
@@ -67,8 +72,13 @@ export function parseDeveloperArguments(arguments_: readonly string[], defaultSt
       ascii = true;
     } else if (!optionsEnded && argument === '--json') {
       json = true;
-    } else if (!optionsEnded && !commandSeen && startPath === undefined && argument === 'doctor') {
-      command = 'doctor';
+    } else if (
+      !optionsEnded &&
+      !commandSeen &&
+      startPath === undefined &&
+      (argument === 'doctor' || argument === 'endpoint')
+    ) {
+      command = argument;
       commandSeen = true;
     } else if (!optionsEnded && argument.startsWith('-')) {
       throw new TypeError(`Unknown option ${argument}`);
@@ -78,7 +88,7 @@ export function parseDeveloperArguments(arguments_: readonly string[], defaultSt
       throw new TypeError('Only one workspace path may be provided');
     }
   }
-  if (json && command !== 'doctor') throw new TypeError('--json works only with doctor');
+  if (json && command === 'review') throw new TypeError('--json works only with doctor and endpoint');
   return {
     command,
     startPath: startPath ?? defaultStartPath,

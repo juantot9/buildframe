@@ -17,3 +17,4 @@ export {
   type LocalRuntimeServerErrorCode,
   type StartLocalRuntimeServerRequest,
 } from './server.js';
+export { publicIntegrationEndpoint, type PublicIntegrationEndpoint } from './publicIntegration/endpoint.js';

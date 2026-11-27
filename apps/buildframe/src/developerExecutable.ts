@@ -57,8 +57,8 @@ async function run(): Promise<void> {
     return;
   }
   // Inside Codex, `!buildframe` (and its status and disconnect) connects that
-  // session instead of opening the app; doctor, --help and --version still work there.
-  const ownCommand = ['doctor', '--help', '-h', '--version', '-v'].includes(process.argv[2] ?? '');
+  // session instead of opening the app; doctor, endpoint, --help and --version still work there.
+  const ownCommand = ['doctor', 'endpoint', '--help', '-h', '--version', '-v'].includes(process.argv[2] ?? '');
   if (process.argv[2] === '--codex-helper' || (process.env.CODEX_THREAD_ID !== undefined && !ownCommand)) {
     const codex = await import('@buildframe/codex-adapter-source/helper');
     if (process.argv[2] === codex.CODEX_HELPER_ARGUMENT) await codex.runCodexHelper();
@@ -100,6 +100,13 @@ async function run(): Promise<void> {
   }
   if (process.exitCode === 2) return;
 
+  if (options.command === 'endpoint') {
+    const { runEndpointCommand } = await import('./endpointCommand.js');
+    const result = await runEndpointCommand(options.startPath, options.json);
+    (result.ok ? process.stdout : process.stderr).write(result.output);
+    process.exitCode = result.ok ? 0 : 1;
+    return;
+  }
   if (options.command === 'doctor') {
     const { formatDoctorReport, hostVersionFromPath, runDoctor } = await import('./doctor.js');
     const report = await runDoctor({

@@ -36,6 +36,7 @@ describe('local-runtime client Interface', () => {
       'LocalRuntimeServerError',
       'ensureWorkspaceRuntime',
       'inspectWorkspaceRuntime',
+      'publicIntegrationEndpoint',
       'runWorkspaceRuntimeProcess',
       'startLocalRuntimeServer',
     ]);

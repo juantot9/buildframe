@@ -54,6 +54,7 @@ assert.deepEqual(
     'LocalRuntimeServerError',
     'ensureWorkspaceRuntime',
     'inspectWorkspaceRuntime',
+    'publicIntegrationEndpoint',
     'runWorkspaceRuntimeProcess',
     'startLocalRuntimeServer',
   ],
